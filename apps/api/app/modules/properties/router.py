@@ -1,10 +1,11 @@
 from typing import List, Optional
 from uuid import UUID
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import require_roles, get_current_user
+from app.core.security import decode_token
 from app.core.exceptions import NotFoundException
 from app.modules.users.models import User
 from app.modules.properties.schemas import (
@@ -55,10 +56,25 @@ async def create_property(
 @router.get("/{property_id}", response_model=PropertyResponse)
 async def get_property(
     property_id: UUID,
+    authorization: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db),
 ):
+    viewer_id = None
+    is_admin = False
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        payload = decode_token(token)
+        if payload and "sub" in payload:
+            try:
+                viewer_id = UUID(payload["sub"])
+                roles = payload.get("app_metadata", {}).get("roles", [])
+                if "admin" in roles or "super_admin" in roles:
+                    is_admin = True
+            except Exception:
+                pass
+
     service = PropertyService(db)
-    prop = await service.get_by_id(property_id)
+    prop = await service.get_by_id(property_id, viewer_id=viewer_id, is_admin=is_admin)
     if not prop:
         raise NotFoundException("Property not found")
     return prop

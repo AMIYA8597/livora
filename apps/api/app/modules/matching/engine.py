@@ -36,18 +36,18 @@ def score_working_schedule(t1: Dict[str, Any], t2: Dict[str, Any]) -> Tuple[int,
     w1 = t1.get("work_arrangement", "hybrid")
     w2 = t2.get("work_arrangement", "hybrid")
     if w1 == w2:
-        return 100, f"Both have identical {w1} work schedules."
+        return 100, "Both flatmates share matching work routines."
     if "shift_work" in (w1, w2):
         return 50, "One flatmate has rotational shift work; schedule coordination recommended."
     if "remote" in (w1, w2) and "on_site" in (w1, w2):
-        return 75, "Complementary occupancy: one works from home while one is on-site."
-    return 85, f"Compatible working modes ({w1} & {w2})."
+        return 75, "Complementary occupancy: balanced remote and out-of-home working hours."
+    return 85, "Compatible working schedules and household occupancy routines."
 
 def score_sleep_schedule(t1: Dict[str, Any], t2: Dict[str, Any]) -> Tuple[int, str]:
     s1 = t1.get("sleep_schedule", "flexible")
     s2 = t2.get("sleep_schedule", "flexible")
     if s1 == s2:
-        return 95, f"Harmonious sleep cycles: both are {s1}s."
+        return 95, "Harmonious sleep cycles with well-matched quiet hours."
     if "flexible" in (s1, s2):
         return 80, "Flexible sleeping hours accommodate differences smoothly."
     # Opposite schedules: early_bird vs night_owl
@@ -96,7 +96,7 @@ def score_cleanliness(t1: Dict[str, Any], t2: Dict[str, Any]) -> Tuple[int, str]
     chore2 = t2.get("chore_philosophy", "shared_roster")
     if chore1 == chore2:
         score = min(100, score + 5)
-    return score, f"Cleanliness expectations ({c1}/5 vs {c2}/5)."
+    return score, f"Cleanliness and tidiness alignment scored at {score}%."
 
 def score_lifestyle(t1: Dict[str, Any], t2: Dict[str, Any], vector_sim: float) -> Tuple[int, str]:
     smk1 = t1.get("smoking", "never")
@@ -152,13 +152,13 @@ def score_food_cooking(t1: Dict[str, Any], t2: Dict[str, Any]) -> Tuple[int, str
         score -= 20
     if cook1 == cook2:
         score += 5
-    return max(30, min(100, score)), f"Kitchen & dietary compatibility ({d1} & {d2})."
+    return max(30, min(100, score)), "Kitchen and dietary habits evaluated for mutual household comfort."
 
 def score_professional_domain(occ1: Optional[str], occ2: Optional[str], dom1: Optional[str], dom2: Optional[str]) -> Tuple[int, str]:
     if dom1 and dom2 and dom1.lower() == dom2.lower():
-        return 95, f"Shared professional domain ({dom1}); similar work routines."
+        return 95, "Shared professional domain with complementary daily schedules."
     if occ1 and occ2 and occ1.lower() == occ2.lower():
-        return 90, f"Peer profession ({occ1})."
+        return 90, "Peer profession with mutually compatible career rhythms."
     return 75, "Diverse professional backgrounds."
 
 def score_location(pref_locs1: List[str], pref_locs2: List[str]) -> Tuple[int, str]:

@@ -21,6 +21,9 @@ SEEDS_DIR = Path(__file__).resolve().parent
 POLICIES_DIR = Path(__file__).resolve().parent.parent / "policies"
 
 async def run_seed():
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env in ("production", "prod"):
+        raise RuntimeError("CRITICAL SAFETY CHECK: Database seeding is disabled in production environments.")
     print(f"Connecting to database: {DATABASE_URL}")
     try:
         conn = await asyncpg.connect(DATABASE_URL)

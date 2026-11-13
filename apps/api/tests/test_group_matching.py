@@ -135,9 +135,12 @@ async def test_wishlist_voting():
     mock_db.add = MagicMock()
     service = GroupService(mock_db)
 
+    mock_member_res = MagicMock()
+    mock_member_res.scalar_one_or_none.return_value = GroupMember(group_id=group_id, user_id=voter_id)
+
     mock_empty = MagicMock()
     mock_empty.scalar_one_or_none.return_value = None
-    mock_db.execute.return_value = mock_empty
+    mock_db.execute.side_effect = [mock_member_res, mock_empty]
 
     item = await service.vote_wishlist(group_id, prop_id, voter_id, vote="up")
     assert item.votes[str(voter_id)] == "up"

@@ -27,6 +27,18 @@ class ApplicationService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_by_id_authorized(self, application_id: UUID, current_user_id: UUID, is_admin: bool = False) -> Application:
+        app = await self.get_by_id(application_id)
+        if not app:
+            raise NotFoundException("Application not found")
+
+        if not is_admin and app.applicant_id != current_user_id:
+            prop_query = select(Property).where(Property.id == app.property_id)
+            prop = (await self.db.execute(prop_query)).scalar_one_or_none()
+            if not prop or prop.owner_id != current_user_id:
+                raise ForbiddenException("You are not authorized to view this application")
+        return app
+
     async def list_for_user(self, user_id: UUID) -> List[Application]:
         query = (
             select(Application)

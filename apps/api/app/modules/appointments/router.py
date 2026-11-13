@@ -38,13 +38,12 @@ async def schedule_appointment(
 @router.get("/{appointment_id}", response_model=AppointmentResponse)
 async def get_appointment(
     appointment_id: UUID,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    is_admin = current_user.role in ["admin", "super_admin"]
     service = AppointmentService(db)
-    appt = await service.get_by_id(appointment_id)
-    if not appt:
-        raise NotFoundException("Appointment not found")
-    return appt
+    return await service.get_by_id_authorized(appointment_id, current_user.id, is_admin=is_admin)
 
 @router.patch("/{appointment_id}/status", response_model=AppointmentResponse)
 async def update_appointment_status(

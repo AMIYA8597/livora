@@ -71,7 +71,7 @@ class MessagingService:
             .limit(limit)
         )
         result = await self.db.execute(query)
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     async def create_conversation(self, creator_id: UUID, req: CreateConversationRequest) -> Conversation:
         all_participants = list(set([creator_id] + req.participant_user_ids))

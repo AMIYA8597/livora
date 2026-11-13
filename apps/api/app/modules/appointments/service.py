@@ -24,6 +24,15 @@ class AppointmentService:
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_by_id_authorized(self, appointment_id: UUID, current_user_id: UUID, is_admin: bool = False) -> Appointment:
+        appt = await self.get_by_id(appointment_id)
+        if not appt:
+            raise NotFoundException("Appointment not found")
+
+        if not is_admin and appt.applicant_id != current_user_id and appt.host_id != current_user_id:
+            raise ForbiddenException("You are not authorized to view this appointment")
+        return appt
+
     async def list_for_user(self, user_id: UUID) -> List[Appointment]:
         query = (
             select(Appointment)

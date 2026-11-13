@@ -34,11 +34,9 @@ async def get_application(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    is_admin = current_user.role in ["admin", "super_admin"]
     service = ApplicationService(db)
-    app = await service.get_by_id(application_id)
-    if not app:
-        raise NotFoundException("Application not found")
-    return app
+    return await service.get_by_id_authorized(application_id, current_user.id, is_admin=is_admin)
 
 @router.patch("/{application_id}/status", response_model=ApplicationResponse)
 async def update_application_status(

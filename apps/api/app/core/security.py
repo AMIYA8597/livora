@@ -90,8 +90,8 @@ def decode_token(token: str) -> Dict[str, Any]:
         return payload
     except JWTError as e:
         logger.warning(f"JWT verification failure: {e}")
-        # Try fallback secret if distinct
-        if settings.SUPABASE_JWT_SECRET and settings.SECRET_KEY != settings.SUPABASE_JWT_SECRET:
+        # In non-development environments, fail closed immediately without insecure key fallback
+        if settings.ENVIRONMENT == "development" and settings.SUPABASE_JWT_SECRET and settings.SECRET_KEY != settings.SUPABASE_JWT_SECRET:
             try:
                 return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_aud": False})
             except JWTError:

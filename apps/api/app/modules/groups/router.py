@@ -54,8 +54,11 @@ async def add_group_member(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    is_admin = current_user.role in ["admin", "super_admin"]
     service = GroupService(db)
-    return await service.add_member(group_id, data.user_id, role=data.role)
+    return await service.add_member(
+        group_id, data.user_id, requester_id=current_user.id, role=data.role, is_admin=is_admin
+    )
 
 @router.delete("/{group_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_group_member(

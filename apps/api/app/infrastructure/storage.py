@@ -53,7 +53,9 @@ class SupabaseStorageProvider(StorageProvider):
         if not self.client:
             return f"https://mock.supabase.co/storage/v1/object/sign/{bucket}/{path}?expires={expires_in}"
         res = self.client.storage.from_(bucket).create_signed_url(path, expires_in)
-        return res.get("signedURL", "")
+        if isinstance(res, dict):
+            return str(res.get("signedURL") or "")
+        return str(res or "")
 
 _storage_instance: Optional[StorageProvider] = None
 

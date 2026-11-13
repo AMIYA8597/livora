@@ -60,10 +60,27 @@ class GroupService:
         await self.db.commit()
         return await self.get_by_id(group.id)
 
-    async def add_member(self, group_id: UUID, user_id: UUID, role: str = "member") -> GroupMember:
+    async def add_member(
+        self,
+        group_id: UUID,
+        user_id: UUID,
+        requester_id: Optional[UUID] = None,
+        role: str = "member",
+        is_admin: bool = False,
+    ) -> GroupMember:
         group = await self.get_by_id(group_id)
         if not group:
             raise NotFoundException("Group not found")
+
+        # Verify requester has authority: must be group creator, leader, or admin
+        if requester_id is not None and requester_id != group.creator_id and not is_admin:
+            leader_q = select(GroupMember).where(
+                GroupMember.group_id == group_id,
+                GroupMember.user_id == requester_id,
+                GroupMember.role == "leader"
+            )
+            if not (await self.db.execute(leader_q)).scalar_one_or_none():
+                raise ForbiddenException("Only the group creator or a leader can add members")
 
         # Check existing membership
         existing_q = select(GroupMember).where(
@@ -214,6 +231,14 @@ class GroupService:
         )
 
     async def vote_wishlist(self, group_id: UUID, property_id: UUID, user_id: UUID, vote: str) -> GroupWishlistItem:
+        # Verify user is a member of the group
+        member_q = select(GroupMember).where(
+            GroupMember.group_id == group_id,
+            GroupMember.user_id == user_id
+        )
+        if not (await self.db.execute(member_q)).scalar_one_or_none():
+            raise ForbiddenException("You must be an active member of this group to interact with its wishlist")
+
         query = select(GroupWishlistItem).where(
             GroupWishlistItem.group_id == group_id,
             GroupWishlistItem.property_id == property_id,

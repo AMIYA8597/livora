@@ -16,7 +16,7 @@ class PropertyService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    def _format_property_response(self, prop: Property) -> dict:
+    def _format_property_response(self, prop: Property, viewer_id: Optional[UUID] = None, is_admin: bool = False) -> dict:
         lat = 12.9716  # Bengaluru default coordinates
         lng = 77.5946
         if hasattr(prop, "location") and prop.location is not None:
@@ -60,6 +60,10 @@ class PropertyService:
                     "created_at": r.created_at or datetime.now(timezone.utc),
                 })
 
+        address_exact_val = prop.address_exact
+        if not is_admin and (viewer_id is None or viewer_id != prop.owner_id):
+            address_exact_val = "[Exact address protected - revealed upon confirmed visit]"
+
         return {
             "id": prop.id,
             "owner_id": prop.owner_id,
@@ -70,7 +74,7 @@ class PropertyService:
             "latitude": lat,
             "longitude": lng,
             "address_display": prop.address_display,
-            "address_exact": prop.address_exact,
+            "address_exact": address_exact_val,
             "city": prop.city,
             "state": prop.state,
             "postal_code": prop.postal_code,
@@ -99,7 +103,7 @@ class PropertyService:
             "updated_at": prop.updated_at or datetime.now(timezone.utc),
         }
 
-    async def get_by_id(self, property_id: UUID) -> Optional[dict]:
+    async def get_by_id(self, property_id: UUID, viewer_id: Optional[UUID] = None, is_admin: bool = False) -> Optional[dict]:
         query = (
             select(Property)
             .options(
@@ -112,7 +116,7 @@ class PropertyService:
         prop = result.scalar_one_or_none()
         if not prop:
             return None
-        return self._format_property_response(prop)
+        return self._format_property_response(prop, viewer_id=viewer_id, is_admin=is_admin)
 
     async def list_properties(
         self,
@@ -230,7 +234,10 @@ class PropertyService:
                         self.db.add(bed)
 
         await self.db.commit()
-        return await self.get_by_id(prop.id)
+        res = await self.get_by_id(prop.id)
+        if not res:
+            raise NotFoundException("Property not found")
+        return res
 
     async def update(self, property_id: UUID, user_id: UUID, data: PropertyUpdate, is_admin: bool = False) -> dict:
         query = select(Property).where(Property.id == property_id)
@@ -259,7 +266,10 @@ class PropertyService:
                 setattr(prop, key, value)
 
         await self.db.commit()
-        return await self.get_by_id(prop.id)
+        res = await self.get_by_id(prop.id)
+        if not res:
+            raise NotFoundException("Property not found")
+        return res
 
     async def update_listing_status(self, property_id: UUID, user_id: UUID, status_val: str, is_admin: bool = False) -> dict:
         if status_val not in VALID_LISTING_STATUSES:
@@ -276,10 +286,18 @@ class PropertyService:
 
         prop.listing_status = status_val
         await self.db.commit()
-        return await self.get_by_id(prop.id)
+        res = await self.get_by_id(prop.id)
+        if not res:
+            raise NotFoundException("Property not found")
+        return res
 
     async def assign_bed_occupant(self, bed_id: UUID, occupant_id: UUID, user_id: UUID, is_admin: bool = False) -> Bed:
-        query = select(Bed).options(selectinload(Bed.room).selectinload(Room.property)).where(Bed.id == bed_id)
+        query = (
+            select(Bed)
+            .options(selectinload(Bed.room).selectinload(Room.property))
+            .where(Bed.id == bed_id)
+            .with_for_update()
+        )
         result = await self.db.execute(query)
         bed = result.scalar_one_or_none()
         if not bed:
@@ -309,7 +327,12 @@ class PropertyService:
         return bed
 
     async def vacate_bed(self, bed_id: UUID, user_id: UUID, is_admin: bool = False) -> Bed:
-        query = select(Bed).options(selectinload(Bed.room).selectinload(Room.property)).where(Bed.id == bed_id)
+        query = (
+            select(Bed)
+            .options(selectinload(Bed.room).selectinload(Room.property))
+            .where(Bed.id == bed_id)
+            .with_for_update()
+        )
         result = await self.db.execute(query)
         bed = result.scalar_one_or_none()
         if not bed:

@@ -91,13 +91,10 @@ class SearchService:
                 if distance_km > filters.radius_km:
                     continue  # Outside requested search radius
 
-            # Apply coordinate fuzzing for privacy if unauthenticated or not property owner
+            # Always apply coordinate fuzzing to discovery search results to safeguard resident privacy
+            fuzzed_lat, fuzzed_lng = fuzz_coordinates(lat, lng, precision_decimals=2)
             is_fuzzed = True
-            if is_authenticated_viewer:
-                fuzzed_lat, fuzzed_lng = lat, lng
-                is_fuzzed = False
-            else:
-                fuzzed_lat, fuzzed_lng = fuzz_coordinates(lat, lng, precision_decimals=2)
+            coarse_dist = round(distance_km, 1) if distance_km is not None else None
 
             items.append(PropertySearchResultItem(
                 id=prop.id,
@@ -120,7 +117,7 @@ class SearchService:
                 images=prop.images or [],
                 latitude=fuzzed_lat,
                 longitude=fuzzed_lng,
-                distance_km=distance_km,
+                distance_km=coarse_dist,
                 is_fuzzed_location=is_fuzzed,
             ))
 

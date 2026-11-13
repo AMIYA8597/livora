@@ -28,7 +28,7 @@ from app.modules.matching.service import MatchingService
 from app.modules.matching.models import MatchInteraction
 from app.modules.groups.service import GroupService
 from app.modules.groups.schemas import GroupCreate
-from app.modules.groups.models import Group
+from app.modules.groups.models import Group, GroupMember
 from app.modules.applications.service import ApplicationService
 from app.modules.applications.schemas import ApplicationCreate, ApplicationStatusUpdate
 from app.modules.appointments.service import AppointmentService
@@ -287,9 +287,11 @@ async def test_full_marketplace_end_to_end_journey():
     assert added_member.user_id == tenant_b_id
 
     # Member votes up the target property in the shared wishlist
+    mock_member_ok = MagicMock()
+    mock_member_ok.scalar_one_or_none.return_value = GroupMember(group_id=group_id, user_id=tenant_a_id)
     mock_no_vote = MagicMock()
     mock_no_vote.scalar_one_or_none.return_value = None
-    mock_db.execute.side_effect = [mock_no_vote]
+    mock_db.execute.side_effect = [mock_member_ok, mock_no_vote]
     vote_res = await group_service.vote_wishlist(
         group_id=group_id,
         property_id=created_prop.id,
