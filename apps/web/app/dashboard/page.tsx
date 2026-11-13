@@ -180,7 +180,7 @@ export default function DashboardPage() {
                     Target Move-In: {formatDate(app.move_in_target)} • Submitted: {formatDate(app.submitted_at)}
                   </p>
                   <p className="text-xs text-slate-600 mt-2 italic bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                    "{app.introduction}"
+                    &ldquo;{app.introduction}&rdquo;
                   </p>
                 </div>
               </Card>

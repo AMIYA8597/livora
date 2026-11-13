@@ -33,6 +33,7 @@ function PropertiesListContent() {
 
   useEffect(() => {
     fetchProperties();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleFilterSubmit = (e: React.FormEvent) => {
