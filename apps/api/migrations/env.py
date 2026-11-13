@@ -1,0 +1,62 @@
+import asyncio
+from logging.config import fileConfig
+from sqlalchemy.ext.asyncio import create_async_engine
+from alembic import context
+import os
+import sys
+
+# Ensure app path is accessible
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from app.core.config import settings
+from app.core.database import Base
+# Import all models to register with Base.metadata
+from app.modules.users.models import User, UserRole, UserPrivacySetting  # noqa: F401
+from app.modules.profiles.models import Profile  # noqa: F401
+from app.modules.professional_domains.models import ProfessionalDomain, Profession, Designation  # noqa: F401
+from app.modules.locations.models import Country, State, City, Locality  # noqa: F401
+from app.modules.lifestyle.models import LifestyleProfile, UserDealbreaker  # noqa: F401
+from app.modules.properties.models import Property, Room, Bed, PropertyAmenity  # noqa: F401
+from app.modules.tenants.models import TenantMembership, ExistingTenantVacancy  # noqa: F401
+from app.modules.pg_management.models import PGBuilding, PGFloor  # noqa: F401
+from app.modules.appointments.models import Appointment  # noqa: F401
+from app.modules.groups.models import Group, GroupMember, GroupWishlistItem  # noqa: F401
+from app.modules.applications.models import Application  # noqa: F401
+from app.modules.messaging.models import Conversation, ConversationParticipant, Message  # noqa: F401
+from app.modules.matching.models import MatchInteraction, MutualMatch  # noqa: F401
+from app.modules.notifications.models import Notification  # noqa: F401
+from app.modules.verification.models import Verification  # noqa: F401
+from app.modules.moderation.models import ModerationReport  # noqa: F401
+from app.modules.subscriptions.models import SubscriptionPlan, Subscription, Payment  # noqa: F401
+
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+def do_run_migrations(connection):
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+async def run_async_migrations():
+    connectable = create_async_engine(settings.DATABASE_URL)
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+    await connectable.dispose()
+
+def run_migrations_online():
+    asyncio.run(run_async_migrations())
+
+if context.is_offline_mode():
+    context.configure(url=settings.DATABASE_URL, target_metadata=target_metadata, literal_binds=True)
+    with context.begin_transaction():
+        context.run_migrations()
+else:
+    run_migrations_online()
