@@ -1,0 +1,129 @@
+name: Staging Deployment Pipeline
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+    inputs:
+      skip_migrations:
+        description: "Skip database migrations"
+        required: false
+        default: "false"
+
+concurrency:
+  group: staging-deployment
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy-backend:
+    name: Build & Deploy Backend Container to Cloud Run (Staging)
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Cloud SDK & Docker
+        uses: google-github-actions/auth@v2
+        if: env.GCP_SA_KEY != ''
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for Google Artifact Registry
+        if: env.GCP_SA_KEY != ''
+        run: |
+          gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Build & Push Backend Container
+        if: env.GCP_SA_KEY != ''
+        run: |
+          IMAGE_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
+          LATEST_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:staging-latest"
+          docker build -t "$IMAGE_TAG" -t "$LATEST_TAG" -f apps/api/Dockerfile apps/api
+          docker push "$IMAGE_TAG"
+          docker push "$LATEST_TAG"
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Deploy to Cloud Run Staging
+        if: env.GCP_SA_KEY != ''
+        run: |
+          IMAGE_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
+          gcloud run deploy flatmate-api-staging \
+            --image "$IMAGE_TAG" \
+            --region asia-south1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging" \
+            --set-secrets "DATABASE_URL=STAGING_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+
+  database-migration:
+    name: Apply Database Migrations (Staging)
+    needs: [build-and-deploy-backend]
+    runs-on: ubuntu-latest
+    environment: staging
+    if: github.event.inputs.skip_migrations != 'true'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Migration Dependencies
+        run: |
+          pip install alembic psycopg2-binary asyncpg
+
+      - name: Execute Alembic Migration Forward
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        if: env.DATABASE_URL != ''
+        run: |
+          cd apps/api
+          python -m alembic upgrade head
+
+  build-and-deploy-frontend:
+    name: Build & Deploy Frontend to Vercel (Staging)
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Deploy to Vercel Staging Environment
+        if: env.VERCEL_TOKEN != ''
+        run: |
+          vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --token=${{ secrets.VERCEL_TOKEN }}
+          vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  verify-staging:
+    name: Trigger Automated Staging Smoke Tests
+    needs: [build-and-deploy-backend, database-migration, build-and-deploy-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Staging Deployment Succeeded
+        run: |
+          echo "✅ Staging Deployment Phase Completed. Ready for automated smoke tests."

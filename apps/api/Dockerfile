@@ -1,6 +1,6 @@
 # Multi-stage production Dockerfile for FastAPI Backend
 # Stage 1: Build dependencies and wheels
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels .
+COPY pyproject.toml README.md ./
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip wheel --no-cache-dir --wheel-dir /app/wheels .
 
 # Stage 2: Final hardened minimal runtime image
 FROM python:3.12-slim
@@ -38,7 +38,7 @@ RUN groupadd -r -g 10001 flatmate && \
     useradd -r -u 10001 -g flatmate -s /bin/false -d /app flatmate
 
 COPY --from=builder /app/wheels /wheels
-RUN pip install --no-cache /wheels/*
+RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
 COPY . /app
 RUN chown -R flatmate:flatmate /app
@@ -48,6 +48,6 @@ USER flatmate
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health/live || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health/live || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

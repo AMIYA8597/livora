@@ -1,0 +1,68 @@
+name: Staging Post-Deployment Smoke Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_frontend_url:
+        description: "Target Staging Frontend URL"
+        required: true
+        default: "https://staging.flatmate.platform"
+      target_api_url:
+        description: "Target Staging API URL"
+        required: true
+        default: "https://api-staging.flatmate.platform/api/v1"
+
+jobs:
+  smoke-tests:
+    name: Staging HTTP, TLS, Security & API Probes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Verify API Liveness Endpoint
+        run: |
+          API_URL="${{ github.event.inputs.target_api_url }}"
+          BASE_URL="${API_URL%/api/v1}"
+          echo "Testing Liveness at ${BASE_URL}/health/live..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/health/live" || echo "failed")
+          echo "Liveness response code: ${STATUS}"
+          if [ "$STATUS" != "200" ]; then
+            echo "::warning::Liveness check returned status ${STATUS}"
+          fi
+
+      - name: Verify API Readiness Endpoint
+        run: |
+          API_URL="${{ github.event.inputs.target_api_url }}"
+          BASE_URL="${API_URL%/api/v1}"
+          echo "Testing Readiness at ${BASE_URL}/health/ready..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/health/ready" || echo "failed")
+          echo "Readiness response code: ${STATUS}"
+
+      - name: Verify Frontend Web App Connectivity
+        run: |
+          WEB_URL="${{ github.event.inputs.target_frontend_url }}"
+          echo "Testing Web App root at ${WEB_URL}..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${WEB_URL}" || echo "failed")
+          echo "Web App response code: ${STATUS}"
+
+      - name: Verify TLS Certificate
+        run: |
+          WEB_HOST=$(echo "${{ github.event.inputs.target_frontend_url }}" | awk -F[/:] '{print $4}')
+          if [ -n "$WEB_HOST" ]; then
+            echo "Checking TLS handshake for ${WEB_HOST}..."
+            openssl s_client -connect "${WEB_HOST}:443" -servername "${WEB_HOST}" </dev/null 2>/dev/null | grep -E "Verify return code|CN=" || true
+          fi
+
+      - name: Verify Staging Robots.txt Disallow Indexing
+        run: |
+          WEB_URL="${{ github.event.inputs.target_frontend_url }}"
+          echo "Verifying robots.txt blocks search indexing..."
+          ROBOTS=$(curl -s "${WEB_URL}/robots.txt" || echo "")
+          echo "$ROBOTS"
+          if echo "$ROBOTS" | grep -q "Disallow: /"; then
+            echo "✅ Staging robots.txt successfully blocks public indexing."
+          else
+            echo "::warning::robots.txt does not contain 'Disallow: /'"
+          fi

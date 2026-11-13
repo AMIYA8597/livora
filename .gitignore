@@ -44,11 +44,10 @@ wheels/
 
 # Environment variables
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
 !.env.example
+!.env.staging.example
+!.env.production.example
 
 # IDEs
 .idea/
@@ -74,3 +73,5 @@ data/
 minio_data/
 postgres_data/
 redis_data/
+uploads/
+apps/api/uploads/
