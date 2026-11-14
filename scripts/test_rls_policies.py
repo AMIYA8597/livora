@@ -71,7 +71,12 @@ def run_rls_tests():
     # Create unprivileged role to test RLS
     try:
         cur.execute("CREATE ROLE rls_test_user LOGIN;")
-        cur.execute("GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO rls_test_user;")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+    try:
+        cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO rls_test_user;")
         conn.commit()
     except Exception:
         conn.rollback()
@@ -168,6 +173,55 @@ def run_rls_tests():
     # 0 rows will be updated because USING clause filters it out
     assert cur.rowcount == 0, f"Expected 0 rows updated by outsider, got {cur.rowcount}"
     print("6.1 Cross-user profile modification attempt: PASS (0 rows updated / silently denied by RLS)")
+
+    print("\n--- 7. Testing Anonymous Access Boundaries ---")
+    # 7.1 Anonymous reads active properties
+    cur.execute("RESET app.current_user_id;")
+    cur.execute("SELECT count(*) FROM properties WHERE is_active = true;")
+    anon_props = cur.fetchone()[0]
+    assert anon_props >= 1, "Anonymous user should be able to view active properties"
+    print(f"7.1 Anonymous property discovery: PASS ({anon_props} active properties visible)")
+
+    # 7.2 Anonymous reading private applications
+    cur.execute("SELECT count(*) FROM applications;")
+    anon_apps = cur.fetchone()[0]
+    assert anon_apps == 0, "Anonymous user must see 0 private applications"
+    print("7.2 Anonymous application access: PASS (0 rows returned)")
+
+    print("\n--- 8. Testing Unauthorized Deletion / Tampering ---")
+    # Outsider attempts to delete User A's application
+    cur.execute(f"SET app.current_user_id = '{outsider_u}';")
+    cur.execute("DELETE FROM applications WHERE id = %s;", (app_id,))
+    assert cur.rowcount == 0, "Outsider must not be able to delete User A's application"
+    print("8.1 Unauthorized application deletion: PASS (0 rows deleted / blocked by RLS)")
+
+    print("\n--- 9. Testing Group Syndicate Access Boundaries ---")
+    cur.execute("RESET ROLE;")
+    group_id = str(uuid.uuid4())
+    cur.execute(
+        "INSERT INTO groups (id, creator_id, name, target_budget_total, target_city, created_at, updated_at) "
+        "VALUES (%s, %s, 'Koramangala Flat Hunt', 50000, 'Bengaluru', NOW(), NOW());",
+        (group_id, user_a)
+    )
+    cur.execute(
+        "INSERT INTO group_members (id, group_id, user_id, role, joined_at) "
+        "VALUES (%s, %s, %s, 'leader', NOW());",
+        (str(uuid.uuid4()), group_id, user_a)
+    )
+    conn.commit()
+
+    cur.execute("SET ROLE rls_test_user;")
+    # Member User A reads group
+    cur.execute(f"SET app.current_user_id = '{user_a}';")
+    cur.execute("SELECT count(*) FROM groups WHERE id = %s;", (group_id,))
+    assert cur.fetchone()[0] == 1
+    print("9.1 Group member viewing group: PASS")
+
+    # Outsider tries to modify group membership
+    cur.execute(f"SET app.current_user_id = '{outsider_u}';")
+    cur.execute("DELETE FROM group_members WHERE group_id = %s AND user_id = %s;", (group_id, user_a))
+    assert cur.rowcount == 0
+    print("9.2 Outsider tampering with group members: PASS (0 rows affected / denied)")
 
     cur.execute("RESET ROLE;")
     conn.commit()
