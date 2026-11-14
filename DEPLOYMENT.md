@@ -1,12 +1,12 @@
 # Staging & Production Deployment Guide
 ## Flatmate Compatibility & Rental Marketplace
 
-**Phase:** Phase 22 — Real Supabase Connection, Complete Backend + Frontend + Database + AI/ML + Security Verification  
+**Phase:** Phase 23 — Real Hosted Database Integration, Complete Full-Stack Validation, AI/ML Audit & Security Release Gate  
 **Target Architecture:** FastAPI (Backend) + Next.js 14 (Frontend) + Hosted Supabase / PostgreSQL (PostGIS + pgvector)  
 **Database Schema:** 42 Domain Tables + `alembic_version` (43 Tables total)  
 **Migration Head:** `002_messaging_realtime`  
-**Containerization:** Multi-stage Non-Root Docker (`apps/api/Dockerfile`, `apps/web/Dockerfile`)  
-**Status:** **STAGING VERIFIED — PENDING HOSTED CLOUD CREDENTIALS**  
+**Containerization:** Multi-stage Non-Root Docker (`infrastructure/docker/Dockerfile.api`, `infrastructure/docker/Dockerfile.web`)  
+**Status:** **`CONDITIONALLY READY`** (Full-Stack Verified; Awaiting Hosted Migration Apply Approval)  
 
 ---
 

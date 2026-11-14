@@ -3,11 +3,50 @@ Security Infrastructure: Supabase Auth & JWT token validation,
 password hashing, and claim verification.
 """
 import bcrypt
+import time
+import httpx
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict, List
-from jose import jwt, JWTError
+from jose import jwt, jwk, JWTError
+from jose.constants import ALGORITHMS
 from app.core.config import settings
 from app.core.logging import logger
+
+_JWKS_CACHE: Dict[str, Any] = {"keys": {}, "last_fetched": 0.0}
+_JWKS_CACHE_TTL = 3600  # 1 hour TTL
+
+def _get_jwks_key(kid: Optional[str]) -> Optional[Any]:
+    global _JWKS_CACHE
+    if not kid:
+        return None
+    now = time.time()
+    jwks_url = settings.SUPABASE_JWKS_URL
+    if not jwks_url:
+        return None
+
+    if kid in _JWKS_CACHE["keys"] and (now - _JWKS_CACHE["last_fetched"]) < _JWKS_CACHE_TTL:
+        return _JWKS_CACHE["keys"][kid]
+
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(jwks_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                keys_map = {}
+                for key_dict in data.get("keys", []):
+                    k_id = key_dict.get("kid")
+                    alg = key_dict.get("alg", ALGORITHMS.ES256)
+                    if k_id:
+                        try:
+                            keys_map[k_id] = jwk.construct(key_dict, algorithm=alg)
+                        except Exception as e:
+                            logger.warning(f"Failed to construct JWK for kid {k_id}: {e}")
+                _JWKS_CACHE["keys"] = keys_map
+                _JWKS_CACHE["last_fetched"] = now
+                return keys_map.get(kid)
+    except Exception as exc:
+        logger.warning(f"Error fetching JWKS from {jwks_url}: {exc}")
+    return _JWKS_CACHE["keys"].get(kid)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies a plain password against a bcrypt hash."""
@@ -87,8 +126,33 @@ def create_password_reset_token(subject: str, email: str) -> str:
 def decode_token(token: str) -> Dict[str, Any]:
     """
     Decodes and validates JWT signature, expiry, and structure.
-    Checks SUPABASE_JWT_SECRET first, falling back to local SECRET_KEY.
+    Supports asymmetric JWKS (ES256/RS256) from hosted Supabase Auth as well as
+    symmetric HS256 tokens signed with SUPABASE_JWT_SECRET / SECRET_KEY.
     """
+    try:
+        header = jwt.get_unverified_header(token)
+    except Exception:
+        header = {}
+
+    alg = header.get("alg", settings.ALGORITHM)
+    kid = header.get("kid")
+
+    # If asymmetric algorithm, verify via hosted Supabase JWKS public key
+    if alg in ("ES256", "RS256"):
+        public_key = _get_jwks_key(kid)
+        if public_key:
+            try:
+                return jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=[alg],
+                    options={"verify_aud": False}
+                )
+            except JWTError as e:
+                logger.warning(f"JWKS token verification failed: {e}")
+                return {}
+
+    # Otherwise fall back to symmetric secret verification (HS256)
     secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
     try:
         # Note: audience check is disabled here to support both Supabase 'authenticated'
@@ -96,7 +160,7 @@ def decode_token(token: str) -> Dict[str, Any]:
         payload = jwt.decode(
             token,
             secret,
-            algorithms=[settings.ALGORITHM],
+            algorithms=[settings.ALGORITHM, "HS256"],
             options={"verify_aud": False}
         )
         return payload
@@ -105,7 +169,7 @@ def decode_token(token: str) -> Dict[str, Any]:
         # In non-development environments, fail closed immediately without insecure key fallback
         if settings.ENVIRONMENT == "development" and settings.SUPABASE_JWT_SECRET and settings.SECRET_KEY != settings.SUPABASE_JWT_SECRET:
             try:
-                return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_aud": False})
+                return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM, "HS256"], options={"verify_aud": False})
             except JWTError:
                 pass
         return {}

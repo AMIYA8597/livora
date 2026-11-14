@@ -2,11 +2,12 @@
 ## Flatmate Compatibility & Rental Marketplace
 
 **Audience:** Frontend Engineers, Mobile Engineers, Fullstack Integrators  
-**Backend API Version:** `v1`  
-**Base URL:** `http://localhost:8000/api/v1` (Local) / `https://flatmate-api-staging-<hash>.a.run.app/api/v1` (Staging)  
-**WebSocket URL:** `ws://localhost:8000/api/v1/messaging/ws` (Local) / `wss://flatmate-api-staging-<hash>.a.run.app/api/v1/messaging/ws` (Staging)  
-**Frontend Staging Host:** `https://flatmate-web-staging.vercel.app` (Vercel Edge)  
-**Phase:** Phase 20 — Staging Infrastructure & Deployment Baseline  
+**Backend API Version:** `v1` (110 Endpoints Registered)  
+**Base URL:** `http://localhost:8000/api/v1` (Local) / `https://api-staging.flatmate.platform/api/v1` (Staging)  
+**WebSocket URL:** `ws://localhost:8000/api/v1/messaging/ws` (Local) / `wss://api-staging.flatmate.platform/api/v1/messaging/ws` (Staging)  
+**Frontend Framework:** Next.js 14.2.4 App Router (32 Production Routes)  
+**Auth Strategy:** Supabase SSR with Asymmetric ES256 JWKS and Cookie Session Refresh  
+**Phase:** Phase 23 — Real Hosted Database Integration & Full-Stack Validation  
 
 ---
 

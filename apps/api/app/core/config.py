@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
     SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
+    SUPABASE_JWKS_URL: str = os.getenv(
+        "SUPABASE_JWKS_URL",
+        f"{os.getenv('SUPABASE_URL', '').rstrip('/')}/auth/v1/.well-known/jwks.json"
+        if os.getenv("SUPABASE_URL") else ""
+    )
 
     # CORS
     CORS_ORIGINS: List[str] = [

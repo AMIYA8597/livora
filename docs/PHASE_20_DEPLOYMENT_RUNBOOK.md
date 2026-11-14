@@ -44,9 +44,14 @@ pnpm --filter @flatmate/web build
 
 ### Step 2: Database Migration Execution
 ```bash
-# Apply pending schema migrations against the staging database using direct port 5432
+# Apply pending schema migrations against the staging database:
+# Option A (Local / Staging direct network):
 cd apps/api
 alembic upgrade head
+
+# Option B (Hosted Cloud with restricted egress on 5432/6543):
+# Trigger GitHub Actions workflow .github/workflows/hosted-db-migration.yml
+# or apply database/migrations/complete_hosted_schema.sql in the Supabase Dashboard SQL Editor
 ```
 
 ### Step 3: Seed Synthetic Staging Data (If resetting or initial bootstrap)
