@@ -1,8 +1,16 @@
 # Phase 20 Deployment Runbook & Operational Playbook
 
-**Phase:** Phase 20 — Enterprise-Grade Staging Infrastructure  
-**Date:** November 13, 2026  
+**Phase:** Phase 20 & Phase 23 — Enterprise-Grade Staging Infrastructure & Hosted Validation  
+**Date:** November 14, 2026  
 **Author:** Senior DevOps & Site Reliability Engineer  
+**Status:** `CONDITIONALLY READY` (Phase 23 Real Hosted Database Integration & Release Gate)
+
+---
+
+## Phase 23 Hosted Database Migration Procedure
+For executing schema migrations on the hosted Supabase database:
+1. **GitHub Actions Runner (Recommended):** Set repository secret `STAGING_DATABASE_URL` (Supabase IPv4 session pooler URI on port 5432) and trigger `.github/workflows/hosted-db-migration.yml`.
+2. **Supabase SQL Editor:** Copy `database/migrations/complete_hosted_schema.sql` and run it directly in the [Supabase SQL Editor](https://supabase.com/dashboard/project/qjwitdovbsfviaepjcul/sql).
 
 ---
 
