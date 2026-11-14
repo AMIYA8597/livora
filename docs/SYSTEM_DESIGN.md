@@ -84,7 +84,15 @@ Built with **FastAPI** leveraging `asyncio` for non-blocking I/O operations.
   11. `verification`: Document upload, verification workflow, trust score aggregation.
   12. `moderation`: Report auditing, spam suppression, administrative control.
 
-### 3.2 Matching Engine Pipeline
+### 3.2 Matching & Search Engine Pipeline
+
+The system employs a dual-tiered architecture:
+1. **10-Dimensional Compatibility Engine (`v1.0-india-heuristic`)**:
+   - Normalized multi-attribute scoring function where weights sum to exactly 1.000000.
+   - 10 evaluated dimensions: Budget, Location/Commute, Cleanliness, Sleep Schedule, Food/Dietary Preferences, Smoking/Drinking, Social Battery, Work Habits, Guest Policy, and Pet Compatibility.
+   - **Dealbreaker Ceiling**: If any critical lifestyle or budget dealbreaker is violated, the composite compatibility score is strictly capped at 30.0%.
+2. **Deterministic 64-Dimensional Token Projection Search**:
+   - Deterministic lexical hash-trick projection mapping Indian locality names, amenities, and user search terms into 64-dimensional sparse vectors for fast cosine distance ranking, with graceful fallback to PostGIS bounding-box filtering (`ST_DWithin`).
 
 ```mermaid
 sequenceDiagram
@@ -139,23 +147,34 @@ sequenceDiagram
 
 ## 4. Data Storage Architecture
 
-### 4.1 Relational Database (`PostgreSQL 16`)
+### 4.1 Relational Database (`PostgreSQL 15+ / 16 / 18`)
+- **Schema & Migrations**: 43 managed tables including `alembic_version` metadata tracking migration revision `002_messaging_realtime`.
 - **Spatial Features (`PostGIS`)**:
   - `ST_DWithin` used for fast spatial bounding box and circular radius searches for listings and commute zones.
   - Spatial indexes (`GIST`) on `geometry(Point, 4326)`.
-- **Vector Search (`pgvector`)**:
-  - 64-dimensional lifestyle preference vectors.
-  - `HNSW` (Hierarchical Navigable Small World) index with cosine distance operator `<=>` for sub-5ms neighbor searches across millions of profiles.
+- **Vector & Projection Search**:
+  - 64-dimensional lifestyle preference projections and token hashing for localized search.
+  - Compatible with `pgvector` HNSW indexes and deterministic fallback scoring.
+- **Connection Architecture**:
+  - Direct connection on port 5432 or IPv4 Session/Transaction Pooler (`aws-0-ap-south-1.pooler.supabase.com:5432/6543`) on Supabase.
+  - Fail-safe isolation: Backend strictly errors on missing database connections without silent fallback.
 
 ### 4.2 Cache & In-Memory State (`Redis 7.2`)
 - **Key-Value Cache**: Profile summaries, frequently queried property listings, location geocoding lookup tables.
 - **Ephemeral State**: Online presence tracking (`user:{id}:online`), typing indicators (3-second TTL keys).
 - **Pub/Sub Channels**: Scalable inter-process event distribution for WebSocket cluster nodes.
+- **Local Fallback**: Process-local in-memory pub/sub broker for development and single-instance deployments.
 
-### 4.3 Object Storage (`MinIO / S3`)
-- Buckets:
-  - `flatmate-public-photos`: Profile avatars, listing image galleries, group photos (CDN cached).
-  - `flatmate-private-docs`: Identity documents, proof of employment/student status, rental references (AES-256 encrypted, presigned URLs only).
+### 4.3 Object Storage (`Supabase Storage / MinIO / S3`)
+- **Public Buckets**:
+  - `property-photos`, `properties`, `avatars`: Profile pictures, listing gallery images, public property media.
+- **Private Encrypted Buckets**:
+  - `verification-docs`, `verification`, `chat-attachments`: Identity documents, Aadhaar/PAN avoidance checks, student IDs, encrypted chat attachments accessible only via short-lived signed URLs with strict ownership verification.
+
+### 4.4 Authentication & Identity Tier (`Supabase Auth & JWKS`)
+- Asymmetric `ES256` / `RS256` token verification against live hosted JWKS endpoint (`auth/v1/.well-known/jwks.json`) with 1-hour in-memory key caching.
+- Symmetric `HS256` fallback for development environments and automated test mock tokens.
+- Strict role-based access control (Seeker, Owner, Existing Tenant, PG Operator, Admin) enforced on the backend independent of frontend state.
 
 ---
 
