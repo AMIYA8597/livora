@@ -1,5 +1,7 @@
+import json
 import os
-from typing import List
+from typing import Any, List
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -41,6 +43,29 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
+            return [i.strip() for i in v.split(",") if i.strip()]
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_cors_allowed_origins(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "CORS_ORIGINS" not in data and "CORS_ALLOWED_ORIGINS" in data:
+                data["CORS_ORIGINS"] = data["CORS_ALLOWED_ORIGINS"]
+            elif "CORS_ORIGINS" not in data and "CORS_ALLOWED_ORIGINS" in os.environ:
+                data["CORS_ORIGINS"] = os.environ["CORS_ALLOWED_ORIGINS"]
+        return data
 
     # Matching Weights
     VECTOR_EMBEDDING_DIM: int = 64

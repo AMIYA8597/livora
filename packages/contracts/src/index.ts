@@ -6,6 +6,7 @@ export * from './group';
 export * from './application';
 export * from './messaging';
 export * from './verification';
+export * from './operations';
 
 export interface ApiResponse<T> {
   success: boolean;

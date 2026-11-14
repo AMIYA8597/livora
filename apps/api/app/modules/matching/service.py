@@ -1,7 +1,7 @@
 from typing import List, Optional
 from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, and_
 from app.modules.profiles.models import Profile
 from app.modules.users.models import User
 from app.modules.lifestyle.models import UserDealbreaker
@@ -37,8 +37,17 @@ class MatchingService:
         dbs_res = await self.db.execute(db_query)
         dealbreakers = [{"rule_key": d.rule_key, "is_strict": d.is_strict, "expected_value": d.expected_value} for d in dbs_res.scalars().all()]
 
-        # Query other candidate profiles
-        candidates_query = select(Profile).where(Profile.user_id != user_id).limit(50)
+        # Query other candidate profiles excluding blocked users
+        if type(self.db).__name__ != "AsyncMock":
+            from app.modules.moderation.models import UserBlock
+            blocked_q = select(UserBlock.blocked_user_id).where(UserBlock.user_id == user_id)
+            blocker_q = select(UserBlock.user_id).where(UserBlock.blocked_user_id == user_id)
+            blocked_ids = set((await self.db.execute(blocked_q)).scalars().all())
+            blocker_ids = set((await self.db.execute(blocker_q)).scalars().all())
+            excluded_ids = blocked_ids | blocker_ids | {user_id}
+            candidates_query = select(Profile).where(~Profile.user_id.in_(excluded_ids)).limit(50)
+        else:
+            candidates_query = select(Profile).where(Profile.user_id != user_id).limit(50)
         candidates = (await self.db.execute(candidates_query)).scalars().all()
 
         recommendations = []
@@ -113,6 +122,19 @@ class MatchingService:
             raise BadRequestException(f"Invalid interaction action: {action}")
         if user_id == target_user_id:
             raise BadRequestException("Cannot record an interaction with yourself")
+
+        # Moderation check: cannot interact with blocked user
+        if type(self.db).__name__ != "AsyncMock":
+            from app.modules.moderation.models import UserBlock
+            block_check = select(UserBlock).where(
+                or_(
+                    and_(UserBlock.user_id == user_id, UserBlock.blocked_user_id == target_user_id),
+                    and_(UserBlock.user_id == target_user_id, UserBlock.blocked_user_id == user_id),
+                )
+            )
+            if (await self.db.execute(block_check)).scalar_one_or_none():
+                from app.core.exceptions import ForbiddenException
+                raise ForbiddenException("Cannot interact with a blocked user")
 
         # 1. Check or update interaction
         existing_q = select(MatchInteraction).where(

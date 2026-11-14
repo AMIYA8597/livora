@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
-from app.core.exceptions import NotFoundException
 from app.modules.users.models import User
 from app.modules.applications.schemas import ApplicationResponse, ApplicationCreate, ApplicationStatusUpdate
 from app.modules.applications.service import ApplicationService

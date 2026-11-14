@@ -11,6 +11,12 @@ import asyncio
 from typing import AsyncGenerator
 from httpx import AsyncClient, ASGITransport
 from app.main import app
+from app.core.database import engine
+
+@pytest.fixture(autouse=True)
+async def cleanup_db_engine():
+    yield
+    await engine.dispose()
 
 @pytest.fixture(scope="session")
 def event_loop():

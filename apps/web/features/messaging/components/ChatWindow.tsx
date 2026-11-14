@@ -1,7 +1,12 @@
 "use client";
 
-import React, { useState } from 'react';
-import { Send, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from "react";
+import {
+  Send, ShieldAlert, Check, CheckCheck, Paperclip, X,
+  CornerUpLeft, MoreVertical, Edit2, Trash2, FileText, Download,
+  Users, Info, ShieldCheck, Clock
+} from "lucide-react";
+import { AttachmentDTO } from "@flatmate/contracts";
 
 export interface MessageItem {
   id: string;
@@ -10,118 +15,427 @@ export interface MessageItem {
   content: string;
   createdAt: string;
   isSelf: boolean;
+  status?: "sending" | "sent" | "delivered" | "read" | "failed";
+  isEdited?: boolean;
+  isDeleted?: boolean;
+  replyTo?: {
+    id: string;
+    senderName?: string;
+    content: string;
+  } | null;
+  attachments?: AttachmentDTO[];
 }
 
 export interface ChatWindowProps {
   conversationId: string;
   recipientName: string;
-  isRecipientVerified: boolean;
+  recipientSubtitle?: string;
+  isRecipientVerified?: boolean;
+  isGroup?: boolean;
+  participantCount?: number;
   messages: MessageItem[];
-  onSendMessage: (text: string) => Promise<void>;
+  typingUsers?: string[];
+  currentUserId?: string;
+  onSendMessage: (text: string, replyToId?: string, attachmentIds?: string[]) => Promise<void>;
+  onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
+  onDeleteMessage?: (messageId: string) => Promise<void>;
+  onUploadAttachment?: (file: File) => Promise<AttachmentDTO>;
+  onTyping?: (isTyping: boolean) => void;
+  onOpenDetails?: () => void;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
+  conversationId,
   recipientName,
-  isRecipientVerified,
+  recipientSubtitle = "Direct Message",
+  isRecipientVerified = false,
+  isGroup = false,
+  participantCount = 2,
   messages,
+  typingUsers = [],
+  currentUserId,
   onSendMessage,
+  onEditMessage,
+  onDeleteMessage,
+  onUploadAttachment,
+  onTyping,
+  onOpenDetails,
 }) => {
-  const [inputText, setInputText] = useState('');
+  const [inputText, setInputText] = useState("");
   const [warning, setWarning] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+  const [editingMessage, setEditingMessage] = useState<MessageItem | null>(null);
+  const [stagedAttachments, setStagedAttachments] = useState<AttachmentDTO[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [activeMenuMsgId, setActiveMenuMsgId] = useState<string | null>(null);
 
-  // Local safety heuristic check before dispatch
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, typingUsers]);
+
+  // Handle typing debounce
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+
+    if (onTyping) {
+      onTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        onTyping(false);
+      }, 3000);
+    }
+  };
+
+  // Pre-flight safety heuristic check & submit
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = inputText.trim();
-    if (!text) return;
+    if (!text && stagedAttachments.length === 0) return;
 
     // Rental advance scam warning check
     const isAdvanceScam = /advance\s+(money|token|rent|payment)\s+before\s+visit/i.test(text);
     const hasPhone = /(\+91[\-\s]?)?[6-9]\d{9}/.test(text);
 
     if (isAdvanceScam) {
-      setWarning('Warning: Requesting or offering advance payments before physical property visits is prohibited for your protection.');
+      setWarning("Security Warning: Requesting or offering advance payments before physical property visits is prohibited for your protection.");
       return;
     }
 
     if (hasPhone && !isRecipientVerified) {
-      setWarning('Notice: Sharing personal contact numbers before mutual match confirmation is masked in accordance with data privacy guidelines.');
+      setWarning("Notice: Sharing phone numbers prior to mutual identity verification is monitored in accordance with safety guidelines.");
     } else {
       setWarning(null);
     }
 
-    await onSendMessage(text);
-    setInputText('');
+    if (editingMessage && onEditMessage) {
+      await onEditMessage(editingMessage.id, text);
+      setEditingMessage(null);
+      setInputText("");
+      return;
+    }
+
+    const attIds = stagedAttachments.map((a) => a.id);
+    await onSendMessage(text, replyingTo?.id, attIds);
+
+    setInputText("");
+    setReplyingTo(null);
+    setStagedAttachments([]);
+    if (onTyping) onTyping(false);
+  };
+
+  // File upload trigger
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onUploadAttachment) return;
+
+    try {
+      setIsUploading(true);
+      const att = await onUploadAttachment(file);
+      setStagedAttachments((prev) => [...prev, att]);
+    } catch (err: any) {
+      alert(err.message || "Failed to upload attachment");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   return (
-    <div className="flex flex-col h-[600px] bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      {/* Chat Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+    <div className="flex flex-col h-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-200 bg-slate-50/80">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
-            {recipientName.slice(0, 2).toUpperCase()}
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
+            isGroup ? "bg-purple-100 text-purple-700" : "bg-indigo-100 text-indigo-700"
+          }`}>
+            {isGroup ? <Users className="w-5 h-5" /> : recipientName.slice(0, 2).toUpperCase()}
           </div>
           <div>
             <div className="flex items-center space-x-1.5">
-              <span className="font-semibold text-gray-900 text-sm">{recipientName}</span>
+              <span className="font-semibold text-slate-900 text-sm">{recipientName}</span>
               {isRecipientVerified && (
-                <span title="Verified Identity">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" />
+                <span title="Identity Verified">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 inline" />
                 </span>
               )}
             </div>
-            <span className="text-[11px] text-gray-400">
-              {isRecipientVerified ? 'Government ID Verified' : 'Standard Account'}
-            </span>
+            <div className="flex items-center space-x-2 text-[11px] text-slate-500">
+              <span>{isGroup ? `${participantCount} members` : recipientSubtitle}</span>
+              <span>•</span>
+              <span className="text-emerald-600 font-medium">End-to-end authenticated</span>
+            </div>
           </div>
         </div>
-        <div className="text-xs bg-emerald-50 text-emerald-700 font-medium px-2.5 py-1 rounded-full border border-emerald-100">
-          Encrypted Channel
+
+        {onOpenDetails && (
+          <button
+            onClick={onOpenDetails}
+            className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors"
+            title="Conversation Details"
+          >
+            <Info className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Persistent Safety Reminder */}
+      <div className="bg-warm/60 border-b border-slate-200/80 px-4 py-1.5 flex items-center justify-between text-[11px] text-charcoal-muted">
+        <div className="flex items-center space-x-1.5">
+          <ShieldAlert className="w-3.5 h-3.5 text-forest flex-shrink-0" />
+          <span>Safety Tip: Never transfer advance deposit or token money before a physical visit. Keep all communications here.</span>
         </div>
       </div>
 
-      {/* In-Flight Safety Warning Banner */}
+      {/* Dynamic Safety Warning Banner */}
       {warning && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center space-x-2 text-xs text-amber-800">
-          <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
-          <span>{warning}</span>
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between text-xs text-amber-800">
+          <div className="flex items-center space-x-2">
+            <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <span>{warning}</span>
+          </div>
+          <button onClick={() => setWarning(null)} className="text-amber-700 hover:text-amber-900">
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
       {/* Message Stream */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50/30">
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
-          >
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/30">
+        {messages.map((msg) => {
+          const isDeleted = msg.isDeleted;
+          return (
             <div
-              className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
-                msg.isSelf
-                  ? 'bg-indigo-600 text-white rounded-tr-none'
-                  : 'bg-white text-gray-900 border border-gray-100 rounded-tl-none'
-              }`}
+              key={msg.id}
+              className={`flex flex-col group relative ${msg.isSelf ? "items-end" : "items-start"}`}
             >
-              {msg.content}
+              {/* Sender Name in Group Conversations */}
+              {isGroup && !msg.isSelf && (
+                <span className="text-[11px] font-medium text-slate-500 ml-1 mb-1">
+                  {msg.senderName}
+                </span>
+              )}
+
+              {/* Reply Preview Bubble inside message */}
+              {msg.replyTo && (
+                <div
+                  className={`text-xs px-3 py-1.5 mb-1 rounded-t-lg border-l-2 max-w-[75%] truncate ${
+                    msg.isSelf
+                      ? "bg-indigo-100 text-indigo-900 border-indigo-500"
+                      : "bg-slate-200 text-slate-700 border-slate-400"
+                  }`}
+                >
+                  <span className="font-semibold">{msg.replyTo.senderName || "Reply"}: </span>
+                  <span className="italic">{msg.replyTo.content}</span>
+                </div>
+              )}
+
+              {/* Main Message Bubble */}
+              <div
+                className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-2xs relative break-words ${
+                  msg.isSelf
+                    ? "bg-indigo-600 text-white rounded-tr-none"
+                    : "bg-white text-slate-900 border border-slate-200/80 rounded-tl-none"
+                } ${isDeleted ? "italic text-slate-400 bg-slate-100" : ""}`}
+              >
+                {msg.content}
+
+                {/* Attachments rendering */}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {msg.attachments.map((att) => {
+                      const isImg = att.mime_type.startsWith("image/");
+                      return isImg ? (
+                        <div key={att.id} className="rounded-lg overflow-hidden border border-white/20 max-w-xs">
+                          {att.signed_url ? (
+                            <img src={att.signed_url} alt={att.file_name} className="max-h-48 w-auto object-cover" />
+                          ) : (
+                            <div className="p-3 bg-black/10 text-xs flex items-center space-x-2">
+                              <FileText className="w-4 h-4" />
+                              <span className="truncate">{att.file_name}</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <a
+                          key={att.id}
+                          href={att.signed_url || "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center space-x-2 p-2 rounded-lg bg-black/10 hover:bg-black/20 text-xs font-medium transition-colors"
+                        >
+                          <FileText className="w-4 h-4 flex-shrink-0" />
+                          <span className="truncate flex-1">{att.file_name}</span>
+                          <Download className="w-3.5 h-3.5 flex-shrink-0" />
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Message Footer: Timestamp, Edit label, Receipts */}
+              <div className="flex items-center space-x-1.5 mt-1 px-1 text-[10px] text-slate-400">
+                <span>{msg.createdAt}</span>
+                {msg.isEdited && <span className="italic">(edited)</span>}
+                {msg.isSelf && !isDeleted && (
+                  <span>
+                    {msg.status === "sending" && <Clock className="w-3 h-3 text-slate-400" />}
+                    {msg.status === "sent" && <Check className="w-3 h-3 text-slate-400" />}
+                    {msg.status === "delivered" && <CheckCheck className="w-3 h-3 text-slate-400" />}
+                    {msg.status === "read" && <CheckCheck className="w-3 h-3 text-indigo-500 font-bold" />}
+                  </span>
+                )}
+              </div>
+
+              {/* Hover Action Menu */}
+              {!isDeleted && (
+                <div
+                  className={`absolute top-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-1 bg-white border border-slate-200 rounded-lg shadow-sm px-1.5 py-1 z-10 ${
+                    msg.isSelf ? "right-[80%]" : "left-[80%]"
+                  }`}
+                >
+                  <button
+                    onClick={() => setReplyingTo(msg)}
+                    className="p-1 text-slate-500 hover:text-indigo-600 rounded"
+                    title="Reply"
+                  >
+                    <CornerUpLeft className="w-3.5 h-3.5" />
+                  </button>
+                  {msg.isSelf && onEditMessage && (
+                    <button
+                      onClick={() => {
+                        setEditingMessage(msg);
+                        setInputText(msg.content);
+                      }}
+                      className="p-1 text-slate-500 hover:text-indigo-600 rounded"
+                      title="Edit"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {msg.isSelf && onDeleteMessage && (
+                    <button
+                      onClick={() => onDeleteMessage(msg.id)}
+                      className="p-1 text-slate-500 hover:text-rose-600 rounded"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-            <span className="text-[10px] text-gray-400 mt-1 px-1">{msg.createdAt}</span>
+          );
+        })}
+
+        {/* Real-Time Typing Indicator */}
+        {typingUsers.length > 0 && (
+          <div className="flex items-center space-x-2 text-xs text-slate-500 italic py-1">
+            <div className="flex space-x-1">
+              <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" />
+              <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.2s]" />
+              <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.4s]" />
+            </div>
+            <span>{typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing...</span>
           </div>
-        ))}
+        )}
+
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Box */}
-      <form onSubmit={handleSend} className="p-4 border-t border-gray-100 bg-white flex items-center space-x-3">
+      {/* Replying Banner */}
+      {replyingTo && (
+        <div className="bg-indigo-50 border-t border-indigo-200 px-4 py-2 flex items-center justify-between text-xs text-indigo-900">
+          <div className="flex items-center space-x-2 truncate">
+            <CornerUpLeft className="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" />
+            <span>Replying to <strong>{replyingTo.senderName}</strong>: {replyingTo.content}</span>
+          </div>
+          <button onClick={() => setReplyingTo(null)} className="text-indigo-600 hover:text-indigo-900 ml-2">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Editing Banner */}
+      {editingMessage && (
+        <div className="bg-amber-50 border-t border-amber-200 px-4 py-2 flex items-center justify-between text-xs text-amber-900">
+          <span>Editing message</span>
+          <button
+            onClick={() => {
+              setEditingMessage(null);
+              setInputText("");
+            }}
+            className="text-amber-700 hover:text-amber-900"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Staged Attachments Preview */}
+      {stagedAttachments.length > 0 && (
+        <div className="bg-slate-50 px-4 py-2 border-t border-slate-200 flex flex-wrap gap-2">
+          {stagedAttachments.map((att) => (
+            <div
+              key={att.id}
+              className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-md px-2.5 py-1 text-xs text-slate-700 shadow-2xs"
+            >
+              <FileText className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="max-w-[120px] truncate">{att.file_name}</span>
+              <button
+                type="button"
+                onClick={() => setStagedAttachments((prev) => prev.filter((a) => a.id !== att.id))}
+                className="text-slate-400 hover:text-rose-600"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Composer Input Bar */}
+      <form onSubmit={handleSend} className="p-3 border-t border-slate-200 bg-white flex items-center space-x-2">
+        {onUploadAttachment && (
+          <>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelected}
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              className="hidden"
+            />
+            <button
+              type="button"
+              disabled={isUploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+              title="Attach Document or Photo (Max 10MB)"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+          </>
+        )}
+
         <input
           type="text"
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          onChange={handleInputChange}
           placeholder="Type your message securely..."
-          className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="flex-1 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
+
         <button
           type="submit"
-          className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors"
+          disabled={!inputText.trim() && stagedAttachments.length === 0}
+          className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
+          title="Send"
         >
           <Send className="w-4 h-4" />
         </button>

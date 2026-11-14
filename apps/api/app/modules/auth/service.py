@@ -1,12 +1,19 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from app.core.security import get_password_hash, verify_password, create_access_token, create_refresh_token, decode_token
+from app.core.security import (
+    get_password_hash, verify_password, create_access_token, create_refresh_token,
+    decode_token, create_password_reset_token
+)
 from app.core.exceptions import BadRequestException, UnauthorizedException
 from app.core.config import settings
 from app.core.logging import logger
 from app.modules.users.models import User, UserRole, UserPrivacySetting
-from app.modules.auth.schemas import RegisterRequest, LoginRequest, TokenResponse, SendOtpRequest, VerifyOtpRequest
+from app.modules.users.schemas import UserResponse
+from app.modules.auth.schemas import (
+    RegisterRequest, LoginRequest, TokenResponse, SendOtpRequest, VerifyOtpRequest,
+    ForgotPasswordRequest, ResetPasswordRequest
+)
 from app.modules.profiles.models import Profile
 
 class AuthService:
@@ -59,7 +66,7 @@ class AuthService:
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            user=new_user,
+            user=UserResponse.model_validate(new_user),
             roles=all_roles,
         )
 
@@ -85,7 +92,7 @@ class AuthService:
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            user=user,
+            user=UserResponse.model_validate(user),
             roles=unique_roles,
         )
 
@@ -113,7 +120,7 @@ class AuthService:
             access_token=new_access,
             refresh_token=new_refresh,
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            user=user,
+            user=UserResponse.model_validate(user),
             roles=unique_roles,
         )
 
@@ -128,3 +135,46 @@ class AuthService:
         if req.otp_code not in ("1234", "123456"):
             raise BadRequestException("Invalid or expired OTP code")
         return {"success": True, "message": "Mobile number verified successfully"}
+
+    async def forgot_password(self, req: ForgotPasswordRequest) -> dict:
+        query = select(User).where(User.email == req.email)
+        user = (await self.db.execute(query)).scalar_one_or_none()
+        if not user or not user.is_active:
+            # Generic safe response to prevent user enumeration
+            return {
+                "success": True,
+                "message": "If an active account exists with this email address, password reset instructions have been generated.",
+            }
+
+        reset_token = create_password_reset_token(str(user.id), user.email)
+        logger.info(f"Generated password reset token for user {user.id}")
+
+        res: dict = {
+            "success": True,
+            "message": "If an active account exists with this email address, password reset instructions have been generated.",
+        }
+        # In development/test mode, surface reset token for automated testing
+        if settings.ENVIRONMENT in ("development", "test") or settings.DEBUG:
+            res["reset_token"] = reset_token
+
+        return res
+
+    async def reset_password(self, req: ResetPasswordRequest) -> dict:
+        payload = decode_token(req.token)
+        user_id = payload.get("sub")
+        token_type = payload.get("type")
+
+        if not user_id or token_type != "password_reset":
+            raise BadRequestException("Invalid, expired, or malformed password reset token")
+
+        query = select(User).where(User.id == user_id)
+        user = (await self.db.execute(query)).scalar_one_or_none()
+
+        if not user or not user.is_active:
+            raise BadRequestException("User account not found or deactivated")
+
+        user.hashed_password = get_password_hash(req.new_password)
+        await self.db.commit()
+
+        logger.info(f"Password reset successfully completed for user {user.id}")
+        return {"success": True, "message": "Your password has been reset successfully. Please log in with your new password."}

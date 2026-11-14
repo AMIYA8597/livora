@@ -10,37 +10,32 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.modules.users.models import User
 from app.modules.profiles.models import Profile
-from app.modules.profiles.schemas import ProfileUpdate, LifestyleTraitsSchema
+from app.modules.profiles.schemas import ProfileUpdate
 from app.modules.profiles.service import ProfileService
-from app.modules.lifestyle.models import LifestyleProfile, UserDealbreaker
 from app.modules.lifestyle.schemas import LifestyleCreateOrUpdate, DealbreakerCreate
 from app.modules.lifestyle.service import LifestyleService
-from app.modules.properties.schemas import PropertyCreate, RoomCreate, BedCreate, ListingStatusUpdate
+from app.modules.properties.schemas import PropertyCreate, RoomCreate, BedCreate
 from app.modules.properties.service import PropertyService
-from app.modules.properties.models import Property, Room, Bed
+from app.modules.properties.models import Property
 from app.modules.matching.engine import compute_10_dimension_compatibility
 from app.modules.matching.service import MatchingService
-from app.modules.matching.models import MatchInteraction, MutualMatch
+from app.modules.matching.models import MatchInteraction
 from app.modules.groups.schemas import GroupCreate
 from app.modules.groups.models import Group, GroupMember
 from app.modules.groups.service import GroupService
 from app.modules.applications.schemas import ApplicationCreate, ApplicationStatusUpdate
-from app.modules.applications.models import Application
 from app.modules.applications.service import ApplicationService
 from app.modules.appointments.schemas import AppointmentCreate, AppointmentStatusUpdate
-from app.modules.appointments.models import Appointment
 from app.modules.appointments.service import AppointmentService
 from app.modules.tenants.schemas import ExistingTenantVacancyCreate
-from app.modules.tenants.models import TenantMembership, ExistingTenantVacancy
+from app.modules.tenants.models import TenantMembership
 from app.modules.tenants.service import TenantService
 from app.modules.pg_management.schemas import PGBuildingCreate, PGFloorCreate
-from app.modules.pg_management.models import PGBuilding, PGFloor
+from app.modules.pg_management.models import PGBuilding
 from app.modules.pg_management.service import PGService
-from app.modules.messaging.schemas import CreateConversationRequest, SendMessageRequest
-from app.modules.messaging.models import Conversation, ConversationParticipant, Message
+from app.modules.messaging.schemas import CreateConversationRequest
 from app.modules.messaging.service import MessagingService
 from app.modules.verification.schemas import SubmitVerificationRequest
-from app.modules.verification.models import Verification
 from app.modules.verification.service import VerificationService
 from app.modules.moderation.schemas import ReportCreate, ReportReviewRequest
 from app.modules.moderation.models import ModerationReport, UserBlock
@@ -50,7 +45,6 @@ from app.core.exceptions import (
     BadRequestException,
     ConflictException,
     ForbiddenException,
-    NotFoundException,
 )
 
 
@@ -185,6 +179,9 @@ async def test_workflow_a_flatmate_seeker_journey():
 
     # 12: Access Authorized Conversation
     messaging_service = MessagingService(mock_db)
+    mock_no_block = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    mock_no_conv = MagicMock(scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None))))
+    mock_db.execute.side_effect = [mock_no_block, mock_no_conv]
     conv_req = CreateConversationRequest(
         type="direct",
         participant_user_ids=[candidate_id],

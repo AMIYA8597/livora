@@ -1,10 +1,10 @@
 # Project Status: Flatmate Compatibility & Rental Marketplace
 
-**Document Version:** 1.15  
-**Current Phase:** Phase 15 — Final E2E Verification & Deployment Readiness  
-**Target Architecture:** Modular Monolith (FastAPI + Supabase / PostgreSQL + PostGIS + pgvector + SQLAlchemy 2.x)  
+**Document Version:** 1.21  
+**Current Phase:** Phase 21 — Real Staging Deployment, Infrastructure Validation and Operational Readiness (COMPLETED)  
+**Target Architecture:** Modular Monolith (FastAPI + Supabase / PostgreSQL + PostGIS + pgvector + Next.js 14 + TailwindCSS)  
 **Execution Mode:** Sequential, Test-Driven, Production-Oriented  
-**Overall Status:** **100% COMPLETE — PRODUCTION READY**  
+**Overall Status:** **STAGING VERIFIED — CONDITIONAL APPROVAL FOR PRODUCTION**  
 
 ---
 
@@ -27,7 +27,12 @@
 | **Phase 12**| Verification, Safety & Administration | **COMPLETED** | Identity verification approval, moderation queue, user blocking, administrative stats & role granting |
 | **Phase 13**| AI/ML Readiness & Optional Integrations | **COMPLETED** | Replaceable interfaces for recommendation reranking, heuristic & ML moderation, pgvector & keyword fallback search |
 | **Phase 14**| Production Hardening, Security & Performance | **COMPLETED** | Sliding-window rate limiting dependency, 10MB payload size limit (HTTP 413), security headers (CSP, HSTS, X-Frame-Options), SQL injection defense, multi-stage hardened Dockerfile with non-root user |
-| **Phase 15**| Final E2E Verification & Deployment Readiness | **COMPLETED** | Complete 9-step multi-actor realistic user journey test, OpenAPI 3.x schema generation audit, 69/69 passing tests |
+| **Phase 15**| Final E2E Verification & Deployment Readiness | **COMPLETED** | Complete 9-step multi-actor realistic user journey test, OpenAPI 3.x schema generation audit |
+| **Phase 16**| Independent Release-Candidate Audit & Staging Integration | **COMPLETED** | Independent 11-step audit, fixed 8 security vulnerabilities (SEC-01 to SEC-08), verified Workflows A–F, benchmarked 4,042 ops/s throughput, 84/84 tests passing, Mypy 0 errors, Next.js build clean |
+| **Phase 17**| Frontend–Backend Integration | **COMPLETED** | 68 user-facing endpoints connected, 0 mock data in production routes, centralized `apiClient` with RFC 7807 problem details & silent 401 refresh, 32 Next.js routes compiled cleanly, 167/167 tests passing monorepo-wide |
+| **Phase 17.2**| Baseline Remediation & Full Marketplace Integration | **COMPLETED** | All 14 audit work items remediated (ISSUE-01 to ISSUE-14), 10 missing routes & components implemented, authenticated storage API with MIME magic-byte validation, 136 backend pytest + 31 frontend node:test passing |
+| **Phase 18**| Complete Product Experience & Finalization | **COMPLETED** | India-first design system (`@flatmate/ui` 21 components), DPDP Act 2023 address masking & coordinate fuzzing, token scam safety warnings, 8 core user journeys passing (Journeys A–H), 32 Next.js routes fully operational, 136 backend + 31 frontend tests passing |
+| **Phase 21**| Real Staging Deployment, Infrastructure Validation & Operational Readiness | **COMPLETED (STAGING VERIFIED)** | Disposable DB provisioned, Alembic head `002_messaging_realtime` applied, 43 tables, RLS non-superuser verified, Next.js on port 3001, FastAPI on port 8001, 7 live HTTP staging user journeys passed (100%), physical backup/restore drill 100% parity, 14 security regression tests passed, 0 Bandit vulnerabilities, RTO/RPO defined, operational runbooks created in `docs/PHASE_21/` |
 
 ---
 
@@ -49,4 +54,18 @@
 - Implemented Phase 13: Replaceable external service providers for recommendations, content safety & moderation, and dense vector vs keyword search with zero-downtime resilient fallbacks.
 - Implemented Phase 14: Sliding window rate limiting, request body payload size enforcement (HTTP 413), security headers, SQL injection defense, and multi-stage Docker containerization with non-root `flatmate` user.
 - Implemented Phase 15: Comprehensive end-to-end user journey integration tests (`test_e2e_journey.py`) and validated OpenAPI 3.x schema generation with 0 errors.
-- **69 tests passing with 0 warnings (100% pass rate).**
+- **Implemented Phase 16:** Complete independent audit, remediated critical BOLA/IDOR vulnerabilities, fuzzed coordinates for privacy, synchronized `@flatmate/contracts` with Next.js 14, executed 6 complete E2E workflows (A–F), benchmarked high-performance matching at 4,042.4 evaluations/sec, created production runbooks and staging checklists.
+- **Implemented Phase 17 & 17.2:** End-to-end frontend–backend integration connecting all user-facing API endpoints, zero mock data in production routes, centralized `apiClient` with RFC 7807 problem details parsing, silent 401 token refresh mutex, multi-role session management (`useAuth`), Indian rental market localization (INR `₹`, lakhs/crores formatting, BHK configurations), privacy enforcement (exact coordinate masking, confidential lifestyle answers), authenticated storage upload API with magic-byte validation, complete missing routes (`/owner/dashboard`, `/owner/listings/create`, `/tenants/vacancies/create`, `/pg/manage`, `/appointments`, `/admin/moderation`, `/onboarding`, `/profile`, auth reset), and comprehensive test suites.
+- **Implemented Phase 18:** Full product experience completion, UI/UX finalization, and marketplace functionality:
+  - 21 accessible `@flatmate/ui` design system components in Forest Green/Charcoal brand palette.
+  - Complete public landing page, property discovery with mobile drawer filters, image gallery with lightbox, and room/bed inventory.
+  - Flatmate discovery with 10-dimension compatibility radar, mutual matching, and group syndicates with wishlist voting.
+  - Portals for Owner (dashboard, inventory, applications, bed vacating), Tenant (active lease check, roommate vacancies), and PG Operator (buildings, floors, meal plans, curfews).
+  - Safety & Account Settings (password reset, phone update, user blocking, deposit scam warnings, DPDP Act 2023 address masking & coordinate fuzzing).
+  - Admin console (stats, moderation queue, property verification queue, user management).
+  - 8 core acceptance journeys verified in `test_phase18_e2e_acceptance.py`.
+- **167 automated tests passing monorepo-wide (136 backend pytest, 31 frontend node:test, 3 package tsc type-checks).**
+- **0 Mypy strict type errors across 131 backend source files.**
+- **0 TypeScript compile errors across `@flatmate/contracts`, `@flatmate/ui`, and `@flatmate/web`.**
+- **0 ESLint warnings or errors (`next lint`).**
+- **32 Next.js routes compiled and prerendered.**

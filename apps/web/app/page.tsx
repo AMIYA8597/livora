@@ -1,272 +1,423 @@
-import React from "react";
+"use client";
+
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
 import { PropertyCard } from "@/components/PropertyCard";
 import { FlatmateCard } from "@/components/FlatmateCard";
-import { Button } from "@flatmate/ui";
-import { Sparkles, ShieldCheck, MapPin, Users, ArrowRight, HeartHandshake, CheckCircle } from "lucide-react";
-
-// Mock initial data for landing page rendering
-const FEATURED_PROPERTIES = [
-  {
-    id: "b1111111-1111-1111-1111-111111111111",
-    owner_id: "55555555-5555-5555-5555-555555555555",
-    title: "Sun-Drenched 3BR Flat in Mission Dolores with Roof Deck",
-    description: "Gorgeous Victorian flat with hardwood floors, chef kitchen, and panoramic roof deck.",
-    property_type: "apartment" as const,
-    latitude: 37.7601,
-    longitude: -122.4269,
-    address: "482 Valencia St",
-    city: "San Francisco",
-    state: "CA",
-    postal_code: "94103",
-    country: "USA",
-    monthly_rent: 4200,
-    deposit: 4200,
-    bills_included: false,
-    total_bedrooms: 3,
-    total_bathrooms: 2,
-    available_from: "2026-12-01",
-    is_furnished: true,
-    pets_allowed: true,
-    smoking_allowed: false,
-    images: ["https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800"],
-    amenities: ["in_unit_laundry", "roof_deck", "dishwasher"],
-    rooms: [],
-    is_active: true,
-    created_at: "2026-11-01T00:00:00Z",
-  },
-  {
-    id: "b2222222-2222-2222-2222-222222222222",
-    owner_id: "66666666-6666-6666-6666-666666666666",
-    title: "Modern Hayes Valley Loft with Private Balcony",
-    description: "Ultra-modern designer loft unit featuring floor-to-ceiling windows and high speed fiber.",
-    property_type: "condo" as const,
-    latitude: 37.7758,
-    longitude: -122.4243,
-    address: "315 Octavia St",
-    city: "San Francisco",
-    state: "CA",
-    postal_code: "94102",
-    country: "USA",
-    monthly_rent: 3400,
-    deposit: 3400,
-    bills_included: true,
-    total_bedrooms: 2,
-    total_bathrooms: 2,
-    available_from: "2026-11-25",
-    is_furnished: true,
-    pets_allowed: false,
-    smoking_allowed: false,
-    images: ["https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800"],
-    amenities: ["central_ac", "elevator", "bike_storage"],
-    rooms: [],
-    is_active: true,
-    created_at: "2026-11-02T00:00:00Z",
-  },
-];
-
-const FEATURED_FLATMATES = [
-  {
-    id: "a1111111-1111-1111-1111-111111111111",
-    user_id: "11111111-1111-1111-1111-111111111111",
-    display_name: "Priya S.",
-    avatar_url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400",
-    bio: "Software engineer working in tech. Early riser, tidy, vegan, loves trail running.",
-    occupation: "Software Engineer",
-    budget_min: 1200,
-    budget_max: 1800,
-    move_in_date: "2026-12-01",
-    lifestyle_traits: {
-      sleep_schedule: "early_bird" as const,
-      cleanliness_level: 5 as const,
-      social_battery: "moderate" as const,
-      work_arrangement: "hybrid" as const,
-      diet: "vegan" as const,
-      smoking: "never" as const,
-      pets: "cats_ok" as const,
-      guests_policy: "occasional_weekends",
-    },
-    preferred_locations: ["Downtown", "Mission District"],
-    created_at: "2026-11-01T00:00:00Z",
-    updated_at: "2026-11-01T00:00:00Z",
-  },
-  {
-    id: "a2222222-2222-2222-2222-222222222222",
-    user_id: "22222222-2222-2222-2222-222222222222",
-    display_name: "Marcus V.",
-    avatar_url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400",
-    bio: "Product designer & coffee lover. Very respectful of quiet hours, loves cooking Saturday dinners.",
-    occupation: "Senior Product Designer",
-    budget_min: 1400,
-    budget_max: 2100,
-    move_in_date: "2026-11-20",
-    lifestyle_traits: {
-      sleep_schedule: "early_bird" as const,
-      cleanliness_level: 4 as const,
-      social_battery: "extroverted" as const,
-      work_arrangement: "hybrid" as const,
-      diet: "omnivore" as const,
-      smoking: "never" as const,
-      pets: "loves_pets" as const,
-      guests_policy: "weekends_welcome",
-    },
-    preferred_locations: ["Mission District", "SoMa"],
-    created_at: "2026-11-01T00:00:00Z",
-    updated_at: "2026-11-01T00:00:00Z",
-  },
-];
+import { Button, Card, Badge, Skeleton, EmptyState } from "@flatmate/ui";
+import { PropertyDTO } from "@flatmate/contracts";
+import { apiClient } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  Sparkles,
+  ShieldCheck,
+  MapPin,
+  Users,
+  ArrowRight,
+  HeartHandshake,
+  CheckCircle,
+  Home,
+  Sliders,
+  CalendarCheck,
+  MessageSquare,
+  Lock,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 
 export default function HomePage() {
+  const { isAuthenticated } = useAuth();
+  const [featuredProperties, setFeaturedProperties] = useState<PropertyDTO[]>([]);
+  const [featuredFlatmates, setFeaturedFlatmates] = useState<any[]>([]);
+  const [loadingProps, setLoadingProps] = useState(true);
+  const [loadingFlatmates, setLoadingFlatmates] = useState(true);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  useEffect(() => {
+    // 1. Fetch real properties from API
+    async function loadProperties() {
+      try {
+        setLoadingProps(true);
+        const data = await apiClient<PropertyDTO[]>("/properties", { params: { limit: 6 } });
+        setFeaturedProperties(data || []);
+      } catch (err) {
+        console.error("Failed to load featured properties:", err);
+        setFeaturedProperties([]);
+      } finally {
+        setLoadingProps(false);
+      }
+    }
+
+    // 2. Fetch real flatmates from API if user is authenticated
+    async function loadFlatmates() {
+      try {
+        setLoadingFlatmates(true);
+        if (typeof window !== "undefined" && localStorage.getItem("flatmate_access_token")) {
+          const seekers = await apiClient<any[]>("/flatmates/search", { params: { limit: 4 } });
+          setFeaturedFlatmates(seekers || []);
+        } else {
+          setFeaturedFlatmates([]);
+        }
+      } catch (err) {
+        console.error("Failed to load featured flatmates:", err);
+        setFeaturedFlatmates([]);
+      } finally {
+        setLoadingFlatmates(false);
+      }
+    }
+
+    loadProperties();
+    loadFlatmates();
+  }, [isAuthenticated]);
+
+  const faqs = [
+    {
+      q: "How does Flatmate verify property listings?",
+      a: "Every listing on Flatmate represents a real database inventory record with physical units, rooms, and beds. Verified listings undergo ownership and identity review before receiving a verified trust badge.",
+    },
+    {
+      q: "How does the 10-dimension compatibility score work?",
+      a: "Our algorithm calculates vector alignment across Cleanliness, Sleep schedules, Work routines, Diet preferences, Smoking, Drinking, Social rhythm, Guests, Budget, and Locality. Dealbreakers are checked strictly. Individual raw questionnaire answers are never shown to other users.",
+    },
+    {
+      q: "How do viewing appointments and applications work?",
+      a: "Seekers can book physical viewing visits directly through the property calendar in Indian Standard Time (IST). Applications can be submitted with proposed rent and move-in dates, allowing owners to review dossiers and approve visits before revealing exact door numbers.",
+    },
+    {
+      q: "How does Flatmate protect my personal privacy and contact info?",
+      a: "In compliance with India's DPDP Act 2023, exact residential coordinates and building numbers are obscured until a viewing is confirmed. Phone numbers are masked by default, and initial conversations are kept safely on-platform with automatic scam warnings.",
+    },
+    {
+      q: "What should I do if someone asks for token money before a visit?",
+      a: "Never transfer advance token money, gate pass fees, or holding deposits via UPI or bank transfer before physically inspecting the property. Flatmate will never ask you to pay before an in-person viewing. You can report suspicious users immediately.",
+    },
+  ];
+
   return (
     <div className="space-y-20 pb-20">
       {/* 1. Hero Section */}
-      <section className="relative pt-12 pb-24 md:pt-20 md:pb-32 overflow-hidden bg-gradient-to-b from-indigo-50/50 via-white to-slate-50">
+      <section className="relative pt-12 pb-20 md:pt-20 md:pb-28 overflow-hidden bg-gradient-to-b from-warm-100/80 via-warm-50 to-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-          <div className="inline-flex items-center space-x-2 bg-indigo-100/80 border border-indigo-200/80 text-indigo-700 text-xs font-semibold px-4 py-1.5 rounded-full mb-6 shadow-2xs">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>AI & Vector-Powered Lifestyle Roommate Matching</span>
+          <div className="inline-flex items-center space-x-2 bg-pale-green/60 border border-brand-200 text-forest text-xs font-semibold px-4 py-1.5 rounded-full mb-6 shadow-xs">
+            <Sparkles className="w-3.5 h-3.5 text-secondary-green" />
+            <span>Find your place. Find your people. Live better together.</span>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl font-extrabold text-slate-900 tracking-tight max-w-4xl mx-auto leading-tight">
+          <h1 className="text-4xl sm:text-6xl font-extrabold text-charcoal tracking-tight max-w-4xl mx-auto leading-tight">
             Stop guessing. Live with someone who{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-forest to-secondary-green">
               actually fits your life.
             </span>
           </h1>
 
-          <p className="mt-6 text-lg sm:text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
-            We match your sleep schedule, cleanliness standards, budget, and habits with verified flatmates and top-tier co-living rentals.
+          <p className="mt-6 text-base sm:text-lg text-charcoal-muted max-w-2xl mx-auto leading-relaxed">
+            Match lifestyle preferences, quiet hours, cleanliness, and budget with verified flatmates and
+            vetted shared rentals in Bengaluru, Mumbai, Delhi NCR, Hyderabad, and Pune.
           </p>
 
+          {/* Search Bar */}
           <div className="mt-10">
             <SearchBar />
           </div>
 
-          {/* Social Proof Stats */}
-          <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-3xl mx-auto pt-8 border-t border-slate-200/60">
+          {/* Quick Dual Actions */}
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Link href="/properties">
+              <Button variant="outline" size="sm" className="font-semibold text-charcoal">
+                Explore Available Accommodations →
+              </Button>
+            </Link>
+            <Link href="/flatmates">
+              <Button variant="ghost" size="sm" className="font-semibold text-forest">
+                Find Compatible Flatmates →
+              </Button>
+            </Link>
+          </div>
+
+          {/* Core Trust Metrics */}
+          <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-3xl mx-auto pt-8 border-t border-warm-200">
             <div>
-              <div className="text-2xl font-bold text-slate-900">94%</div>
-              <div className="text-xs text-slate-500 font-medium">Match Accuracy</div>
+              <div className="text-2xl font-bold text-forest">10-D</div>
+              <div className="text-xs text-charcoal-muted font-medium">Lifestyle Dimensions</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-slate-900">12k+</div>
-              <div className="text-xs text-slate-500 font-medium">Verified Seekers</div>
+              <div className="text-2xl font-bold text-forest">100%</div>
+              <div className="text-xs text-charcoal-muted font-medium">Verified ID Badges</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-slate-900">&lt; 14 Days</div>
-              <div className="text-xs text-slate-500 font-medium">Avg. Time to Move In</div>
+              <div className="text-2xl font-bold text-forest">DPDP 2023</div>
+              <div className="text-xs text-charcoal-muted font-medium">Location Privacy Fuzzing</div>
             </div>
             <div>
-              <div className="text-2xl font-bold text-slate-900">0 Fraud</div>
-              <div className="text-xs text-slate-500 font-medium">Guaranteed Safety</div>
+              <div className="text-2xl font-bold text-forest">Zero Fake</div>
+              <div className="text-xs text-charcoal-muted font-medium">Persisted Inventory Policy</div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 2. How It Works Section */}
+      {/* 2. How It Works Section (5 Clear Steps) */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <h2 className="text-3xl font-extrabold text-slate-900">How Flatmate Platform Works</h2>
-          <p className="text-slate-600 mt-3 text-base">
-            Three simple steps to secure your dream space and compatible roommate.
+        <div className="text-center max-w-3xl mx-auto mb-14">
+          <Badge variant="brand" size="md">
+            Simple 5-Step Process
+          </Badge>
+          <h2 className="text-3xl font-extrabold text-charcoal mt-2">How Flatmate Works</h2>
+          <p className="text-charcoal-muted mt-2 text-sm sm:text-base">
+            From lifestyle discovery to moving in with peace of mind.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="bg-white p-8 rounded-2xl border border-slate-200/80 shadow-xs relative">
-            <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg mb-6">
-              1
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+          <div className="bg-white p-6 rounded-2xl border border-warm-200 shadow-xs relative flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 rounded-xl bg-pale-green/40 text-forest flex items-center justify-center font-bold text-sm mb-4">
+                1
+              </div>
+              <h3 className="font-bold text-charcoal text-base mb-1">Create Profile</h3>
+              <p className="text-xs text-charcoal-muted leading-relaxed">
+                Set up your verified identity, budget range, and preferred city localities.
+              </p>
             </div>
-            <h3 className="font-bold text-slate-900 text-lg mb-2">Take the Lifestyle Quiz</h3>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Tell us your quiet hours, cleaning habits, remote work rhythm, and budget. Our engine compiles your 64-D compatibility vector.
-            </p>
           </div>
 
-          <div className="bg-white p-8 rounded-2xl border border-slate-200/80 shadow-xs relative">
-            <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold text-lg mb-6">
-              2
+          <div className="bg-white p-6 rounded-2xl border border-warm-200 shadow-xs relative flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 rounded-xl bg-pale-green/40 text-forest flex items-center justify-center font-bold text-sm mb-4">
+                2
+              </div>
+              <h3 className="font-bold text-charcoal text-base mb-1">Lifestyle Preferences</h3>
+              <p className="text-xs text-charcoal-muted leading-relaxed">
+                Answer 10 behavioral lifestyle dimensions and establish strict dealbreakers.
+              </p>
             </div>
-            <h3 className="font-bold text-slate-900 text-lg mb-2">Connect & Team-Up</h3>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Explore high-compatibility matches with transparent alignment radar charts. Chat in real-time or form a hunting syndicate.
-            </p>
           </div>
 
-          <div className="bg-white p-8 rounded-2xl border border-slate-200/80 shadow-xs relative">
-            <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-lg mb-6">
-              3
+          <div className="bg-white p-6 rounded-2xl border border-warm-200 shadow-xs relative flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 rounded-xl bg-pale-green/40 text-forest flex items-center justify-center font-bold text-sm mb-4">
+                3
+              </div>
+              <h3 className="font-bold text-charcoal text-base mb-1">Discover People</h3>
+              <p className="text-xs text-charcoal-muted leading-relaxed">
+                Browse compatible seekers with transparent alignment radar charts.
+              </p>
             </div>
-            <h3 className="font-bold text-slate-900 text-lg mb-2">Apply Jointly with Confidence</h3>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Submit verified application dossiers directly to vetted property owners and sign leases with zero awkward surprises.
-            </p>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-warm-200 shadow-xs relative flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 rounded-xl bg-pale-green/40 text-forest flex items-center justify-center font-bold text-sm mb-4">
+                4
+              </div>
+              <h3 className="font-bold text-charcoal text-base mb-1">Find Accommodation</h3>
+              <p className="text-xs text-charcoal-muted leading-relaxed">
+                Explore real units, private rooms, and PG beds with transparent financials.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-warm-200 shadow-xs relative flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 rounded-xl bg-pale-green/40 text-forest flex items-center justify-center font-bold text-sm mb-4">
+                5
+              </div>
+              <h3 className="font-bold text-charcoal text-base mb-1">Connect & Visit</h3>
+              <p className="text-xs text-charcoal-muted leading-relaxed">
+                Chat securely on-platform, submit applications, and book in-person viewings.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* 3. Featured Rooms & Listings */}
+      {/* 3. Real Accommodation Discovery Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-end mb-8">
           <div>
-            <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Curated Co-Living</span>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">Available Rooms & Shared Flats</h2>
+            <span className="text-xs font-bold text-secondary-green uppercase tracking-wider">
+              Verified Properties
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-charcoal mt-1">
+              Available Rooms & Shared Flats
+            </h2>
           </div>
-          <Link href="/properties" className="text-sm font-semibold text-indigo-600 hover:text-indigo-700 flex items-center space-x-1">
-            <span>View all listings</span>
+          <Link
+            href="/properties"
+            className="text-sm font-semibold text-secondary-green hover:text-forest flex items-center space-x-1"
+          >
+            <span>Explore all homes</span>
             <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {FEATURED_PROPERTIES.map((prop) => (
-            <PropertyCard key={prop.id} property={prop} matchScore={96} />
-          ))}
-        </div>
+        {loadingProps ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Skeleton variant="card" />
+            <Skeleton variant="card" />
+            <Skeleton variant="card" />
+          </div>
+        ) : featuredProperties.length === 0 ? (
+          <EmptyState
+            icon={MapPin}
+            title="No active property listings found"
+            description="Be the first verified landlord or tenant to list an accommodation on Flatmate."
+            actionLabel="List a Property"
+            onAction={() => (window.location.href = "/owner")}
+          />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {featuredProperties.map((prop) => (
+              <PropertyCard key={prop.id} property={prop} />
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* 4. Top Compatible Flatmates */}
+      {/* 4. Flatmate Discovery & Lifestyle Compatibility */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-end mb-8">
           <div>
-            <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Seeker Directory</span>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">Top Matching Roommates</h2>
+            <span className="text-xs font-bold text-secondary-green uppercase tracking-wider">
+              Seeker Directory
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-charcoal mt-1">
+              Compatible Roommates
+            </h2>
           </div>
-          <Link href="/flatmates" className="text-sm font-semibold text-indigo-600 hover:text-indigo-700 flex items-center space-x-1">
-            <span>Browse all flatmates</span>
+          <Link
+            href="/flatmates"
+            className="text-sm font-semibold text-secondary-green hover:text-forest flex items-center space-x-1"
+          >
+            <span>Browse seeker directory</span>
             <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {FEATURED_FLATMATES.map((profile, i) => (
-            <FlatmateCard key={profile.id} profile={profile as any} matchScore={i === 0 ? 98 : 91} />
-          ))}
-        </div>
+        {loadingFlatmates ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <Skeleton variant="card" height={220} />
+            <Skeleton variant="card" height={220} />
+            <Skeleton variant="card" height={220} />
+            <Skeleton variant="card" height={220} />
+          </div>
+        ) : !isAuthenticated ? (
+          <Card className="p-10 text-center max-w-xl mx-auto border-warm-200 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-pale-green/40 text-forest flex items-center justify-center mx-auto">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-charcoal">Privacy-Protected Seeker Directory</h3>
+            <p className="text-sm text-charcoal-muted leading-relaxed">
+              In accordance with our digital privacy policy, verified flatmate profiles and compatibility
+              breakdowns are accessible only to authenticated members.
+            </p>
+            <div className="pt-2 flex justify-center gap-3">
+              <Link href="/login">
+                <Button variant="primary" size="md">
+                  Sign In to Connect
+                </Button>
+              </Link>
+              <Link href="/register">
+                <Button variant="outline" size="md">
+                  Create Account
+                </Button>
+              </Link>
+            </div>
+          </Card>
+        ) : featuredFlatmates.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title="No flatmate profiles found nearby"
+            description="Broaden your search or update your preferred localities in your profile settings."
+            actionLabel="Update Profile"
+            onAction={() => (window.location.href = "/profile")}
+          />
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {featuredFlatmates.map((profile) => (
+              <FlatmateCard
+                key={profile.id || profile.user_id}
+                profile={profile}
+                isVerified={profile.is_verified}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* 5. Trust & Verification Banner */}
+      {/* 5. Trust, Verification & Safety Section */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-slate-900 rounded-3xl p-8 sm:p-12 text-white relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="space-y-4 max-w-xl">
-            <div className="inline-flex items-center space-x-2 bg-emerald-500/20 text-emerald-300 text-xs font-semibold px-3 py-1 rounded-full border border-emerald-500/30">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Verified Community</span>
+        <div className="bg-forest rounded-3xl p-8 sm:p-12 text-white relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-8 shadow-xl">
+          <div className="space-y-4 max-w-2xl">
+            <div className="inline-flex items-center space-x-2 bg-pale-green/20 text-pale-green text-xs font-semibold px-3 py-1 rounded-full border border-pale-green/30">
+              <ShieldCheck className="w-4 h-4 text-pale-green" />
+              <span>Trust & Safety Architecture</span>
             </div>
             <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Safety, privacy, and genuine human respect.
+              Genuine security built into every step.
             </h3>
-            <p className="text-slate-300 text-sm leading-relaxed">
-              Every applicant verifies their government identification, university enrollment, or corporate credentials before exchanging private contact details.
+            <p className="text-warm-100 text-sm leading-relaxed">
+              We implement government ID verification badges, strict DPDP Act exact location fuzzing, and
+              real-time advance payment scam defense in chats.
+            </p>
+            <p className="text-xs text-pale-green/80 italic">
+              * Note: Verification validates identity and listing ownership; it does not substitute personal judgment. Always inspect accommodation in person before transferring funds.
             </p>
           </div>
-          <Link href="/register">
-            <Button variant="primary" size="lg" className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg whitespace-nowrap">
-              Join the Verified Network
-            </Button>
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Link href="/safety">
+              <Button variant="secondary" size="lg" className="bg-white text-forest hover:bg-pale-green shadow-sm">
+                Safety Guidelines
+              </Button>
+            </Link>
+            <Link href="/register">
+              <Button variant="outline" size="lg" className="border-white text-white hover:bg-white/10">
+                Join Flatmate
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* 6. Frequently Asked Questions Section */}
+      <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+        <div className="text-center space-y-2">
+          <Badge variant="brand" size="md">
+            Got Questions?
+          </Badge>
+          <h2 className="text-3xl font-extrabold text-charcoal">Frequently Asked Questions</h2>
+          <p className="text-sm text-charcoal-muted">
+            Clear, transparent answers on how our platform safeguards your housing search.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          {faqs.map((faq, idx) => {
+            const isOpen = openFaq === idx;
+            return (
+              <Card key={idx} className="overflow-hidden border-warm-200">
+                <button
+                  onClick={() => setOpenFaq(isOpen ? null : idx)}
+                  className="w-full text-left p-5 flex items-center justify-between font-semibold text-charcoal hover:bg-slate-50 transition-colors"
+                  aria-expanded={isOpen}
+                >
+                  <span className="text-sm sm:text-base">{faq.q}</span>
+                  {isOpen ? (
+                    <ChevronUp className="w-5 h-5 text-forest shrink-0 ml-4" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-slate-400 shrink-0 ml-4" />
+                  )}
+                </button>
+                {isOpen && (
+                  <div className="px-5 pb-5 pt-1 text-sm text-charcoal-muted leading-relaxed border-t border-slate-100 bg-slate-50/50">
+                    {faq.a}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
         </div>
       </section>
     </div>

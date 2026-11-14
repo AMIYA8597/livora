@@ -23,7 +23,7 @@ class Property(Base):
     configuration: Mapped[str] = mapped_column(String(50), default="2BHK", nullable=False) # 1RK, 1BHK, 2RK, 2BHK, 3BHK, 4BHK_plus, studio
     
     # PostGIS Location (Approximate locality exposed publicly, exact masked)
-    location = mapped_column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
+    location = mapped_column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
     address_display: Mapped[str] = mapped_column(String(255), nullable=False) # Public locality: "HSR Layout Sector 2, Bengaluru"
     address_exact: Mapped[str] = mapped_column(String(255), nullable=False) # Private building/flat number
     city: Mapped[str] = mapped_column(String(100), nullable=False, index=True)

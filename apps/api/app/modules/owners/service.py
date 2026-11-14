@@ -1,8 +1,9 @@
 from decimal import Decimal
-from typing import List
+from typing import List, Dict, Any
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from app.modules.properties.models import Property
 from app.modules.applications.models import Application
 from app.modules.users.models import User
@@ -12,6 +13,7 @@ from app.modules.properties.models import Room, Bed
 from app.modules.owners.schemas import OwnerDashboardStats, ApplicantReviewCard, TenantRosterItem
 from app.core.exceptions import NotFoundException, ForbiddenException
 from app.modules.applications.schemas import ApplicationResponse
+from app.modules.properties.service import PropertyService
 
 class OwnerService:
     def __init__(self, db: AsyncSession):
@@ -102,3 +104,19 @@ class OwnerService:
                 is_primary_tenant=membership.is_primary_tenant,
             ))
         return roster
+
+    async def get_owner_properties(self, owner_id: UUID) -> List[Dict[str, Any]]:
+        query = (
+            select(Property)
+            .options(
+                selectinload(Property.rooms).selectinload(Room.beds),
+                selectinload(Property.amenities),
+            )
+            .where(Property.owner_id == owner_id)
+            .order_by(Property.created_at.desc())
+        )
+        result = await self.db.execute(query)
+        props = result.scalars().all()
+        prop_service = PropertyService(self.db)
+        return [prop_service._format_property_response(p, viewer_id=owner_id, is_admin=False) for p in props]
+

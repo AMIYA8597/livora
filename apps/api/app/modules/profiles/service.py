@@ -117,6 +117,8 @@ class ProfileService:
         await self.db.refresh(profile)
         return profile
 
+    update_profile = update
+
     async def submit_lifestyle_quiz(self, user_id: UUID, quiz: LifestyleTraitsSchema) -> Profile:
         profile = await self.get_by_user_id(user_id)
         if not profile:
@@ -191,4 +193,4 @@ class ProfileService:
             "created_at": profile.created_at or datetime.now(timezone.utc),
             "updated_at": profile.updated_at or datetime.now(timezone.utc),
         }
-        return ProfileResponse(**response_dict)
+        return ProfileResponse.model_validate(response_dict)

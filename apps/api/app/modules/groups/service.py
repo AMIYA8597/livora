@@ -58,7 +58,10 @@ class GroupService:
         )
         self.db.add(leader)
         await self.db.commit()
-        return await self.get_by_id(group.id)
+        created = await self.get_by_id(group.id)
+        if not created:
+            raise NotFoundException("Group not found after creation")
+        return created
 
     async def add_member(
         self,

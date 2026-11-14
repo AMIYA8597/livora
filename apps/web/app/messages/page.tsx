@@ -1,89 +1,278 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { ConversationDTO, MessageDTO } from "@flatmate/contracts";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  ConversationDTO, MessageDTO, AttachmentDTO,
+  ConversationParticipantDTO
+} from "@flatmate/contracts";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/hooks/useSocket";
-import { Card, Avatar, Input, Button } from "@flatmate/ui";
-import { Send, MessageSquare, Check, CheckCheck } from "lucide-react";
+import { Card, Avatar, Button } from "@flatmate/ui";
+import { ChatWindow } from "@/features/messaging/components/ChatWindow";
+import {
+  MessageSquare, ShieldCheck, Search, Users, Home, UserCheck,
+  Archive, BellOff, MoreVertical, X, AlertCircle, RefreshCw
+} from "lucide-react";
+
+type FilterTab = "all" | "direct" | "property_inquiry" | "group" | "archived";
 
 export default function MessagesPage() {
   const { user, isAuthenticated } = useAuth();
   const [conversations, setConversations] = useState<ConversationDTO[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageDTO[]>([]);
-  const [inputContent, setInputContent] = useState("");
+  const [activeTab, setActiveTab] = useState<FilterTab>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [activeConvDetails, setActiveConvDetails] = useState<any>(null);
 
-  // Realtime WebSocket integration
-  const { isConnected, sendEvent } = useSocket((newMsg: MessageDTO) => {
-    if (newMsg.conversation_id === activeConvId) {
-      setMessages((prev) => [...prev, newMsg]);
-    }
-    // Update last message in thread list
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === newMsg.conversation_id ? { ...c, last_message: newMsg, last_message_at: newMsg.sent_at } : c
-      )
-    );
+  // Real-time WebSocket hook with full callbacks
+  const { isConnected, sendEvent, startTyping, stopTyping, markRead } = useSocket({
+    onMessageCreated: (newMsg: MessageDTO) => {
+      if (newMsg.conversation_id === activeConvId) {
+        setMessages((prev) => {
+          // Deduplicate by id or idempotency_key
+          const exists = prev.some(
+            (m) => m.id === newMsg.id || (m.idempotency_key && m.idempotency_key === newMsg.idempotency_key)
+          );
+          if (exists) {
+            return prev.map((m) =>
+              (m.id === newMsg.id || (m.idempotency_key && m.idempotency_key === newMsg.idempotency_key))
+                ? { ...newMsg, status: "sent" }
+                : m
+            );
+          }
+          return [...prev, { ...newMsg, status: "sent" }];
+        });
+        // Mark as read immediately if current active conversation
+        markRead(activeConvId, newMsg.id);
+      }
+
+      // Update conversation in sidebar list
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === newMsg.conversation_id
+            ? {
+                ...c,
+                last_message: newMsg,
+                last_message_at: newMsg.sent_at,
+                unread_count: c.id === activeConvId ? 0 : (c.unread_count || 0) + 1,
+              }
+            : c
+        )
+      );
+    },
+    onMessageUpdated: (data) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.id
+            ? { ...m, content: data.content, is_edited: data.is_edited, edited_at: data.edited_at }
+            : m
+        )
+      );
+    },
+    onMessageDeleted: (data) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.id
+            ? { ...m, content: "This message was deleted.", is_deleted: true, deleted_at: data.deleted_at }
+            : m
+        )
+      );
+    },
+    onMessageRead: (data) => {
+      // If another user read messages, update status of my sent messages
+      if (data.conversation_id === activeConvId && data.user_id !== user?.id) {
+        setMessages((prev) =>
+          prev.map((m) => (m.sender_id === user?.id ? { ...m, status: "read" } : m))
+        );
+      }
+    },
+    onTypingStarted: (data) => {
+      if (data.conversation_id === activeConvId && data.user_id !== user?.id) {
+        setTypingUsers((prev) => (prev.includes("Participant") ? prev : [...prev, "Participant"]));
+      }
+    },
+    onTypingStopped: (data) => {
+      if (data.conversation_id === activeConvId) {
+        setTypingUsers([]);
+      }
+    },
   });
 
   // 1. Fetch conversations
-  useEffect(() => {
-    async function loadConversations() {
-      if (!isAuthenticated) return;
-      try {
-        setIsLoading(true);
-        const data = await apiClient<ConversationDTO[]>("/messaging/conversations");
-        setConversations(data);
-        if (data.length > 0 && !activeConvId) {
-          setActiveConvId(data[0].id);
-        }
-      } catch (err) {
-        console.error("Failed to load conversations:", err);
-      } finally {
-        setIsLoading(false);
+  const loadConversations = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      setIsLoading(true);
+      const data = await apiClient<ConversationDTO[]>("/messaging/conversations");
+      setConversations(data);
+      if (data.length > 0 && !activeConvId) {
+        setActiveConvId(data[0].id);
       }
+    } catch (err) {
+      console.error("Failed to load conversations:", err);
+    } finally {
+      setIsLoading(false);
     }
-    loadConversations();
   }, [isAuthenticated, activeConvId]);
 
-  // 2. Fetch messages for active conversation
   useEffect(() => {
-    async function loadMessages() {
+    loadConversations();
+  }, [loadConversations]);
+
+  // 2. Fetch messages & details for active conversation
+  useEffect(() => {
+    async function loadActiveConversation() {
       if (!activeConvId) return;
       try {
-        const data = await apiClient<MessageDTO[]>(`/messaging/conversations/${activeConvId}/messages`);
-        setMessages(data);
+        const [msgs, details] = await Promise.all([
+          apiClient<MessageDTO[]>(`/messaging/conversations/${activeConvId}/messages`),
+          apiClient<any>(`/messaging/conversations/${activeConvId}`),
+        ]);
+        setMessages(msgs);
+        setActiveConvDetails(details);
+        // Reset unread count in sidebar
+        setConversations((prev) =>
+          prev.map((c) => (c.id === activeConvId ? { ...c, unread_count: 0 } : c))
+        );
       } catch (err) {
-        console.error("Failed to load messages:", err);
+        console.error("Failed to load active conversation messages:", err);
       }
     }
-    loadMessages();
+    loadActiveConversation();
   }, [activeConvId]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputContent.trim() || !activeConvId) return;
+  // Handle optimistic message sending
+  const handleSendMessage = async (text: string, replyToId?: string, attachmentIds?: string[]) => {
+    if (!activeConvId) return;
 
-    const text = inputContent.trim();
-    setInputContent("");
+    const tempId = `temp-${Date.now()}`;
+    const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : `key-${Date.now()}-${Math.random()}`;
+
+    // Optimistic message entry
+    const optimisticMsg: MessageDTO = {
+      id: tempId,
+      conversation_id: activeConvId,
+      sender_id: user?.id || "",
+      content: text,
+      message_type: "text",
+      idempotency_key: idempotencyKey,
+      reply_to_message_id: replyToId,
+      is_edited: false,
+      is_deleted: false,
+      is_read: false,
+      sent_at: new Date().toISOString(),
+      status: "sending",
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
 
     try {
-      const newMsg = await apiClient<MessageDTO>("/messaging/messages", {
+      const persisted = await apiClient<MessageDTO>("/messaging/messages", {
         method: "POST",
         body: JSON.stringify({
           conversation_id: activeConvId,
           content: text,
           message_type: "text",
+          idempotency_key: idempotencyKey,
+          reply_to_message_id: replyToId,
+          attachment_ids: attachmentIds || [],
         }),
       });
-      setMessages((prev) => [...prev, newMsg]);
-    } catch (err: any) {
-      console.error("Send message error:", err);
+
+      // Reconcile optimistic entry
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...persisted, status: "sent" } : m))
+      );
+    } catch (err) {
+      console.error("Failed to persist message:", err);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, status: "failed" } : m))
+      );
     }
   };
+
+  // Handle message edit
+  const handleEditMessage = async (messageId: string, newContent: string) => {
+    try {
+      await apiClient(`/messaging/messages/${messageId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content: newContent }),
+      });
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, content: newContent, is_edited: true } : m))
+      );
+    } catch (err) {
+      console.error("Failed to edit message:", err);
+    }
+  };
+
+  // Handle message soft deletion
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      await apiClient(`/messaging/messages/${messageId}`, {
+        method: "DELETE",
+      });
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, content: "This message was deleted.", is_deleted: true } : m))
+      );
+    } catch (err) {
+      console.error("Failed to delete message:", err);
+    }
+  };
+
+  // Handle attachment file upload
+  const handleUploadAttachment = async (file: File): Promise<AttachmentDTO> => {
+    if (!activeConvId) throw new Error("No active conversation");
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const token = localStorage.getItem("flatmate_access_token") || localStorage.getItem("token") || "";
+    const res = await fetch(`/api/v1/messaging/conversations/${activeConvId}/attachments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || "Attachment upload failed");
+    }
+    return await res.json();
+  };
+
+  // Filtered conversations
+  const filteredConversations = useMemo(() => {
+    return conversations.filter((c) => {
+      // Tab filter
+      if (activeTab === "archived") {
+        if (!c.preferences?.is_archived) return false;
+      } else {
+        if (c.preferences?.is_archived) return false;
+        if (activeTab !== "all" && c.type !== activeTab) return false;
+      }
+
+      // Search query filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesTitle = c.title && c.title.toLowerCase().includes(q);
+        const matchesMsg = c.last_message?.content?.toLowerCase().includes(q);
+        if (!matchesTitle && !matchesMsg) return false;
+      }
+      return true;
+    });
+  }, [conversations, activeTab, searchQuery]);
+
+  // Current active conversation
+  const currentConv = useMemo(() => {
+    return conversations.find((c) => c.id === activeConvId);
+  }, [conversations, activeConvId]);
 
   if (!isAuthenticated) {
     return (
@@ -95,47 +284,133 @@ export default function MessagesPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 h-[calc(100vh-140px)]">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-[calc(100vh-120px)] flex flex-col">
       <Card className="h-full border-slate-200/80 flex overflow-hidden shadow-md">
-        {/* Conversations Sidebar */}
-        <div className="w-80 border-r border-slate-200/80 bg-slate-50/50 flex flex-col">
-          <div className="p-4 border-b border-slate-200/80">
-            <h2 className="font-bold text-slate-900 text-lg">Direct Messages</h2>
-            <div className="flex items-center space-x-1.5 mt-1 text-xs text-slate-500">
-              <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-amber-500"}`} />
-              <span>{isConnected ? "Realtime connected" : "Connecting..."}</span>
+        {/* Sidebar: Conversations List */}
+        <div className="w-full md:w-80 lg:w-96 border-r border-slate-200 bg-slate-50/50 flex flex-col">
+          {/* Header & Status */}
+          <div className="p-4 border-b border-slate-200">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-slate-900 text-lg">Messages</h2>
+              <div className="flex items-center space-x-1.5 text-xs text-slate-500">
+                <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                <span>{isConnected ? "Connected" : "Connecting..."}</span>
+              </div>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative mt-3">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search conversations..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex items-center space-x-1 mt-3 overflow-x-auto pb-1 text-xs">
+              <button
+                onClick={() => setActiveTab("all")}
+                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                  activeTab === "all" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => setActiveTab("direct")}
+                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                  activeTab === "direct" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
+                }`}
+              >
+                Direct
+              </button>
+              <button
+                onClick={() => setActiveTab("property_inquiry")}
+                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                  activeTab === "property_inquiry" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
+                }`}
+              >
+                Properties
+              </button>
+              <button
+                onClick={() => setActiveTab("group")}
+                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                  activeTab === "group" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
+                }`}
+              >
+                Groups
+              </button>
+              <button
+                onClick={() => setActiveTab("archived")}
+                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                  activeTab === "archived" ? "bg-forest text-white" : "text-charcoal-muted hover:bg-slate-200/60"
+                }`}
+              >
+                Archived
+              </button>
             </div>
           </div>
 
+          {/* Conversations Scrollable List */}
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            {conversations.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-400">
-                No active conversations yet. Visit a listing or flatmate to start chatting.
+            {isLoading ? (
+              <div className="p-8 text-center text-xs text-charcoal-muted flex flex-col items-center">
+                <RefreshCw className="w-5 h-5 animate-spin mb-2 text-forest" />
+                <span>Loading conversations...</span>
+              </div>
+            ) : filteredConversations.length === 0 ? (
+              <div className="p-8 text-center text-xs text-charcoal-muted">
+                No conversations found. Explore verified flatmates or property listings to begin chatting!
               </div>
             ) : (
-              conversations.map((c) => {
+              filteredConversations.map((c) => {
                 const isActive = c.id === activeConvId;
+                const isGroup = c.type === "group";
+                const isProp = c.type === "property_inquiry";
+                const title = c.title || (isGroup ? "Flatmate Group" : isProp ? "Property Enquiry" : "Flatmate Seeker");
+                const hasUnread = (c.unread_count || 0) > 0;
+
                 return (
                   <button
                     key={c.id}
                     onClick={() => setActiveConvId(c.id)}
-                    className={`w-full p-4 text-left flex items-start space-x-3 transition-colors ${
-                      isActive ? "bg-white border-l-4 border-indigo-600 shadow-2xs" : "hover:bg-slate-100/60"
+                    className={`w-full p-3.5 text-left flex items-start space-x-3 transition-colors ${
+                      isActive ? "bg-white border-l-4 border-forest shadow-2xs" : "hover:bg-slate-100/60"
                     }`}
                   >
-                    <Avatar alt="Participant" size="md" />
+                    <div className="relative">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs ${
+                        isGroup ? "bg-purple-100 text-purple-700" : isProp ? "bg-forest-pale text-forest" : "bg-forest-pale text-forest"
+                      }`}>
+                        {isGroup ? <Users className="w-4 h-4" /> : isProp ? <Home className="w-4 h-4" /> : title.slice(0, 2).toUpperCase()}
+                      </div>
+                      {/* Presence badge */}
+                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
+                    </div>
+
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-baseline mb-0.5">
-                        <span className="font-semibold text-xs text-slate-900 truncate">
-                          {c.type === "direct" ? "Flatmate Seeker" : "Group Channel"}
+                        <span className={`font-semibold text-xs truncate ${hasUnread ? "text-charcoal font-bold" : "text-charcoal"}`}>
+                          {title}
                         </span>
-                        <span className="text-[10px] text-slate-400">
+                        <span className="text-[10px] text-charcoal-muted">
                           {c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 truncate">
-                        {c.last_message ? c.last_message.content : "Start a conversation..."}
-                      </p>
+                      <div className="flex items-center justify-between">
+                        <p className={`text-xs truncate ${hasUnread ? "font-semibold text-charcoal" : "text-charcoal-muted"}`}>
+                          {c.last_message ? c.last_message.content : "No messages yet"}
+                        </p>
+                        {hasUnread && (
+                          <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold bg-forest text-white rounded-full">
+                            {c.unread_count}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 );
@@ -144,71 +419,119 @@ export default function MessagesPage() {
           </div>
         </div>
 
-        {/* Active Conversation Chat Window */}
-        <div className="flex-1 flex flex-col bg-white">
-          {activeConvId ? (
-            <>
-              {/* Chat Header */}
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Avatar alt="Active Chat" size="sm" isVerified={true} />
-                  <div>
-                    <h3 className="font-bold text-slate-900 text-sm">Active Conversation</h3>
-                    <span className="text-[11px] text-emerald-600 font-medium">Online</span>
-                  </div>
-                </div>
+        {/* Chat Area & Optional Info Drawer */}
+        <div className="flex-1 flex bg-white overflow-hidden relative">
+          {activeConvId && currentConv ? (
+            <div className="flex-1 flex flex-col h-full">
+              <ChatWindow
+                conversationId={activeConvId}
+                recipientName={currentConv.title || (currentConv.type === "group" ? "Flatmate Group" : "Flatmate Seeker / Host")}
+                recipientSubtitle={
+                  currentConv.type === "property_inquiry" ? "Property Inquiry" : currentConv.type === "group" ? "Group Syndicate" : "Direct Message"
+                }
+                isRecipientVerified={true}
+                isGroup={currentConv.type === "group"}
+                participantCount={Array.isArray(currentConv.participants) ? currentConv.participants.length : 2}
+                messages={messages.map((m) => ({
+                  id: m.id,
+                  senderId: m.sender_id,
+                  senderName: m.sender_id === user?.id ? "You" : "Participant",
+                  content: m.content,
+                  createdAt: new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                  isSelf: m.sender_id === user?.id,
+                  status: m.status || (m.is_read ? "read" : "sent"),
+                  isEdited: m.is_edited,
+                  isDeleted: m.is_deleted,
+                  replyTo: m.reply_to ? {
+                    id: m.reply_to.id,
+                    senderName: m.reply_to.sender_id === user?.id ? "You" : "Participant",
+                    content: m.reply_to.content,
+                  } : null,
+                  attachments: m.attachments,
+                }))}
+                typingUsers={typingUsers}
+                currentUserId={user?.id}
+                onSendMessage={handleSendMessage}
+                onEditMessage={handleEditMessage}
+                onDeleteMessage={handleDeleteMessage}
+                onUploadAttachment={handleUploadAttachment}
+                onTyping={(isTyping) => {
+                  if (isTyping) startTyping(activeConvId);
+                  else stopTyping(activeConvId);
+                }}
+                onOpenDetails={() => setIsDetailsOpen(!isDetailsOpen)}
+              />
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
+              <MessageSquare className="w-12 h-12 text-slate-300 mb-3" />
+              <p className="text-sm font-medium text-slate-600">Select a conversation to start chatting</p>
+              <p className="text-xs text-slate-400 mt-1">Real-time messages are durably stored in PostgreSQL.</p>
+            </div>
+          )}
+
+          {/* Details / Participant Drawer */}
+          {isDetailsOpen && activeConvDetails && (
+            <div className="w-72 border-l border-slate-200 bg-slate-50/70 p-4 flex flex-col overflow-y-auto">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 className="font-bold text-sm text-slate-900">Details</h3>
+                <button onClick={() => setIsDetailsOpen(false)} className="text-slate-400 hover:text-slate-700">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              {/* Messages Stream */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {messages.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                    Say hello and introduce yourself!
-                  </div>
-                ) : (
-                  messages.map((m) => {
-                    const isMe = m.sender_id === user?.id;
-                    return (
-                      <div
-                        key={m.id}
-                        className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
-                      >
-                        <div
-                          className={`max-w-md px-4 py-2.5 rounded-2xl text-xs leading-relaxed shadow-2xs ${
-                            isMe
-                              ? "bg-indigo-600 text-white rounded-br-none"
-                              : "bg-slate-100 text-slate-800 rounded-bl-none"
-                          }`}
-                        >
-                          {m.content}
-                        </div>
-                        <span className="text-[10px] text-slate-400 mt-1 px-1 flex items-center space-x-1">
-                          <span>{new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                          {isMe && <CheckCheck className="w-3 h-3 text-indigo-500" />}
-                        </span>
-                      </div>
-                    );
-                  })
+              {/* Context Summary */}
+              <div className="py-4 border-b border-slate-200">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Type</span>
+                <p className="text-xs font-semibold text-slate-800 capitalize mt-0.5">{activeConvDetails.type?.replace("_", " ")}</p>
+                {activeConvDetails.title && (
+                  <>
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mt-3 block">Title</span>
+                    <p className="text-xs text-slate-700 mt-0.5">{activeConvDetails.title}</p>
+                  </>
                 )}
               </div>
 
-              {/* Chat Input Bar */}
-              <form onSubmit={handleSendMessage} className="p-3 border-t border-slate-100 flex items-center gap-2">
-                <input
-                  type="text"
-                  value={inputContent}
-                  onChange={(e) => setInputContent(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white"
-                />
-                <Button type="submit" variant="primary" size="sm" className="px-4 py-2.5">
-                  <Send className="w-4 h-4" />
+              {/* Participants */}
+              <div className="py-4 flex-1">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 block">
+                  Participants ({activeConvDetails.participant_details?.length || 0})
+                </span>
+                <div className="space-y-2">
+                  {activeConvDetails.participant_details?.map((p: any) => (
+                    <div key={p.id} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200">
+                      <div className="flex items-center space-x-2 truncate">
+                        <Avatar alt={p.user?.full_name || "User"} size="sm" />
+                        <span className="text-xs font-medium text-slate-800 truncate">
+                          {p.user_id === user?.id ? "You" : (p.user?.full_name || "Participant")}
+                        </span>
+                      </div>
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 bg-slate-100 rounded text-slate-600">
+                        {p.role}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Preferences / Actions */}
+              <div className="pt-4 border-t border-slate-200 space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start text-xs text-slate-700"
+                  onClick={async () => {
+                    await apiClient(`/messaging/conversations/${activeConvId}/preferences`, {
+                      method: "PATCH",
+                      body: JSON.stringify({ is_archived: !activeConvDetails.preferences?.is_archived }),
+                    });
+                    loadConversations();
+                  }}
+                >
+                  <Archive className="w-3.5 h-3.5 mr-2" />
+                  {activeConvDetails.preferences?.is_archived ? "Unarchive Conversation" : "Archive Conversation"}
                 </Button>
-              </form>
-            </>
-          ) : (
-            <div className="h-full flex items-center justify-center text-slate-400 text-xs">
-              Select a conversation to start chatting.
+              </div>
             </div>
           )}
         </div>

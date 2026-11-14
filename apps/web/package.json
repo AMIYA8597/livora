@@ -7,11 +7,13 @@
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "next lint",
-    "test": "tsc --noEmit"
+    "test": "tsc --noEmit && node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "@flatmate/contracts": "workspace:*",
     "@flatmate/ui": "workspace:*",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.119.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.383.0",
     "next": "14.2.4",

@@ -1,4 +1,4 @@
-export type UserRole = 'seeker' | 'owner' | 'admin';
+export type UserRole = 'seeker' | 'tenant' | 'owner' | 'pg_operator' | 'broker' | 'admin' | 'super_admin';
 
 export interface UserDTO {
   id: string;
@@ -6,6 +6,7 @@ export interface UserDTO {
   full_name: string;
   phone_number?: string | null;
   role: UserRole;
+  roles?: string[];
   is_active: boolean;
   is_verified: boolean;
   created_at: string;
@@ -21,6 +22,7 @@ export interface AuthTokens {
 export interface AuthResponse {
   user: UserDTO;
   tokens: AuthTokens;
+  roles?: string[];
 }
 
 export interface TokenResponse {
@@ -29,6 +31,7 @@ export interface TokenResponse {
   token_type: string;
   expires_in: number;
   user: UserDTO;
+  roles?: string[];
 }
 
 export interface RegisterRequest {
@@ -36,10 +39,24 @@ export interface RegisterRequest {
   password: string;
   full_name: string;
   role?: UserRole;
+  additional_roles?: string[];
   phone_number?: string;
 }
 
 export interface LoginRequest {
   email: string;
   password: string;
+}
+
+export interface RefreshTokenRequest {
+  refresh_token: string;
+}
+
+export interface SendOtpRequest {
+  phone_number: string;
+}
+
+export interface VerifyOtpRequest {
+  phone_number: string;
+  otp_code: string;
 }

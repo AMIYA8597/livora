@@ -24,7 +24,7 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Multi-Role & Profile Relationships
-    roles: Mapped[List["UserRole"]] = relationship("UserRole", back_populates="user", cascade="all, delete-orphan")
+    roles: Mapped[List["UserRole"]] = relationship("UserRole", back_populates="user", cascade="all, delete-orphan", lazy="selectin")
     privacy_settings: Mapped[Optional["UserPrivacySetting"]] = relationship("UserPrivacySetting", back_populates="user", uselist=False, cascade="all, delete-orphan")
     profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 

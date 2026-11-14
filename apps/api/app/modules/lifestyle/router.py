@@ -79,8 +79,22 @@ async def get_user_lifestyle(
         privacy_query = select(UserPrivacySetting).where(UserPrivacySetting.user_id == user_id)
         privacy_res = await db.execute(privacy_query)
         privacy = privacy_res.scalar_one_or_none()
-        if privacy and privacy.profile_visibility == "private":
-            raise ForbiddenException("User profile is private")
+        if privacy:
+            if privacy.profile_visibility == "private":
+                raise ForbiddenException("User profile is private")
+            elif privacy.profile_visibility == "matched_only":
+                from app.modules.matching.models import MutualMatch
+                from sqlalchemy import or_, and_
+                match_query = select(MutualMatch).where(
+                    or_(
+                        and_(MutualMatch.user_one_id == current_user.id, MutualMatch.user_two_id == user_id),
+                        and_(MutualMatch.user_one_id == user_id, MutualMatch.user_two_id == current_user.id)
+                    ),
+                    MutualMatch.status == "matched"
+                )
+                match_res = await db.execute(match_query)
+                if not match_res.scalar_one_or_none():
+                    raise ForbiddenException("This profile is only visible to mutual matches")
 
     service = LifestyleService(db)
     profile = await service.get_by_user_id(user_id)

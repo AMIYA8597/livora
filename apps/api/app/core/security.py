@@ -72,6 +72,18 @@ def create_refresh_token(subject: str, roles: List[str] | str, expires_delta: Op
     secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
     return jwt.encode(payload, secret, algorithm=settings.ALGORITHM)
 
+def create_password_reset_token(subject: str, email: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    payload: Dict[str, Any] = {
+        "sub": str(subject),
+        "email": email,
+        "type": "password_reset",
+        "exp": expire,
+        "iat": datetime.now(timezone.utc),
+    }
+    secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
+    return jwt.encode(payload, secret, algorithm=settings.ALGORITHM)
+
 def decode_token(token: str) -> Dict[str, Any]:
     """
     Decodes and validates JWT signature, expiry, and structure.

@@ -6,7 +6,7 @@ from app.modules.users.models import User
 from app.modules.users.schemas import UserResponse
 from app.modules.auth.schemas import (
     RegisterRequest, LoginRequest, TokenResponse, RefreshTokenRequest,
-    SendOtpRequest, VerifyOtpRequest
+    SendOtpRequest, VerifyOtpRequest, ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.modules.auth.service import AuthService
 
@@ -26,6 +26,16 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
 async def refresh_tokens(data: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)
     return await service.refresh_token(data.refresh_token)
+
+@router.post("/forgot-password")
+async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    service = AuthService(db)
+    return await service.forgot_password(data)
+
+@router.post("/reset-password")
+async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    service = AuthService(db)
+    return await service.reset_password(data)
 
 @router.post("/otp/send")
 async def send_mobile_otp(data: SendOtpRequest, db: AsyncSession = Depends(get_db)):

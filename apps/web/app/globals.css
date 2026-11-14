@@ -4,14 +4,20 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
+    --background: 45 25% 97%;
+    --foreground: 160 8% 16%;
   }
 
   body {
-    @apply bg-slate-50 text-slate-900 antialiased selection:bg-indigo-500 selection:text-white;
+    @apply bg-[#FDFBF7] text-charcoal antialiased selection:bg-brand-500 selection:text-white;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
+}
+
+/* Accessible focus ring style */
+:focus-visible {
+  outline: 2px solid #287A5A;
+  outline-offset: 2px;
 }
 
 /* Custom Scrollbars */

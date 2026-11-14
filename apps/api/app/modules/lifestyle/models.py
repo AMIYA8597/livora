@@ -5,10 +5,9 @@ Normalized representation of 10-dimension compatibility attributes and dealbreak
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text, Float
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from pgvector.sqlalchemy import Vector
 from app.core.database import Base
 
 class LifestyleProfile(Base):
@@ -53,7 +52,7 @@ class LifestyleProfile(Base):
     pet_preference: Mapped[str] = mapped_column(String(32), default="cats_and_dogs_ok", nullable=False) # no_pets, loves_pets, cats_ok, dogs_ok, allergic
 
     # 10. Vector Representation for ANN Similarity Search
-    preference_vector: Mapped[list] = mapped_column(Vector(64), nullable=False)
+    preference_vector: Mapped[list] = mapped_column(ARRAY(Float), default=list, nullable=False)
     custom_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

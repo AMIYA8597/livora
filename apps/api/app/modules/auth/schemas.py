@@ -31,3 +31,10 @@ class SendOtpRequest(BaseModel):
 class VerifyOtpRequest(BaseModel):
     phone_number: str
     otp_code: str = Field(min_length=4, max_length=6)
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, description="New password must be at least 8 characters")

@@ -61,8 +61,12 @@ class PropertyService:
                 })
 
         address_exact_val = prop.address_exact
+        out_lat = lat
+        out_lng = lng
         if not is_admin and (viewer_id is None or viewer_id != prop.owner_id):
             address_exact_val = "[Exact address protected - revealed upon confirmed visit]"
+            from app.infrastructure.geospatial import fuzz_coordinates
+            out_lat, out_lng = fuzz_coordinates(lat, lng, precision_decimals=2)
 
         return {
             "id": prop.id,
@@ -71,8 +75,8 @@ class PropertyService:
             "description": prop.description,
             "property_category": prop.property_category,
             "configuration": prop.configuration,
-            "latitude": lat,
-            "longitude": lng,
+            "latitude": out_lat,
+            "longitude": out_lng,
             "address_display": prop.address_display,
             "address_exact": address_exact_val,
             "city": prop.city,

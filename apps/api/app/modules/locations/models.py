@@ -39,7 +39,7 @@ class City(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True) # Bengaluru, Mumbai, Delhi, Hyderabad
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     tier: Mapped[int] = mapped_column(Integer, default=1, nullable=False) # Tier 1, Tier 2
-    center_location = mapped_column(Geometry(geometry_type="POINT", srid=4326), nullable=True)
+    center_location = mapped_column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=True)
 
     state: Mapped["State"] = relationship("State", back_populates="cities")
     localities: Mapped[List["Locality"]] = relationship("Locality", back_populates="city", cascade="all, delete-orphan")
@@ -51,7 +51,7 @@ class Locality(Base):
     city_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("cities.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, index=True) # e.g. Koramangala, Indiranagar, HSR Layout, Whitefield
     postal_code: Mapped[str] = mapped_column(String(12), nullable=False, index=True) # Pin code
-    center_location = mapped_column(Geometry(geometry_type="POINT", srid=4326), nullable=False)
+    center_location = mapped_column(Geometry(geometry_type="POINT", srid=4326, spatial_index=False), nullable=False)
     boundary_geojson: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     city: Mapped["City"] = relationship("City", back_populates="localities")

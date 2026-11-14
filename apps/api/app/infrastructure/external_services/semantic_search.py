@@ -71,7 +71,7 @@ class KeywordFallbackSearchProvider(BaseSemanticSearchProvider):
         if not tokens:
             return vec
         for token in tokens:
-            h = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
+            h = int(hashlib.md5(token.encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
             idx = h % dims
             vec[idx] += 1.0
 

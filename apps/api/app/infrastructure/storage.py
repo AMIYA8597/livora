@@ -25,14 +25,24 @@ class LocalStorageProvider(StorageProvider):
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def upload_file(self, bucket: str, destination_path: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-        bucket_dir = self.base_dir / bucket
+        if ".." in destination_path or destination_path.startswith("/") or "\\" in destination_path:
+            raise ValueError("Invalid destination path: traversal detected")
+        bucket_dir = (self.base_dir / bucket).resolve()
         bucket_dir.mkdir(parents=True, exist_ok=True)
-        file_path = bucket_dir / destination_path
+        file_path = (bucket_dir / destination_path).resolve()
+        if not str(file_path).startswith(str(bucket_dir)):
+            raise ValueError("Path traversal attempt detected")
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(data)
         return f"/uploads/{bucket}/{destination_path}"
 
     def get_signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str:
+        if ".." in path or path.startswith("/") or "\\" in path:
+            raise ValueError("Invalid path: traversal detected")
+        bucket_dir = (self.base_dir / bucket).resolve()
+        file_path = (bucket_dir / path).resolve()
+        if not str(file_path).startswith(str(bucket_dir)):
+            raise ValueError("Path traversal attempt detected")
         return f"/uploads/{bucket}/{path}?expires={expires_in}"
 
 class SupabaseStorageProvider(StorageProvider):

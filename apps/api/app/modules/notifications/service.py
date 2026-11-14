@@ -66,7 +66,36 @@ class NotificationService:
         self.db.add(notif)
         await self.db.commit()
         await self.db.refresh(notif)
+
+        # Real-time WebSocket delivery of in-app notification
+        try:
+            from app.modules.messaging.websocket import manager
+            await manager.broadcast_to_users(
+                event_type="notification.created",
+                data={
+                    "id": str(notif.id),
+                    "user_id": str(notif.user_id),
+                    "title": notif.title,
+                    "body": notif.body,
+                    "notification_type": notif.notification_type,
+                    "reference_id": str(notif.reference_id) if notif.reference_id else None,
+                    "created_at": notif.created_at.isoformat(),
+                },
+                user_ids=[user_id]
+            )
+        except Exception:
+            pass
+
         return notif
+
+    async def get_unread_count(self, user_id: UUID) -> int:
+        from sqlalchemy import func
+        count_q = select(func.count(Notification.id)).where(
+            Notification.user_id == user_id,
+            Notification.is_read.is_(False)
+        )
+        res = await self.db.execute(count_q)
+        return res.scalar() or 0
 
     async def mark_read(self, notification_id: UUID, user_id: UUID) -> Notification:
         query = select(Notification).where(

@@ -8,6 +8,7 @@ from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.core.exceptions import UnauthorizedException, ForbiddenException
@@ -31,7 +32,7 @@ async def get_current_user(
     except (ValueError, TypeError):
         raise UnauthorizedException("Invalid user identity claim in token")
 
-    query = select(User).where(User.id == user_uuid)
+    query = select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
 
@@ -50,8 +51,8 @@ def require_roles(allowed_roles: List[str]):
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
         # User roles may be stored on the user model or extracted from user_roles
         user_roles = [current_user.role]
-        if hasattr(current_user, "roles") and current_user.roles:
-            user_roles.extend([r.role for r in current_user.roles])
+        if "roles" in current_user.__dict__ and current_user.__dict__["roles"]:
+            user_roles.extend([r.role for r in current_user.__dict__["roles"]])
 
         # Super administrators bypass operational role restrictions
         if "super_admin" in user_roles or "admin" in user_roles:

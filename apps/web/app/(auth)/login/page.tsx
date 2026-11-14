@@ -34,7 +34,8 @@ export default function LoginPage() {
           token_type: res.token_type,
           expires_in: res.expires_in,
         },
-        res.user
+        res.user,
+        res.roles
       );
       router.push("/dashboard");
     } catch (err: any) {
@@ -81,6 +82,12 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
           />
+
+          <div className="flex justify-end">
+            <Link href="/forgot-password" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+              Forgot password?
+            </Link>
+          </div>
 
           <Button type="submit" variant="primary" className="w-full mt-2" isLoading={isLoading}>
             Sign In

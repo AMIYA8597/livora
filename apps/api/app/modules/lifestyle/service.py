@@ -113,6 +113,8 @@ class LifestyleService:
         await self.db.refresh(profile)
         return profile
 
+    create_or_update_lifestyle = upsert_lifestyle
+
     async def get_dealbreakers(self, user_id: UUID) -> List[UserDealbreaker]:
         query = select(UserDealbreaker).where(UserDealbreaker.user_id == user_id).order_by(UserDealbreaker.created_at)
         result = await self.db.execute(query)

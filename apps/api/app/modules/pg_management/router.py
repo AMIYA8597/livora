@@ -23,7 +23,7 @@ router = APIRouter(prefix="/pg", tags=["PG Management"])
 @router.post("/buildings", response_model=PGBuildingResponse, status_code=status.HTTP_201_CREATED)
 async def create_pg_building(
     data: PGBuildingCreate,
-    current_user: User = Depends(require_roles(["pg_operator", "admin", "super_admin"])),
+    current_user: User = Depends(require_roles(["pg_operator", "owner", "admin", "super_admin"])),
     db: AsyncSession = Depends(get_db),
 ):
     service = PGService(db)

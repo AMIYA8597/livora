@@ -58,7 +58,10 @@ class PGService:
                 self.db.add(floor)
 
         await self.db.commit()
-        return await self.get_building(building.id)
+        created = await self.get_building(building.id)
+        if not created:
+            raise NotFoundException("PG Building not found after creation")
+        return created
 
     async def list_buildings(
         self,

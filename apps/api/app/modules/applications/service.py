@@ -8,12 +8,13 @@ from app.modules.properties.models import Property
 from app.modules.applications.schemas import ApplicationCreate, ApplicationStatusUpdate
 from app.core.exceptions import NotFoundException, ForbiddenException, ConflictException, BadRequestException
 
-ACTIVE_APPLICATION_STATUSES = {"submitted", "under_review", "reviewing", "accepted"}
+ACTIVE_APPLICATION_STATUSES = {"submitted", "under_review", "reviewing", "accepted", "approved"}
 VALID_STATUS_TRANSITIONS = {
-    "submitted": {"under_review", "reviewing", "accepted", "rejected", "withdrawn"},
-    "reviewing": {"under_review", "accepted", "rejected", "withdrawn"},
-    "under_review": {"accepted", "rejected", "withdrawn"},
+    "submitted": {"under_review", "reviewing", "accepted", "approved", "rejected", "withdrawn"},
+    "reviewing": {"under_review", "accepted", "approved", "rejected", "withdrawn"},
+    "under_review": {"accepted", "approved", "rejected", "withdrawn"},
     "accepted": {"withdrawn"},
+    "approved": {"withdrawn"},
     "rejected": set(),
     "withdrawn": set(),
 }
