@@ -1,0 +1,103 @@
+name: Hosted Supabase Database Migration (Alembic)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Target deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      migration_action:
+        description: 'Action to perform'
+        required: true
+        default: 'upgrade_head'
+        type: choice
+        options:
+          - upgrade_head
+          - check_current
+          - dry_run_sql
+      confirmation:
+        description: 'Type "APPLY_MIGRATION" to confirm schema changes'
+        required: true
+        default: ''
+
+concurrency:
+  group: hosted-database-migration-${{ github.event.inputs.target_environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-migrate:
+    name: Execute Hosted Schema Migration
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.target_environment }}
+
+    steps:
+      - name: Validate Execution Safeguards
+        run: |
+          echo "Validating environment safeguards..."
+          if [ "${{ github.event.inputs.migration_action }}" = "upgrade_head" ] && [ "${{ github.event.inputs.confirmation }}" != "APPLY_MIGRATION" ]; then
+            echo "::error::Migration aborted: confirmation string 'APPLY_MIGRATION' is required to execute schema changes."
+            exit 1
+          fi
+          echo "Safeguards validated for environment: ${{ github.event.inputs.target_environment }}"
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Migration Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install alembic psycopg2-binary asyncpg sqlalchemy pydantic pydantic-settings
+
+      - name: Verify Network Connectivity & Execute Migration
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::STAGING_DATABASE_URL secret is not configured in repository environment settings."
+            exit 1
+          fi
+
+          # Mask secret connection string
+          echo "::add-mask::$DATABASE_URL"
+
+          cd apps/api
+
+          echo "=================================================================="
+          echo "Checking Hosted Database Alembic Migration State"
+          echo "=================================================================="
+          python -m alembic current
+
+          if [ "${{ github.event.inputs.migration_action }}" = "check_current" ]; then
+            echo "Current revision checked successfully."
+            exit 0
+          fi
+
+          if [ "${{ github.event.inputs.migration_action }}" = "dry_run_sql" ]; then
+            echo "Generating offline dry-run SQL..."
+            python -m alembic upgrade head --sql
+            exit 0
+          fi
+
+          if [ "${{ github.event.inputs.migration_action }}" = "upgrade_head" ]; then
+            echo "Applying Alembic forward migrations to head..."
+            python -m alembic upgrade head
+
+            echo "Verifying new revision head..."
+            python -m alembic current
+
+            echo "Hosted schema migration successfully completed to head."
+          fi

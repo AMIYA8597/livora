@@ -1,10 +1,17 @@
+import os
 import httpx
 import uuid
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def test_auth():
-    url = "https://qjwitdovbsfviaepjcul.supabase.co"
-    anon_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqd2l0ZG92YnNmdmlhZXBqY3VsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ2MzM0MzEsImV4cCI6MjExMDIwOTQzMX0.YKgDfTU8ONUeJXvhTumLnJm1nalw22FAwE1NfZMTdM0"
-    service_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqd2l0ZG92YnNmdmlhZXBqY3VsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDYzMzQzMSwiZXhwIjoyMTEwMjA5NDMxfQ.cws1o2WJ4eVfNIaLO780t32TBOx5XtbgCruf99X_sVo"
+    url = os.getenv("SUPABASE_URL", "https://qjwitdovbsfviaepjcul.supabase.co")
+    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SECRET_KEY", "")
+    if not anon_key or not service_key:
+        print("ERROR: SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY required in environment")
+        return
     
     headers = {"apikey": anon_key, "Content-Type": "application/json"}
     admin_headers = {"apikey": service_key, "Authorization": f"Bearer {service_key}", "Content-Type": "application/json"}

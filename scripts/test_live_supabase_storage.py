@@ -1,9 +1,15 @@
 import os
 from supabase import create_client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def test_storage():
-    url = "https://qjwitdovbsfviaepjcul.supabase.co"
-    service_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqd2l0ZG92YnNmdmlhZXBqY3VsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5NDYzMzQzMSwiZXhwIjoyMTEwMjA5NDMxfQ.cws1o2WJ4eVfNIaLO780t32TBOx5XtbgCruf99X_sVo"
+    url = os.getenv("SUPABASE_URL", "https://qjwitdovbsfviaepjcul.supabase.co")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SECRET_KEY", "")
+    if not service_key:
+        print("ERROR: SUPABASE_SERVICE_ROLE_KEY required in environment")
+        return
     
     client = create_client(url, service_key)
     

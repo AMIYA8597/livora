@@ -3,10 +3,11 @@ import { type NextRequest, NextResponse } from "next/server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const updateSession = async (request: NextRequest) => {
+export const createClient = (request: NextRequest) => {
+  // Create an unmodified response
   let supabaseResponse = NextResponse.next({
     request: {
       headers: request.headers,
@@ -14,7 +15,7 @@ export const updateSession = async (request: NextRequest) => {
   });
 
   if (!supabaseUrl || !supabaseKey) {
-    return supabaseResponse;
+    return { supabase: null, response: supabaseResponse };
   }
 
   const supabase = createServerClient(
@@ -38,8 +39,14 @@ export const updateSession = async (request: NextRequest) => {
     },
   );
 
-  // Refresh user session if token exists
-  await supabase.auth.getUser();
+  return { supabase, response: supabaseResponse };
+};
 
-  return supabaseResponse;
+export const updateSession = async (request: NextRequest) => {
+  const { supabase, response } = createClient(request);
+  if (supabase) {
+    // Refresh user session if token exists
+    await supabase.auth.getUser();
+  }
+  return response;
 };
