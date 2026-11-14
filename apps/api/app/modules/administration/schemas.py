@@ -30,3 +30,4 @@ class PlatformStatsResponse(BaseModel):
     total_mutual_matches: int
     pending_verifications: int
     open_moderation_reports: int
+
