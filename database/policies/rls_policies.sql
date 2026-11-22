@@ -1,4 +1,13 @@
 -- ==============================================================================
+-- SUPERSEDED - NOT APPLIED BY MIGRATIONS. Do not apply to Supabase.
+-- Data API security is enforced by Alembic migration 005_lockdown_data_api
+-- (RLS on every table + no anon/authenticated privileges). The FastAPI backend
+-- is the only data path. This file is kept for the legacy scripts/test_rls_*.py
+-- harnesses only. Known flaw: the users SELECT policy below exposes every active
+-- user row (including hashed_password) to any role it is granted to.
+-- ==============================================================================
+
+-- ==============================================================================
 -- Database Policies: Complete Row-Level Security (RLS) Configuration
 -- Dual-Context Support: Supabase PostgREST (auth.uid) & FastAPI (app.current_user_id)
 -- ==============================================================================

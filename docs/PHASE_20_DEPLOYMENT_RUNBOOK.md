@@ -64,7 +64,7 @@ alembic upgrade head
 
 ### Step 3: Seed Synthetic Staging Data (If resetting or initial bootstrap)
 ```bash
-python database/seeds/staging_seed.py
+python database/seeds/seed.py --allow-remote  # staging only; refuses production
 ```
 
 ### Step 4: Container Build & Backend Cloud Run Deployment

@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
-set -e
-
-echo "🌱 Running Flatmate Platform Database Migrations & Seeds..."
-
-if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
-fi
-
-# Execute seed.py script inside apps/api virtualenv or directly via python
-cd database/seeds
-python3 seed.py
-cd ../..
-
-echo "✅ Database seeded successfully."
+# Apply the Alembic schema, then load idempotent development seed data.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT/apps/api"
+echo "Applying migrations (alembic upgrade head)..."
+python -m alembic upgrade head
+echo "Seeding development data..."
+python "$ROOT/database/seeds/seed.py" "$@"

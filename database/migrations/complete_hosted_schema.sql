@@ -244,11 +244,11 @@ CREATE TABLE properties (
 
 CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
+CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
+
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
 
 CREATE INDEX ix_properties_city ON properties (city);
-
-CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE TABLE groups (
     id UUID NOT NULL, 
@@ -727,9 +727,9 @@ CREATE TABLE conversation_preferences (
 
 CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
-CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
-
 CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
+
+CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
 
 CREATE TABLE attachments (
     id UUID NOT NULL, 
@@ -995,6 +995,43 @@ DO $$
 CREATE INDEX IF NOT EXISTS ix_properties_location_geog ON properties USING gist ((location::geography));
 
 UPDATE alembic_version SET version_num='004_real_postgis_location' WHERE alembic_version.version_num = '003_pgvector_matching';
+
+-- Running upgrade 004_real_postgis_location -> 005_lockdown_data_api
+
+DO $$
+DECLARE
+    r record;
+    api_role text;
+BEGIN
+    -- 1. Default-deny RLS on every application table.
+    FOR r IN
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p')
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_depend d
+              WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
+          )
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+    END LOOP;
+
+    -- 2. Remove Data API access for Supabase's API roles, now and for future objects.
+    FOREACH api_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = api_role) THEN
+            EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I', api_role);
+            EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I', api_role);
+            EXECUTE format('REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM %I', api_role);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', api_role);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM %I', api_role);
+            EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM %I', api_role);
+        END IF;
+    END LOOP;
+END $$;;
+
+UPDATE alembic_version SET version_num='005_lockdown_data_api' WHERE alembic_version.version_num = '004_real_postgis_location';
 
 COMMIT;
 

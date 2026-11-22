@@ -29,10 +29,16 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       pagination (previously it paginated first, then filtered in Python). The silent Bengaluru
       default coordinates are removed. Real-PostGIS tests are in `test_search_geospatial.py`.
       PostGIS 3.7.0 is installed natively on the dev machine.
-- [ ] **3c. Seed data has every property at one point.** All 60 properties in local
-      `flatmate_db` share `POINT(77.6446 12.9121)`, an artefact of the old fake. Regenerate the
-      seed with real coordinates.
-- [ ] **3d. pgvector not installed natively.** Migration 003's vector index is skipped on the
+- [x] **3c. Seed data was broken.** *(Done.)* Both old seeds (`01_seed_data.sql`,
+      `staging_seed.py`) referenced columns that no longer exist, and `seed.py` plus the Docker
+      init mount applied a competing raw-SQL schema. Now Alembic is the only schema path, and
+      `database/seeds/seed.py` is ORM-based and idempotent: 4 cities, 10 localities and 11
+      listings at real coordinates, plus 8 seekers with distinct lifestyles. It refuses
+      production, and refuses remote hosts without `--allow-remote`. `test_seed_db.py` guards it.
+      The legacy raw SQL migrations were removed (they remain in git history).
+- [ ] **3e. Dev DB holds 278 test-generated users and 60 duplicate listings** from test runs made
+      before the tests were isolated. They need cleaning up (owner's call: it deletes local data).
+- [ ] **3d. pgvector not installed natively.** *(Blocked: needs Visual Studio Build Tools, a multi-GB install, for a source build; owner to decide.)* Migration 003's vector index is skipped on the
       dev machine (there are no official Windows binaries; it needs a Visual Studio build or the
       Docker image `infrastructure/docker/Dockerfile.postgres`). CI and Supabase have it.
 - [ ] **4. No transactional email.** Nothing sends mail. Needed for verification, password reset
@@ -54,6 +60,18 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 - [x] **2e. Chat showed the oldest messages.** `get_messages` sorted ascending before applying
       LIMIT, so long chats never showed new messages. It now returns the latest page in
       chronological order (`test_messaging_pagination_db.py`).
+
+- [x] **2f. CRITICAL: Supabase Data API was wide open.** *(Done.)* No migration enabled RLS, so
+      a hosted deploy would have exposed every table (password hashes, KYC, messages) through
+      PostgREST to the public anon key. The hand-written `rls_policies.sql` was never applied,
+      covered only 21 of 44 tables, and leaked active users' rows. Migration
+      `005_lockdown_data_api` enables RLS on every table and revokes all anon/authenticated
+      privileges, including default privileges for future tables. The backend, as table owner,
+      is unaffected. Tested in `test_data_api_lockdown_db.py`.
+- [ ] **2g. Backend connects as the `postgres` owner.** Least privilege: use a dedicated app role
+      with only DML rights, so an SQL injection cannot run DDL.
+- [ ] **2h. Supabase Storage bucket policies are unverified.** Check that the KYC/avatars buckets
+      are private and that only the backend's service role can write.
 
 ## P1 — Required for a quality product
 
