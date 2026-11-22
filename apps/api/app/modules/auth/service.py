@@ -1,9 +1,11 @@
+import hmac
+from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.core.security import (
     get_password_hash, verify_password, create_access_token, create_refresh_token,
-    decode_token, create_password_reset_token
+    decode_token, create_password_reset_token, password_fingerprint
 )
 from app.core.exceptions import BadRequestException, UnauthorizedException
 from app.core.config import settings
@@ -15,6 +17,9 @@ from app.modules.auth.schemas import (
     ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.modules.profiles.models import Profile
+from app.modules.notifications.emails import QueuedEmail, idempotency_key, web_url
+
+RESET_MESSAGE = "If an active account exists with this email address, password reset instructions have been sent."
 
 class AuthService:
     def __init__(self, db: AsyncSession):
@@ -136,45 +141,62 @@ class AuthService:
             raise BadRequestException("Invalid or expired OTP code")
         return {"success": True, "message": "Mobile number verified successfully"}
 
-    async def forgot_password(self, req: ForgotPasswordRequest) -> dict:
+    async def forgot_password(self, req: ForgotPasswordRequest) -> tuple[dict, List[QueuedEmail]]:
+        """
+        Returns the (enumeration-safe) response and the emails to send after it.
+        The token itself is only ever delivered by email; it is echoed in the response
+        solely in development/test so automated tests can complete the flow.
+        """
         query = select(User).where(User.email == req.email)
         user = (await self.db.execute(query)).scalar_one_or_none()
+        res: dict = {"success": True, "message": RESET_MESSAGE}
         if not user or not user.is_active:
-            # Generic safe response to prevent user enumeration
-            return {
-                "success": True,
-                "message": "If an active account exists with this email address, password reset instructions have been generated.",
-            }
+            return res, []
 
-        reset_token = create_password_reset_token(str(user.id), user.email)
+        reset_token = create_password_reset_token(str(user.id), user.email, user.hashed_password)
         logger.info(f"Generated password reset token for user {user.id}")
-
-        res: dict = {
-            "success": True,
-            "message": "If an active account exists with this email address, password reset instructions have been generated.",
-        }
-        # In development/test mode, surface reset token for automated testing
-        if settings.ENVIRONMENT in ("development", "test") or settings.DEBUG:
+        email = QueuedEmail(
+            to=user.email,
+            template="password_reset",
+            context={
+                "name": user.full_name,
+                "reset_url": web_url(f"/reset-password?token={reset_token}"),
+                "expires_minutes": settings.PASSWORD_RESET_EXPIRE_MINUTES,
+            },
+            idempotency_key=idempotency_key("password_reset", reset_token),
+        )
+        if settings.ENVIRONMENT in ("development", "test"):
             res["reset_token"] = reset_token
+        return res, [email]
 
-        return res
-
-    async def reset_password(self, req: ResetPasswordRequest) -> dict:
-        payload = decode_token(req.token)
+    async def reset_password(self, req: ResetPasswordRequest) -> tuple[dict, List[QueuedEmail]]:
+        invalid = BadRequestException("Invalid, expired, or already used password reset token")
+        try:
+            payload = decode_token(req.token)
+        except Exception:
+            raise invalid
         user_id = payload.get("sub")
-        token_type = payload.get("type")
-
-        if not user_id or token_type != "password_reset":
-            raise BadRequestException("Invalid, expired, or malformed password reset token")
+        if not user_id or payload.get("type") != "password_reset" or not payload.get("pwd"):
+            raise invalid
 
         query = select(User).where(User.id == user_id)
         user = (await self.db.execute(query)).scalar_one_or_none()
-
         if not user or not user.is_active:
-            raise BadRequestException("User account not found or deactivated")
+            raise invalid
+        # Single use: the fingerprint no longer matches once the password has changed.
+        if not hmac.compare_digest(str(payload["pwd"]), password_fingerprint(user.hashed_password)):
+            raise invalid
+        if payload.get("email") != user.email:
+            raise invalid
 
         user.hashed_password = get_password_hash(req.new_password)
         await self.db.commit()
 
         logger.info(f"Password reset successfully completed for user {user.id}")
-        return {"success": True, "message": "Your password has been reset successfully. Please log in with your new password."}
+        notice = QueuedEmail(
+            to=user.email,
+            template="password_changed",
+            context={"name": user.full_name},
+            idempotency_key=idempotency_key("password_changed", user.id, payload.get("iat")),
+        )
+        return {"success": True, "message": "Your password has been reset successfully. Please log in with your new password."}, [notice]

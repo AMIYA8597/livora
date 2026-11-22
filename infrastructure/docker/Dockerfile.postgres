@@ -1,6 +1,8 @@
 # Local/CI database matching the extensions Supabase provides: PostGIS + pgvector.
 FROM postgis/postgis:17-3.5
 
-RUN apt-get update \
+# PGDG moved bullseye (this image's base) to its archive host.
+RUN sed -i 's#apt.postgresql.org/pub/repos/apt#apt-archive.postgresql.org/pub/repos/apt#g' /etc/apt/sources.list.d/*.list \
+    && apt-get update \
     && apt-get install -y --no-install-recommends postgresql-17-pgvector \
     && rm -rf /var/lib/apt/lists/*

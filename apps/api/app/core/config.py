@@ -32,6 +32,20 @@ class Settings(BaseSettings):
     S3_REGION: str = "us-east-1"
     S3_USE_SSL: bool = False
 
+    # Transactional email: resend (production), smtp (Mailpit locally / any relay), memory (dev/test only)
+    EMAIL_PROVIDER: str = "smtp"
+    EMAIL_API_KEY: str = ""
+    EMAIL_FROM_ADDRESS: str = "notifications@flatmate.local"
+    EMAIL_FROM_NAME: str = "Flatmate"
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 1025
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = False
+    # Public web origin used to build links in emails (reset password, dashboards)
+    WEB_BASE_URL: str = "http://localhost:3000"
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 15
+
     # Supabase Integration (Free-first / Managed Backend)
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")

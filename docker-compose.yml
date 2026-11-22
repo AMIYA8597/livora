@@ -76,6 +76,15 @@ services:
       timeout: 5s
       retries: 5
 
+  mailpit:
+    # Local mail catcher: SMTP on 1025, web inbox at http://localhost:8025
+    image: axllent/mailpit:v1.21
+    container_name: flatmate_mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
   api:
     build:
       context: .
@@ -93,6 +102,9 @@ services:
       - S3_BUCKET_NAME=flatmate-media
       - SECRET_KEY=supersecretkey_please_change_in_production_min_32_chars_1234567890
       - ENVIRONMENT=development
+      - EMAIL_PROVIDER=smtp
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
     ports:
       - "8000:8000"
     volumes:
@@ -105,6 +117,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:

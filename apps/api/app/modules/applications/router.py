@@ -1,12 +1,14 @@
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.modules.users.models import User
 from app.modules.applications.schemas import ApplicationResponse, ApplicationCreate, ApplicationStatusUpdate
 from app.modules.applications.service import ApplicationService
+from app.modules.notifications import emails as notify
+from app.modules.properties.models import Property
 
 router = APIRouter(prefix="/applications", tags=["Rental Applications"])
 
@@ -21,11 +23,16 @@ async def list_my_applications(
 @router.post("/", response_model=ApplicationResponse, status_code=status.HTTP_201_CREATED)
 async def submit_application(
     data: ApplicationCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ApplicationService(db)
-    return await service.create(current_user.id, data)
+    application = await service.create(current_user.id, data)
+    prop = await db.get(Property, application.property_id)
+    if prop:
+        notify.enqueue(background_tasks, await notify.application_received(db, application, prop))
+    return application
 
 @router.get("/{application_id}", response_model=ApplicationResponse)
 async def get_application(
@@ -41,8 +48,13 @@ async def get_application(
 async def update_application_status(
     application_id: UUID,
     data: ApplicationStatusUpdate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ApplicationService(db)
-    return await service.update_status(application_id, current_user.id, data)
+    application = await service.update_status(application_id, current_user.id, data)
+    prop = await db.get(Property, application.property_id)
+    if prop:
+        notify.enqueue(background_tasks, await notify.application_status_changed(db, application, prop, current_user.id))
+    return application

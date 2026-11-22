@@ -25,6 +25,7 @@ if _test_db_host not in {"localhost", "127.0.0.1", "::1", "postgres"}:
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["ENVIRONMENT"] = "test"
 os.environ["STORAGE_TYPE"] = "local"  # never upload to hosted buckets from tests
+os.environ["EMAIL_PROVIDER"] = "memory"  # never send real mail from tests
 
 import pytest
 import asyncio

@@ -622,18 +622,20 @@ async def test_phase18_journey_g_account_recovery_and_credentials():
 
     # 1. Forgot password request
     mock_db.execute.side_effect = [MagicMock(scalar_one_or_none=MagicMock(return_value=test_user))]
-    fp_res = await auth_service.forgot_password(ForgotPasswordRequest(email="rohit.sharma@example.com"))
+    fp_res, fp_emails = await auth_service.forgot_password(ForgotPasswordRequest(email="rohit.sharma@example.com"))
+    assert [e.template for e in fp_emails] == ["password_reset"]
     assert fp_res["success"] is True
     assert "reset_token" in fp_res
 
     # 2. Reset password with new secure password
     reset_token = fp_res["reset_token"]
     mock_db.execute.side_effect = [MagicMock(scalar_one_or_none=MagicMock(return_value=test_user))]
-    rp_res = await auth_service.reset_password(
+    rp_res, rp_emails = await auth_service.reset_password(
         ResetPasswordRequest(token=reset_token, new_password="NewSecureP@ssword2026")
     )
     assert rp_res["success"] is True
     assert "reset successfully" in rp_res["message"]
+    assert [e.template for e in rp_emails] == ["password_changed"]
 
     # 3. Update user phone number
     user_service = UserService(mock_db)

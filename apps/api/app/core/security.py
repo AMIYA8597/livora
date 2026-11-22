@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 """
 Security Infrastructure: Supabase Auth & JWT token validation,
 password hashing, and claim verification.
@@ -111,14 +113,25 @@ def create_refresh_token(subject: str, roles: List[str] | str, expires_delta: Op
     secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
     return jwt.encode(payload, secret, algorithm=settings.ALGORITHM)
 
-def create_password_reset_token(subject: str, email: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+def password_fingerprint(hashed_password: str) -> str:
+    """
+    Keyed fingerprint of the current password hash. Embedded in reset tokens so a token
+    stops working as soon as the password changes: each token is single-use, and every
+    outstanding token is revoked by any password change.
+    """
+    key = (settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY).encode()
+    return hmac.new(key, (hashed_password or "").encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def create_password_reset_token(subject: str, email: str, hashed_password: str) -> str:
+    now = datetime.now(timezone.utc)
     payload: Dict[str, Any] = {
         "sub": str(subject),
         "email": email,
         "type": "password_reset",
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "pwd": password_fingerprint(hashed_password),
+        "exp": now + timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES),
+        "iat": now,
     }
     secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
     return jwt.encode(payload, secret, algorithm=settings.ALGORITHM)

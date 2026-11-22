@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -9,6 +9,7 @@ from app.modules.auth.schemas import (
     SendOtpRequest, VerifyOtpRequest, ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.modules.auth.service import AuthService
+from app.modules.notifications.emails import enqueue
 
 router = APIRouter(prefix="/auth", tags=["Authentication & Identity"])
 
@@ -28,14 +29,18 @@ async def refresh_tokens(data: RefreshTokenRequest, db: AsyncSession = Depends(g
     return await service.refresh_token(data.refresh_token)
 
 @router.post("/forgot-password")
-async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+async def forgot_password(data: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)
-    return await service.forgot_password(data)
+    res, emails = await service.forgot_password(data)
+    enqueue(background_tasks, emails)
+    return res
 
 @router.post("/reset-password")
-async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+async def reset_password(data: ResetPasswordRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)
-    return await service.reset_password(data)
+    res, emails = await service.reset_password(data)
+    enqueue(background_tasks, emails)
+    return res
 
 @router.post("/otp/send")
 async def send_mobile_otp(data: SendOtpRequest, db: AsyncSession = Depends(get_db)):

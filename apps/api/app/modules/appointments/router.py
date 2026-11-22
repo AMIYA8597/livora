@@ -3,7 +3,7 @@ Property Viewing Appointments Router
 """
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
@@ -14,6 +14,8 @@ from app.modules.appointments.schemas import (
     AppointmentStatusUpdate,
 )
 from app.modules.appointments.service import AppointmentService
+from app.modules.notifications import emails as notify
+from app.modules.properties.models import Property
 
 router = APIRouter(prefix="/appointments", tags=["Viewing Appointments"])
 
@@ -28,11 +30,16 @@ async def list_my_appointments(
 @router.post("/", response_model=AppointmentResponse, status_code=status.HTTP_201_CREATED)
 async def schedule_appointment(
     data: AppointmentCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = AppointmentService(db)
-    return await service.create(current_user.id, data)
+    appointment = await service.create(current_user.id, data)
+    prop = await db.get(Property, appointment.property_id)
+    if prop:
+        notify.enqueue(background_tasks, await notify.appointment_requested(db, appointment, prop))
+    return appointment
 
 @router.get("/{appointment_id}", response_model=AppointmentResponse)
 async def get_appointment(

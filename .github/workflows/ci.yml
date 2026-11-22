@@ -73,7 +73,8 @@ jobs:
       - name: Install pgvector into PostGIS service (matches Supabase extensions)
         run: |
           PG_CONTAINER=$(docker ps --filter "ancestor=postgis/postgis:17-3.5" --format "{{.ID}}")
-          docker exec "$PG_CONTAINER" bash -c "apt-get update && apt-get install -y --no-install-recommends postgresql-17-pgvector"
+          # PGDG moved bullseye (the postgis image base) to its archive host.
+          docker exec "$PG_CONTAINER" bash -c "sed -i 's#apt.postgresql.org/pub/repos/apt#apt-archive.postgresql.org/pub/repos/apt#g' /etc/apt/sources.list.d/*.list && apt-get update && apt-get install -y --no-install-recommends postgresql-17-pgvector"
           PGPASSWORD=postgres psql -h localhost -U postgres -d flatmate_db -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS postgis;"
 
       - name: Database Schema & Migration Verification

@@ -5,11 +5,12 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 
 ## P0 — Blocks launch
 
-- [ ] **1. Hosted Supabase project is unreachable.** On 2026-11-22,
-      `qjwitdovbsfviaepjcul.supabase.co` returned NXDOMAIN and the pooler (port 6543, now
-      reachable from this network) answered "tenant/user not found". The project is paused or
-      deleted. The owner must restore it or create a new one, update the `.env` files, then run
-      `database/migrations/complete_hosted_schema.sql` or the `hosted-db-migration.yml` workflow.
+- [ ] **1. Hosted schema not yet applied.** *(Waiting on owner.)* The Supabase project is
+      reachable again over HTTPS (auth, JWKS and storage verified), but Postgres ports time out
+      from the dev network, so migrations must run from GitHub Actions. The owner adds the
+      `STAGING_DATABASE_URL` secret to the `staging` environment (session pooler, port 5432),
+      then runs the `hosted-db-migration.yml` workflow, or pastes
+      `database/migrations/complete_hosted_schema.sql` into the Supabase SQL editor.
 - [x] **2. Test hacks in production code.** *(Done: AsyncMock branches removed, block checks always run.)* `matching/service.py` checks
       `type(self.db).__name__ != "AsyncMock"`, so code paths differ between tests and production
       (block filtering is skipped in tests).
@@ -41,8 +42,23 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 - [ ] **3d. pgvector not installed natively.** *(Blocked: needs Visual Studio Build Tools, a multi-GB install, for a source build; owner to decide.)* Migration 003's vector index is skipped on the
       dev machine (there are no official Windows binaries; it needs a Visual Studio build or the
       Docker image `infrastructure/docker/Dockerfile.postgres`). CI and Supabase have it.
-- [ ] **4. No transactional email.** Nothing sends mail. Needed for verification, password reset
-      confirmation, application and appointment notices (Resend/SES adapter + templates).
+- [x] **4. No transactional email.** *(Done.)* `app/infrastructure/email/` has Resend (HTTPS
+      API, idempotency keys, retries on 429/5xx only), SMTP (Mailpit in docker-compose, inbox at
+      :8025) and in-memory providers. In-memory is refused outside dev/test, and an unknown or
+      misconfigured provider fails at startup instead of dropping mail. Templates HTML-escape
+      every value and strip CR/LF from subjects. Sends are fail-safe (logged, never raised) and run
+      after the response through BackgroundTasks. Wired events: password reset link, password
+      changed, application received (owner), application status changed (applicant), visit
+      requested (host). Tests are in `tests/test_email.py`.
+- [x] **4a. Password reset tokens leaked and were reusable.** *(Done.)* The API returned the
+      reset token whenever `DEBUG` was on, and staging ran with `DEBUG=True`, so anyone could
+      reset any account. Tokens could also be replayed for their whole 15 minutes. Now the token
+      is delivered only by email (echoed only in development/test), and it carries a keyed
+      fingerprint of the current password hash, so it is single-use and every outstanding token
+      dies when the password changes.
+- [ ] **4b. OTP verification accepts a hard-coded code.** `AuthService.verify_otp` accepts
+      `1234`/`123456` in every environment, so any phone number can be "verified". Needs a real
+      SMS/OTP provider with hashed, expiring, rate-limited codes, gated to dev/test (pairs with 12).
 - [ ] **5. Workers are stubs.** `workers/tasks.py` only uses `print` and `sleep`. Needs real
       tasks: match precompute, notifications/email fan-out, image processing, cleanup jobs.
 - [ ] **6. Next.js 14.2.4 has 41 security advisories.** Upgrade to a patched 14.2.x or to 15.
@@ -56,7 +72,12 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 
 - [x] **2d. CI would have failed.** There were 12 existing mypy errors in messaging (the README
       claimed 0). Fixed. CI now passes `TEST_DATABASE_URL`, installs pgvector, and checks the
-      migration downgrade/upgrade round-trip.
+      migration downgrade/upgrade round-trip. Later fixes: `apps/web/lib` was gitignored, the API
+      packaging and dependencies were incomplete, ruff 0.17 defaults were pinned, Node is 24, and
+      pgvector installs from the PGDG archive (bullseye moved off the main PGDG host).
+- [x] **2d-ii. Staging deploy reported fake success.** *(Done.)* Jobs with missing secrets now show
+      as skipped with a warning naming each missing secret. Migrations run before the backend,
+      and a real `/health/ready` smoke test gates the result.
 - [x] **2e. Chat showed the oldest messages.** `get_messages` sorted ascending before applying
       LIMIT, so long chats never showed new messages. It now returns the latest page in
       chronological order (`test_messaging_pagination_db.py`).
@@ -92,6 +113,8 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 - [ ] **12. Identity verification is mocked.** Integrate a real KYC provider, or clearly gate
       the feature off.
 - [ ] **13. Web push and in-app notification centre.**
+- [ ] **13b. Admins cannot override application status.** `PATCH /applications/{id}/status`
+      never passes `is_admin`, unlike appointments, so moderators cannot intervene.
 
 ## P2 — Operations and hardening
 
