@@ -80,3 +80,47 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+PRIVILEGE_PROBE_SQL = """
+SELECT current_user AS role_name,
+       r.rolsuper AS is_superuser,
+       r.rolbypassrls AS bypasses_rls,
+       EXISTS (
+           SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+             AND pg_has_role(current_user, c.relowner, 'USAGE')
+       ) AS owns_tables
+FROM pg_roles r WHERE r.rolname = current_user
+"""
+
+
+async def describe_runtime_privileges(session: AsyncSession) -> Dict[str, Any]:
+    """Report whether the runtime connection is least-privilege (see migration 007)."""
+    from sqlalchemy import text
+
+    row = (await session.execute(text(PRIVILEGE_PROBE_SQL))).mappings().one()
+    info = dict(row)
+    info["least_privilege"] = not (info["is_superuser"] or info["bypasses_rls"] or info["owns_tables"])
+    return info
+
+
+async def warn_if_overprivileged() -> None:
+    """Outside dev/test, loudly flag an API connected with owner or superuser rights."""
+    import logging
+
+    log = logging.getLogger("flatmate.database")
+    if (settings.ENVIRONMENT or "").lower() in {"development", "test", "ci", "local"}:
+        return
+    try:
+        async with AsyncSessionLocal() as session:
+            info = await describe_runtime_privileges(session)
+    except Exception as exc:  # noqa: BLE001 - never block startup on the probe itself
+        log.warning("Could not verify database privileges: %s", type(exc).__name__)
+        return
+    if not info["least_privilege"]:
+        log.error(
+            "SECURITY: API connected to the database as '%s' with owner/superuser rights. "
+            "Use a least-privilege login in the flatmate_app role (scripts/create_app_db_user.sql).",
+            info["role_name"],
+        )

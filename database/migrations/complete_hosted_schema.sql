@@ -67,9 +67,9 @@ CREATE TABLE outbox_events (
     PRIMARY KEY (id)
 );
 
-CREATE INDEX ix_outbox_events_status ON outbox_events (status);
-
 CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
+
+CREATE INDEX ix_outbox_events_status ON outbox_events (status);
 
 CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
 
@@ -246,11 +246,11 @@ CREATE TABLE properties (
 
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
 
-CREATE INDEX ix_properties_owner_id ON properties (owner_id);
-
 CREATE INDEX ix_properties_city ON properties (city);
 
 CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
+
+CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
 CREATE TABLE groups (
     id UUID NOT NULL, 
@@ -397,9 +397,9 @@ CREATE TABLE cities (
     FOREIGN KEY(state_id) REFERENCES states (id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
-
 CREATE INDEX ix_cities_name ON cities (name);
+
+CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
 
 CREATE TABLE rooms (
     id UUID NOT NULL, 
@@ -603,11 +603,11 @@ CREATE TABLE applications (
     FOREIGN KEY(room_id) REFERENCES rooms (id) ON DELETE SET NULL
 );
 
+CREATE INDEX ix_applications_status ON applications (status);
+
 CREATE INDEX ix_applications_applicant_id ON applications (applicant_id);
 
 CREATE INDEX ix_applications_property_id ON applications (property_id);
-
-CREATE INDEX ix_applications_status ON applications (status);
 
 CREATE TABLE tenant_memberships (
     id UUID NOT NULL, 
@@ -653,13 +653,13 @@ CREATE TABLE conversations (
 
 CREATE INDEX ix_conversations_property_id ON conversations (property_id);
 
-CREATE INDEX ix_conversations_group_id ON conversations (group_id);
-
 CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
 
-CREATE INDEX ix_conversations_application_id ON conversations (application_id);
-
 CREATE INDEX ix_conversations_flatmate_match_id ON conversations (flatmate_match_id);
+
+CREATE INDEX ix_conversations_group_id ON conversations (group_id);
+
+CREATE INDEX ix_conversations_application_id ON conversations (application_id);
 
 CREATE TABLE conversation_participants (
     id UUID NOT NULL, 
@@ -702,15 +702,15 @@ CREATE TABLE messages (
     FOREIGN KEY(reply_to_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
+CREATE INDEX ix_messages_sent_at ON messages (sent_at);
+
+CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
+
 CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
 
 CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE INDEX ix_messages_sender_id ON messages (sender_id);
-
-CREATE INDEX ix_messages_sent_at ON messages (sent_at);
-
-CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -727,11 +727,11 @@ CREATE TABLE conversation_preferences (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
-
 CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
 CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
+
+CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
 
 CREATE TABLE attachments (
     id UUID NOT NULL, 
@@ -768,9 +768,9 @@ CREATE TABLE conversation_read_cursors (
     FOREIGN KEY(last_read_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
-
 CREATE INDEX ix_conversation_read_cursors_conversation_id ON conversation_read_cursors (conversation_id);
+
+CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
 
 INSERT INTO alembic_version (version_num) VALUES ('001_initial_schema') RETURNING alembic_version.version_num;
 
@@ -1042,6 +1042,112 @@ ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ N
 CREATE INDEX IF NOT EXISTS idx_outbox_pending_due ON outbox_events (next_attempt_at) WHERE status = 'pending';
 
 UPDATE alembic_version SET version_num='006_outbox_dispatch' WHERE alembic_version.version_num = '005_lockdown_data_api';
+
+-- Running upgrade 006_outbox_dispatch -> 007_least_privilege_app_role
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'flatmate_app') THEN
+        CREATE ROLE flatmate_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
+END $$;;
+
+DO $$
+DECLARE
+    r record;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'flatmate_app') THEN
+        RETURN;
+    END IF;
+
+    EXECUTE 'GRANT USAGE ON SCHEMA public TO flatmate_app';
+
+    FOR r IN
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p')
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_depend d
+              WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
+          )
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        IF r.relname = 'alembic_version' THEN
+            EXECUTE format('REVOKE ALL ON public.%I FROM flatmate_app', r.relname);
+            EXECUTE format('GRANT SELECT ON public.%I TO flatmate_app', r.relname);
+        ELSE
+            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO flatmate_app', r.relname);
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'public' AND tablename = r.relname AND policyname = 'flatmate_app_all'
+        ) THEN
+            EXECUTE format(
+                'CREATE POLICY flatmate_app_all ON public.%I FOR ALL TO flatmate_app USING (true) WITH CHECK (true)',
+                r.relname
+            );
+        END IF;
+    END LOOP;
+
+    EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO flatmate_app';
+
+    -- Objects created later by the migrating role get the same grants.
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO flatmate_app';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO flatmate_app';
+END $$;;
+
+UPDATE alembic_version SET version_num='007_least_privilege_app_role' WHERE alembic_version.version_num = '006_outbox_dispatch';
+
+DO $$
+DECLARE
+    r record;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'flatmate_app') THEN
+        RETURN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM alembic_version WHERE version_num >= '007') THEN
+        RETURN;
+    END IF;
+
+    EXECUTE 'GRANT USAGE ON SCHEMA public TO flatmate_app';
+
+    FOR r IN
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p')
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_depend d
+              WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
+          )
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        IF r.relname = 'alembic_version' THEN
+            EXECUTE format('REVOKE ALL ON public.%I FROM flatmate_app', r.relname);
+            EXECUTE format('GRANT SELECT ON public.%I TO flatmate_app', r.relname);
+        ELSE
+            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO flatmate_app', r.relname);
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'public' AND tablename = r.relname AND policyname = 'flatmate_app_all'
+        ) THEN
+            EXECUTE format(
+                'CREATE POLICY flatmate_app_all ON public.%I FOR ALL TO flatmate_app USING (true) WITH CHECK (true)',
+                r.relname
+            );
+        END IF;
+    END LOOP;
+
+    EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO flatmate_app';
+
+    -- Objects created later by the migrating role get the same grants.
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO flatmate_app';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO flatmate_app';
+END $$;;
 
 COMMIT;
 

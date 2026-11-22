@@ -113,8 +113,22 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       `005_lockdown_data_api` enables RLS on every table and revokes all anon/authenticated
       privileges, including default privileges for future tables. The backend, as table owner,
       is unaffected. Tested in `test_data_api_lockdown_db.py`.
-- [ ] **2g. Backend connects as the `postgres` owner.** Least privilege: use a dedicated app role
-      with only DML rights, so an SQL injection cannot run DDL.
+- [x] **2g. Backend connected as the `postgres` owner.** *(Done in code; owner action needed on
+      Supabase.)* Migration `007_least_privilege_app_role` creates a NOLOGIN group role
+      `flatmate_app`. It has DML on application tables only: no DDL, TRUNCATE, TRIGGER or
+      REFERENCES, read-only `alembic_version`, and no BYPASSRLS. Each table gets a
+      `flatmate_app_all` RLS policy for that role alone (anon/authenticated still have none).
+      `migrations/env.py` re-applies this after every migration run (and skips it below 007, so
+      downgrades stick), so new tables can never miss RLS or the app grant.
+      `scripts/create_app_db_user.sql` creates the login with `statement_timeout=15s` and
+      `idle_in_transaction_session_timeout=30s`. Alembic uses `MIGRATION_DATABASE_URL` (owner);
+      the API uses `DATABASE_URL` (the login). Outside dev/test, startup logs a SECURITY error if
+      the API connects with owner/superuser rights. **The whole test suite now runs as a restricted
+      login**, and `test_least_privilege_db.py` proves DDL, privilege escalation and
+      `alembic_version` tampering are refused. CI also runs the real login script and checks it
+      with psql. *Owner action:* after the hosted migration, run the script on Supabase, put the
+      login URL (user `flatmate_api.<project-ref>`) in the runtime secret
+      `STAGING_APP_DATABASE_URL`, and keep the owner URL only in the GitHub migration secret.
 - [ ] **2h. Supabase Storage bucket policies are unverified.** Check that the KYC/avatars buckets
       are private and that only the backend's service role can write.
 

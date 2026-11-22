@@ -7,6 +7,9 @@ import sys
 
 # Ensure app path is accessible
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+
+from db_security import SECURE_TABLES_IF_ENABLED_SQL  # noqa: E402
 
 from app.core.config import settings
 from app.core.database import Base
@@ -36,6 +39,8 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+MIGRATION_URL = settings.MIGRATION_DATABASE_URL or settings.DATABASE_URL
+
 def do_run_migrations(connection):
     context.configure(
         connection=connection,
@@ -44,9 +49,12 @@ def do_run_migrations(connection):
     )
     with context.begin_transaction():
         context.run_migrations()
+        # Idempotent: secure any table a migration just added (RLS + app-role grant/policy).
+        context.execute(SECURE_TABLES_IF_ENABLED_SQL)
 
 async def run_async_migrations():
-    connectable = create_async_engine(settings.DATABASE_URL)
+    # Migrations need DDL rights: use the owner URL when the runtime URL is least-privilege.
+    connectable = create_async_engine(MIGRATION_URL)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
@@ -55,8 +63,9 @@ def run_migrations_online():
     asyncio.run(run_async_migrations())
 
 if context.is_offline_mode():
-    context.configure(url=settings.DATABASE_URL, target_metadata=target_metadata, literal_binds=True)
+    context.configure(url=MIGRATION_URL, target_metadata=target_metadata, literal_binds=True)
     with context.begin_transaction():
         context.run_migrations()
+        context.execute(SECURE_TABLES_IF_ENABLED_SQL)
 else:
     run_migrations_online()

@@ -88,6 +88,20 @@ jobs:
           python -m alembic upgrade head
           PGPASSWORD=postgres psql -h localhost -U postgres -d flatmate_db -tAc             "SELECT 1 FROM pg_indexes WHERE indexname = 'ix_profiles_lifestyle_embedding_hnsw'" | grep -q 1
 
+      - name: Verify Least-Privilege API Login (scripts/create_app_db_user.sql)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d flatmate_db             -v app_user=flatmate_api_ci -v app_password=ci_only_password -f scripts/create_app_db_user.sql
+          export PGPASSWORD=ci_only_password
+          # DML works (RLS policy admits the app role)...
+          psql -h localhost -U flatmate_api_ci -d flatmate_db -v ON_ERROR_STOP=1 -tAc "SELECT count(*) FROM users"
+          # ...but schema changes and privilege escalation are refused.
+          for stmt in "CREATE TABLE public.ci_probe (id int)" "DROP TABLE public.users"                       "ALTER TABLE public.users DISABLE ROW LEVEL SECURITY" "TRUNCATE public.messages"                       "UPDATE public.alembic_version SET version_num = 'x'" "SET ROLE postgres"; do
+            if psql -h localhost -U flatmate_api_ci -d flatmate_db -v ON_ERROR_STOP=1 -tAc "$stmt" 2>/dev/null; then
+              echo "::error::API login was allowed to run: $stmt"; exit 1
+            fi
+          done
+          psql -h localhost -U flatmate_api_ci -d flatmate_db -tAc "SHOW statement_timeout" | grep -q 15s
+
       - name: Execute Pytest Suite with Coverage
         env:
           ENVIRONMENT: test

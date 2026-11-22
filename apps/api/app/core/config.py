@@ -20,6 +20,10 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://postgres:postgres@localhost:5432/flatmate_db"
     )
 
+    # Schema-owner URL for Alembic. Runtime DATABASE_URL should be a least-privilege login in
+    # the `flatmate_app` role (migration 007). Falls back to DATABASE_URL when unset.
+    MIGRATION_DATABASE_URL: str = ""
+
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 

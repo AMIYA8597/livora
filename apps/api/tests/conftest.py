@@ -22,7 +22,46 @@ if _test_db_host not in {"localhost", "127.0.0.1", "::1", "postgres"}:
         f"Refusing to run tests against non-local database host '{_test_db_host}'. "
         "Set TEST_DATABASE_URL to a disposable local database."
     )
-os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+
+def _provision_app_login(owner_url: str) -> str:
+    """
+    Run the suite as a least-privilege login (member of `flatmate_app`, migration 007), exactly
+    like production, so any code path that needs owner/DDL rights fails in tests.
+    Set TEST_DB_AS_OWNER=1 to run as the owner instead (debugging only).
+    """
+    import asyncio
+    from urllib.parse import urlsplit, urlunsplit
+
+    import asyncpg
+
+    user, password = "flatmate_api_test", "flatmate_api_test"
+
+    async def provision() -> None:
+        conn = await asyncpg.connect(owner_url.replace("+asyncpg", ""))
+        try:
+            if not await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = 'flatmate_app'"):
+                raise RuntimeError(
+                    "Role flatmate_app is missing in the test database: run `alembic upgrade head` "
+                    "against TEST_DATABASE_URL first."
+                )
+            if not await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", user):
+                await conn.execute(f"CREATE ROLE {user} LOGIN PASSWORD '{password}' IN ROLE flatmate_app")
+        finally:
+            await conn.close()
+
+    asyncio.run(provision())
+    parts = urlsplit(owner_url)
+    host = parts.hostname or "localhost"
+    netloc = f"{user}:{password}@{host}" + (f":{parts.port}" if parts.port else "")
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+OWNER_DATABASE_URL = TEST_DATABASE_URL
+os.environ["MIGRATION_DATABASE_URL"] = OWNER_DATABASE_URL
+os.environ["DATABASE_URL"] = (
+    TEST_DATABASE_URL if os.environ.get("TEST_DB_AS_OWNER") == "1" else _provision_app_login(TEST_DATABASE_URL)
+)
 os.environ["ENVIRONMENT"] = "test"
 os.environ["STORAGE_TYPE"] = "local"  # never upload to hosted buckets from tests
 os.environ["EMAIL_PROVIDER"] = "memory"  # never send real mail from tests
@@ -52,3 +91,4 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
         base_url="http://testserver"
     ) as client:
         yield client
+

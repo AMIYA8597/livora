@@ -116,6 +116,8 @@ jobs:
           docker push "$IMAGE_TAG"
           docker push "$LATEST_TAG"
 
+      # Runtime uses the least-privilege login (scripts/create_app_db_user.sql); the owner URL in the
+      # GitHub secret STAGING_DATABASE_URL is used only by the migration job above.
       - name: Deploy to Cloud Run Staging
         id: deploy
         run: |
@@ -126,7 +128,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --set-env-vars "ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging" \
-            --set-secrets "DATABASE_URL=STAGING_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
+            --set-secrets "DATABASE_URL=STAGING_APP_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
           URL=$(gcloud run services describe flatmate-api-staging --region asia-south1 --format 'value(status.url)')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 

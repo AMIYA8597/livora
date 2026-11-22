@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from app.core.database import AsyncSessionLocal
+from tests.db_owner import owner_session_factory
+
+AsyncSessionLocal = owner_session_factory()  # creating roles needs the schema owner
 
 _MIGRATION = Path(__file__).resolve().parent.parent / "migrations" / "versions" / "005_lockdown_data_api.py"
 _spec = importlib.util.spec_from_file_location("migration_005", _MIGRATION)
