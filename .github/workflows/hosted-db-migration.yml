@@ -60,7 +60,8 @@ jobs:
       - name: Install Migration Dependencies
         run: |
           pip install --upgrade pip
-          pip install alembic psycopg2-binary asyncpg sqlalchemy pydantic pydantic-settings
+          # Alembic's env.py imports every app model, so the full API package is required.
+          pip install -e apps/api
 
       - name: Verify Network Connectivity & Execute Migration
         env:

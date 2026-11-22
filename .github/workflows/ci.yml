@@ -19,7 +19,7 @@ jobs:
 
     services:
       postgres:
-        image: postgis/postgis:16-3.4
+        image: postgis/postgis:17-3.5
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -72,8 +72,8 @@ jobs:
 
       - name: Install pgvector into PostGIS service (matches Supabase extensions)
         run: |
-          PG_CONTAINER=$(docker ps --filter "ancestor=postgis/postgis:16-3.4" --format "{{.ID}}")
-          docker exec "$PG_CONTAINER" bash -c "apt-get update && apt-get install -y --no-install-recommends postgresql-16-pgvector"
+          PG_CONTAINER=$(docker ps --filter "ancestor=postgis/postgis:17-3.5" --format "{{.ID}}")
+          docker exec "$PG_CONTAINER" bash -c "apt-get update && apt-get install -y --no-install-recommends postgresql-17-pgvector"
           PGPASSWORD=postgres psql -h localhost -U postgres -d flatmate_db -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS postgis;"
 
       - name: Database Schema & Migration Verification
@@ -114,7 +114,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: "pnpm"
 
       - name: Install Dependencies

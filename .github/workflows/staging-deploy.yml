@@ -15,65 +15,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy-backend:
-    name: Build & Deploy Backend Container to Cloud Run (Staging)
+  # Decide what can actually be deployed. Jobs whose secrets are missing show as SKIPPED
+  # (never as a fake green success) and a warning names exactly what is missing.
+  preflight:
+    name: Check Staging Deployment Configuration
     runs-on: ubuntu-latest
     environment: staging
-    permissions:
-      contents: read
-      id-token: write
-
+    outputs:
+      backend: ${{ steps.check.outputs.backend }}
+      database: ${{ steps.check.outputs.database }}
+      frontend: ${{ steps.check.outputs.frontend }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Cloud SDK & Docker
-        uses: google-github-actions/auth@v2
-        if: env.GCP_SA_KEY != ''
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - id: check
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Configure Docker for Google Artifact Registry
-        if: env.GCP_SA_KEY != ''
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          ready() {
+            local target="$1"; shift
+            local missing=()
+            for name in "$@"; do [ -z "${!name}" ] && missing+=("$name"); done
+            if [ ${#missing[@]} -eq 0 ]; then
+              echo "$target=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$target=false" >> "$GITHUB_OUTPUT"
+              echo "::warning title=Staging $target not deployed::Missing secrets in the 'staging' environment: ${missing[*]}"
+            fi
+          }
+          ready backend GCP_SA_KEY GCP_PROJECT_ID
+          ready database STAGING_DATABASE_URL
+          ready frontend VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID
 
-      - name: Build & Push Backend Container
-        if: env.GCP_SA_KEY != ''
-        run: |
-          IMAGE_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
-          LATEST_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:staging-latest"
-          docker build -t "$IMAGE_TAG" -t "$LATEST_TAG" -f apps/api/Dockerfile apps/api
-          docker push "$IMAGE_TAG"
-          docker push "$LATEST_TAG"
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Deploy to Cloud Run Staging
-        if: env.GCP_SA_KEY != ''
-        run: |
-          IMAGE_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
-          gcloud run deploy flatmate-api-staging \
-            --image "$IMAGE_TAG" \
-            --region asia-south1 \
-            --platform managed \
-            --allow-unauthenticated \
-            --set-env-vars "ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging" \
-            --set-secrets "DATABASE_URL=STAGING_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-
+  # Schema first, so newly deployed code never runs against an older schema.
   database-migration:
     name: Apply Database Migrations (Staging)
-    needs: [build-and-deploy-backend]
+    needs: [preflight]
+    if: needs.preflight.outputs.database == 'true' && github.event.inputs.skip_migrations != 'true'
     runs-on: ubuntu-latest
     environment: staging
-    if: github.event.inputs.skip_migrations != 'true'
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -84,23 +67,75 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Install Migration Dependencies
+      - name: Install API package (Alembic env imports the app models)
         run: |
-          pip install alembic psycopg2-binary asyncpg
+          python -m pip install --upgrade pip
+          pip install -e apps/api
 
       - name: Execute Alembic Migration Forward
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-        if: env.DATABASE_URL != ''
+          ENVIRONMENT: staging
         run: |
+          echo "::add-mask::$DATABASE_URL"
           cd apps/api
           python -m alembic upgrade head
+          python -m alembic current
+
+  build-and-deploy-backend:
+    name: Build & Deploy Backend Container to Cloud Run (Staging)
+    needs: [preflight, database-migration]
+    # Run when the backend is configured and migrations either succeeded or were legitimately skipped.
+    if: >-
+      always() && needs.preflight.outputs.backend == 'true' &&
+      (needs.database-migration.result == 'success' || needs.database-migration.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure Docker for Google Artifact Registry
+        run: gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+
+      - name: Build & Push Backend Container
+        run: |
+          IMAGE_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
+          LATEST_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:staging-latest"
+          docker build -t "$IMAGE_TAG" -t "$LATEST_TAG" -f apps/api/Dockerfile apps/api
+          docker push "$IMAGE_TAG"
+          docker push "$LATEST_TAG"
+
+      - name: Deploy to Cloud Run Staging
+        id: deploy
+        run: |
+          IMAGE_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
+          gcloud run deploy flatmate-api-staging \
+            --image "$IMAGE_TAG" \
+            --region asia-south1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging" \
+            --set-secrets "DATABASE_URL=STAGING_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
+          URL=$(gcloud run services describe flatmate-api-staging --region asia-south1 --format 'value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   build-and-deploy-frontend:
     name: Build & Deploy Frontend to Vercel (Staging)
+    needs: [preflight]
+    if: needs.preflight.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     environment: staging
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -109,21 +144,29 @@ jobs:
         run: npm install --global vercel@latest
 
       - name: Deploy to Vercel Staging Environment
-        if: env.VERCEL_TOKEN != ''
-        run: |
-          vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
-          vercel build --token=${{ secrets.VERCEL_TOKEN }}
-          vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel build --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --token="$VERCEL_TOKEN"
 
   verify-staging:
-    name: Trigger Automated Staging Smoke Tests
-    needs: [build-and-deploy-backend, database-migration, build-and-deploy-frontend]
+    name: Staging Smoke Test (backend readiness)
+    needs: [build-and-deploy-backend]
+    if: needs.build-and-deploy-backend.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Notify Staging Deployment Succeeded
+      - name: Check /health/ready on the deployed backend
+        env:
+          API_URL: ${{ needs.build-and-deploy-backend.outputs.url }}
         run: |
-          echo "✅ Staging Deployment Phase Completed. Ready for automated smoke tests."
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -s -o /tmp/ready.json -w '%{http_code}' "$API_URL/health/ready" || true)
+            if [ "$code" = "200" ]; then cat /tmp/ready.json; exit 0; fi
+            echo "Attempt $attempt: HTTP $code"; sleep 10
+          done
+          echo "::error::Staging backend is not ready at $API_URL/health/ready"
+          exit 1

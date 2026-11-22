@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.postgres
-    image: flatmate/postgres:16-postgis-pgvector
+    image: flatmate/postgres:17-postgis-pgvector
     container_name: flatmate_postgres
     restart: unless-stopped
     environment:
@@ -24,7 +24,7 @@ services:
   # Disposable database for the backend test suite (apps/api/tests/conftest.py defaults to it).
   # tmpfs storage: wiped on every container restart, never touches dev data.
   postgres-test:
-    image: flatmate/postgres:16-postgis-pgvector
+    image: flatmate/postgres:17-postgis-pgvector
     build:
       context: .
       dockerfile: infrastructure/docker/Dockerfile.postgres
