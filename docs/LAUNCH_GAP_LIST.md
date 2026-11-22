@@ -21,9 +21,20 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       breaks the endpoint for everyone. Real-DB tests are in
       `tests/test_matching_recommendations_db.py`. *Caveat: pgvector is not installed locally,
       so the ANN path is exercised only in CI (pgvector is now installed there) and on Supabase.*
-- [ ] **3b. PostGIS is faked when missing.** Migration 001 creates a stub `st_asewkb` that returns
-      one hardcoded point, so all properties get the same location. Remove the fake, require
-      PostGIS (Supabase has it), and install it locally.
+- [x] **3b. PostGIS was faked when missing.** *(Done.)* Migration 001 now requires real PostGIS.
+      Migration `004_real_postgis_location` converts databases that got the fakes:
+      `properties.location`, `cities.center_location` and `localities.center_location` become
+      `geometry(Point,4326)`, the shim functions and domain are dropped, and a GiST index is
+      added on `location::geography`. Radius search now filters and sorts in PostGIS **before**
+      pagination (previously it paginated first, then filtered in Python). The silent Bengaluru
+      default coordinates are removed. Real-PostGIS tests are in `test_search_geospatial.py`.
+      PostGIS 3.7.0 is installed natively on the dev machine.
+- [ ] **3c. Seed data has every property at one point.** All 60 properties in local
+      `flatmate_db` share `POINT(77.6446 12.9121)`, an artefact of the old fake. Regenerate the
+      seed with real coordinates.
+- [ ] **3d. pgvector not installed natively.** Migration 003's vector index is skipped on the
+      dev machine (there are no official Windows binaries; it needs a Visual Studio build or the
+      Docker image `infrastructure/docker/Dockerfile.postgres`). CI and Supabase have it.
 - [ ] **4. No transactional email.** Nothing sends mail. Needed for verification, password reset
       confirmation, application and appointment notices (Resend/SES adapter + templates).
 - [ ] **5. Workers are stubs.** `workers/tasks.py` only uses `print` and `sleep`. Needs real

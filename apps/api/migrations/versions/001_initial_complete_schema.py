@@ -40,40 +40,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    # Create required extensions or safe fallbacks if PostGIS/vector C-extensions are missing
-    try:
-        bind.execute(sa.text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
-        bind.execute(sa.text('CREATE EXTENSION IF NOT EXISTS "pg_trgm";'))
-    except Exception:
-        pass
-
-    try:
-        bind.execute(sa.text("""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
-                CREATE DOMAIN vector AS double precision[];
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'geometry') THEN
-                CREATE DOMAIN geometry AS text;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'st_asewkb') THEN
-                CREATE FUNCTION st_asewkb(geom text) RETURNS bytea AS $fn$ BEGIN RETURN E'\\x0101000020e6100000f6285c8fc2655340a69bc420b0f12940'::bytea; END; $fn$ LANGUAGE plpgsql IMMUTABLE;
-                CREATE FUNCTION st_asewkb(geom geometry) RETURNS bytea AS $fn$ BEGIN RETURN E'\\x0101000020e6100000f6285c8fc2655340a69bc420b0f12940'::bytea; END; $fn$ LANGUAGE plpgsql IMMUTABLE;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'st_geomfromewkt') THEN
-                CREATE FUNCTION st_geomfromewkt(ewkt text) RETURNS geometry AS $fn$ BEGIN RETURN ewkt::geometry; END; $fn$ LANGUAGE plpgsql IMMUTABLE;
-            END IF;
-        END $$;
-        """))
-    except Exception:
-        pass
-
-    try:
-        from geoalchemy2.types import _GISType
-        setattr(_GISType, "get_col_spec", lambda self, **kw: "geometry")
-    except Exception:
-        pass
+    # Required extensions. PostGIS is mandatory (Supabase provides it; locally use
+    # infrastructure/docker/Dockerfile.postgres). Failing here is intentional: earlier versions
+    # swallowed this error and installed fake ST_* functions that put every property at one point.
+    bind.execute(sa.text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
+    bind.execute(sa.text('CREATE EXTENSION IF NOT EXISTS "pg_trgm";'))
+    bind.execute(sa.text('CREATE EXTENSION IF NOT EXISTS postgis;'))
 
     Base.metadata.create_all(bind)
 

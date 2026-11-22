@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from geoalchemy2.elements import WKTElement
+from geoalchemy2.shape import to_shape
 from app.modules.properties.models import Property, Room, Bed, PropertyAmenity
 from app.modules.properties.schemas import PropertyCreate, PropertyUpdate
 from app.core.exceptions import NotFoundException, ForbiddenException, BadRequestException, ConflictException
@@ -17,15 +18,9 @@ class PropertyService:
         self.db = db
 
     def _format_property_response(self, prop: Property, viewer_id: Optional[UUID] = None, is_admin: bool = False) -> dict:
-        lat = 12.9716  # Bengaluru default coordinates
-        lng = 77.5946
-        if hasattr(prop, "location") and prop.location is not None:
-            try:
-                from shapely import wkb
-                point = wkb.loads(bytes(prop.location.data))
-                lng, lat = point.x, point.y
-            except Exception:
-                pass
+        # location is NOT NULL in the schema; a decode failure is a real error, never a default point.
+        point = to_shape(prop.location)
+        lat, lng = point.y, point.x
 
         amenity_keys = [a.amenity_key for a in prop.amenities] if prop.amenities else []
         rooms = []
@@ -165,7 +160,7 @@ class PropertyService:
         if data.current_occupants > data.max_capacity:
             raise BadRequestException("Current occupants cannot exceed maximum capacity")
 
-        wkt_point = f"SRID=4326;POINT({data.longitude} {data.latitude})"
+        wkt_point = f"POINT({data.longitude} {data.latitude})"
         prop = Property(
             owner_id=owner_id,
             title=data.title,

@@ -11,22 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";;
 
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";;
 
-DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector') THEN
-                CREATE DOMAIN vector AS double precision[];
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'geometry') THEN
-                CREATE DOMAIN geometry AS text;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'st_asewkb') THEN
-                CREATE FUNCTION st_asewkb(geom text) RETURNS bytea AS $fn$ BEGIN RETURN E'\x0101000020e6100000f6285c8fc2655340a69bc420b0f12940'::bytea; END; $fn$ LANGUAGE plpgsql IMMUTABLE;
-                CREATE FUNCTION st_asewkb(geom geometry) RETURNS bytea AS $fn$ BEGIN RETURN E'\x0101000020e6100000f6285c8fc2655340a69bc420b0f12940'::bytea; END; $fn$ LANGUAGE plpgsql IMMUTABLE;
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'st_geomfromewkt') THEN
-                CREATE FUNCTION st_geomfromewkt(ewkt text) RETURNS geometry AS $fn$ BEGIN RETURN ewkt::geometry; END; $fn$ LANGUAGE plpgsql IMMUTABLE;
-            END IF;
-        END $$;;
+CREATE EXTENSION IF NOT EXISTS postgis;;
 
 CREATE TABLE users (
     id UUID NOT NULL, 
@@ -80,11 +65,11 @@ CREATE TABLE outbox_events (
     PRIMARY KEY (id)
 );
 
-CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
-
 CREATE INDEX ix_outbox_events_status ON outbox_events (status);
 
 CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
+
+CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
 
 CREATE TABLE subscription_plans (
     id UUID NOT NULL, 
@@ -224,7 +209,7 @@ CREATE TABLE properties (
     description TEXT NOT NULL, 
     property_category VARCHAR(50) NOT NULL, 
     configuration VARCHAR(50) NOT NULL, 
-    location geometry NOT NULL, 
+    location geometry(POINT,4326) NOT NULL, 
     address_display VARCHAR(255) NOT NULL, 
     address_exact VARCHAR(255) NOT NULL, 
     city VARCHAR(100) NOT NULL, 
@@ -257,13 +242,13 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_properties_postal_code ON properties (postal_code);
-
 CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
-CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
+CREATE INDEX ix_properties_postal_code ON properties (postal_code);
 
 CREATE INDEX ix_properties_city ON properties (city);
+
+CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE TABLE groups (
     id UUID NOT NULL, 
@@ -291,9 +276,9 @@ CREATE TABLE match_interactions (
     FOREIGN KEY(target_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
-
 CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
+
+CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
 
 CREATE TABLE mutual_matches (
     id UUID NOT NULL, 
@@ -405,7 +390,7 @@ CREATE TABLE cities (
     name VARCHAR(100) NOT NULL, 
     slug VARCHAR(100) NOT NULL, 
     tier INTEGER NOT NULL, 
-    center_location geometry, 
+    center_location geometry(POINT,4326), 
     PRIMARY KEY (id), 
     FOREIGN KEY(state_id) REFERENCES states (id) ON DELETE CASCADE
 );
@@ -513,7 +498,7 @@ CREATE TABLE localities (
     city_id UUID NOT NULL, 
     name VARCHAR(120) NOT NULL, 
     postal_code VARCHAR(12) NOT NULL, 
-    center_location geometry NOT NULL, 
+    center_location geometry(POINT,4326) NOT NULL, 
     boundary_geojson JSONB, 
     PRIMARY KEY (id), 
     FOREIGN KEY(city_id) REFERENCES cities (id) ON DELETE CASCADE
@@ -616,11 +601,11 @@ CREATE TABLE applications (
     FOREIGN KEY(room_id) REFERENCES rooms (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_applications_status ON applications (status);
-
 CREATE INDEX ix_applications_applicant_id ON applications (applicant_id);
 
 CREATE INDEX ix_applications_property_id ON applications (property_id);
+
+CREATE INDEX ix_applications_status ON applications (status);
 
 CREATE TABLE tenant_memberships (
     id UUID NOT NULL, 
@@ -641,9 +626,9 @@ CREATE TABLE tenant_memberships (
     FOREIGN KEY(tenant_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
-
 CREATE INDEX ix_tenant_memberships_property_id ON tenant_memberships (property_id);
+
+CREATE INDEX ix_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
 
 CREATE TABLE conversations (
     id UUID NOT NULL, 
@@ -666,13 +651,13 @@ CREATE TABLE conversations (
 
 CREATE INDEX ix_conversations_property_id ON conversations (property_id);
 
-CREATE INDEX ix_conversations_flatmate_match_id ON conversations (flatmate_match_id);
-
 CREATE INDEX ix_conversations_group_id ON conversations (group_id);
+
+CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
 
 CREATE INDEX ix_conversations_application_id ON conversations (application_id);
 
-CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
+CREATE INDEX ix_conversations_flatmate_match_id ON conversations (flatmate_match_id);
 
 CREATE TABLE conversation_participants (
     id UUID NOT NULL, 
@@ -690,9 +675,9 @@ CREATE TABLE conversation_participants (
 
 CREATE INDEX ix_conversation_participants_conversation_id ON conversation_participants (conversation_id);
 
-CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
-
 CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
+
+CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
 
 CREATE TABLE messages (
     id UUID NOT NULL, 
@@ -721,9 +706,9 @@ CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE INDEX ix_messages_sender_id ON messages (sender_id);
 
-CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
-
 CREATE INDEX ix_messages_sent_at ON messages (sent_at);
+
+CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -742,9 +727,9 @@ CREATE TABLE conversation_preferences (
 
 CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
-CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
-
 CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
+
+CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
 
 CREATE TABLE attachments (
     id UUID NOT NULL, 
@@ -946,6 +931,70 @@ UPDATE profiles SET lifestyle_vector = lifestyle_vector;
 CREATE INDEX IF NOT EXISTS ix_profiles_lifestyle_embedding_hnsw ON profiles USING hnsw (lifestyle_embedding vector_cosine_ops);
 
 UPDATE alembic_version SET version_num='003_pgvector_matching' WHERE alembic_version.version_num = '002_messaging_realtime';
+
+-- Running upgrade 003_pgvector_matching -> 004_real_postgis_location
+
+DO $$
+        DECLARE r record;
+        BEGIN
+            -- Every column typed with the fake domain (properties.location,
+            -- cities.center_location, localities.center_location) is detached to text first.
+            FOR r IN
+                SELECT c.relname AS tbl, a.attname AS col
+                FROM pg_attribute a
+                JOIN pg_class c ON c.oid = a.attrelid
+                JOIN pg_type t ON t.oid = a.atttypid
+                WHERE t.typname = 'geometry' AND t.typtype = 'd' AND c.relkind = 'r' AND NOT a.attisdropped
+            LOOP
+                EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE text USING %I::text', r.tbl, r.col, r.col);
+            END LOOP;
+
+            FOR r IN
+                SELECT p.oid::regprocedure AS sig
+                FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+                WHERE l.lanname = 'plpgsql' AND p.proname IN ('st_asewkb', 'st_geomfromewkt')
+            LOOP
+                EXECUTE 'DROP FUNCTION ' || r.sig;
+            END LOOP;
+
+            IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'geometry' AND typtype = 'd') THEN
+                DROP DOMAIN geometry;
+            END IF;
+        END $$;;
+
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+DO $$
+        DECLARE
+            spec record;
+            coltype text;
+        BEGIN
+            FOR spec IN
+                SELECT * FROM (VALUES
+                    ('properties', 'location'),
+                    ('cities', 'center_location'),
+                    ('localities', 'center_location')
+                ) AS v(tbl, col)
+            LOOP
+                SELECT format_type(a.atttypid, a.atttypmod) INTO coltype
+                FROM pg_attribute a
+                WHERE a.attrelid = spec.tbl::regclass AND a.attname = spec.col AND NOT a.attisdropped;
+
+                IF coltype = 'text' THEN
+                    EXECUTE format(
+                        'ALTER TABLE %I ALTER COLUMN %I TYPE geometry(Point, 4326) '
+                        'USING ST_SetSRID(ST_GeomFromEWKT(%I), 4326)', spec.tbl, spec.col, spec.col);
+                ELSIF coltype = 'geometry' THEN
+                    EXECUTE format(
+                        'ALTER TABLE %I ALTER COLUMN %I TYPE geometry(Point, 4326) '
+                        'USING ST_SetSRID(%I, 4326)', spec.tbl, spec.col, spec.col);
+                END IF;
+            END LOOP;
+        END $$;;
+
+CREATE INDEX IF NOT EXISTS ix_properties_location_geog ON properties USING gist ((location::geography));
+
+UPDATE alembic_version SET version_num='004_real_postgis_location' WHERE alembic_version.version_num = '003_pgvector_matching';
 
 COMMIT;
 

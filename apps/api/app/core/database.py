@@ -1,16 +1,36 @@
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
+from urllib.parse import urlparse
+from uuid import uuid4
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG and settings.ENVIRONMENT == "development",
-    future=True,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-)
+def uses_transaction_pooler(database_url: str) -> bool:
+    """Supabase Supavisor / PgBouncer in transaction mode (port 6543) cannot keep per-connection
+    prepared statements, because consecutive transactions may land on different server connections."""
+    parsed = urlparse(database_url.replace("+asyncpg", ""))
+    return parsed.port == 6543 or "pgbouncer=true" in (parsed.query or "")
+
+
+def engine_options(database_url: str) -> Dict[str, Any]:
+    options: Dict[str, Any] = {
+        "echo": settings.DEBUG and settings.ENVIRONMENT == "development",
+        "future": True,
+        "pool_pre_ping": True,
+        "pool_size": 10,
+        "max_overflow": 20,
+    }
+    if uses_transaction_pooler(database_url):
+        options["connect_args"] = {
+            # Disable asyncpg's statement cache and use unique names so statements never
+            # collide across pooled server connections (SQLAlchemy asyncpg + PgBouncer guidance).
+            "statement_cache_size": 0,
+            "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
+        }
+    return options
+
+
+engine = create_async_engine(settings.DATABASE_URL, **engine_options(settings.DATABASE_URL))
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

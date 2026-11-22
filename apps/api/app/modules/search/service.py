@@ -2,15 +2,15 @@
 Search & Discovery Service
 Implements PostGIS spatial radius discovery, coordinate fuzzing, and flatmate search.
 """
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import ColumnElement, select, or_, func, literal_column, text
 from app.modules.properties.models import Property
 from app.modules.profiles.models import Profile
 from app.modules.users.models import User
-from app.infrastructure.geospatial import haversine_distance, fuzz_coordinates
+from app.infrastructure.geospatial import fuzz_coordinates
 from app.modules.search.schemas import (
     PropertySearchFilter,
     PropertySearchResultItem,
@@ -33,8 +33,13 @@ class SearchService:
         filters: PropertySearchFilter,
         is_authenticated_viewer: bool = False
     ) -> List[PropertySearchResultItem]:
+        # Coordinates come straight from PostGIS; no client-side WKB decoding or default point.
         query = (
-            select(Property)
+            select(
+                Property,
+                func.ST_Y(Property.location).label("lat"),
+                func.ST_X(Property.location).label("lng"),
+            )
             .where(Property.is_active.is_(True))
             .where(Property.listing_status == "published")
         )
@@ -68,33 +73,36 @@ class SearchService:
         if filters.smoking_allowed is not None:
             query = query.where(Property.smoking_allowed.is_(filters.smoking_allowed))
 
+        center_lat, center_lng = filters.latitude, filters.longitude
+        has_center = center_lat is not None and center_lng is not None
+        if center_lat is not None and center_lng is not None:
+            # Radius filter and distance ordering run in PostGIS BEFORE pagination, using the
+            # GiST index on (location::geography) from migration 004. Distances are metres.
+            location_geog: ColumnElement[Any] = literal_column("properties.location::geography")
+            center_geog = text(
+                "ST_SetSRID(ST_MakePoint(:center_lng, :center_lat), 4326)::geography"
+            ).bindparams(center_lng=float(center_lng), center_lat=float(center_lat))
+            distance_km = (func.ST_Distance(location_geog, center_geog) / 1000.0).label("distance_km")
+            query = (
+                query.add_columns(distance_km)
+                .where(func.ST_DWithin(location_geog, center_geog, float(filters.radius_km) * 1000.0))
+                .order_by(distance_km, Property.id)
+            )
+        else:
+            query = query.order_by(Property.created_at.desc(), Property.id)
+
         query = query.limit(filters.limit).offset(filters.offset)
-        result = await self.db.execute(query)
-        props = result.scalars().all()
+        rows = (await self.db.execute(query)).all()
 
         items: List[PropertySearchResultItem] = []
-        for prop in props:
-            # Extract coordinates from PostGIS or defaults
-            lat = 12.9716
-            lng = 77.5946
-            if hasattr(prop, "location") and prop.location is not None:
-                try:
-                    from shapely import wkb
-                    point = wkb.loads(bytes(prop.location.data))
-                    lng, lat = point.x, point.y
-                except Exception:
-                    pass
-
-            distance_km: Optional[float] = None
-            if filters.latitude is not None and filters.longitude is not None:
-                distance_km = haversine_distance(filters.latitude, filters.longitude, lat, lng)
-                if distance_km > filters.radius_km:
-                    continue  # Outside requested search radius
+        for row in rows:
+            prop, lat, lng = row[0], float(row[1]), float(row[2])
+            distance_km_value: Optional[float] = float(row[3]) if has_center else None
 
             # Always apply coordinate fuzzing to discovery search results to safeguard resident privacy
             fuzzed_lat, fuzzed_lng = fuzz_coordinates(lat, lng, precision_decimals=2)
             is_fuzzed = True
-            coarse_dist = round(distance_km, 1) if distance_km is not None else None
+            coarse_dist = round(distance_km_value, 1) if distance_km_value is not None else None
 
             items.append(PropertySearchResultItem(
                 id=prop.id,
@@ -120,10 +128,6 @@ class SearchService:
                 distance_km=coarse_dist,
                 is_fuzzed_location=is_fuzzed,
             ))
-
-        # Sort by distance if radius query was supplied
-        if filters.latitude is not None and filters.longitude is not None:
-            items.sort(key=lambda x: x.distance_km if x.distance_km is not None else 999999.0)
 
         return items
 

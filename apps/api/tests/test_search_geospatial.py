@@ -4,6 +4,7 @@ Coordinate Fuzzing, and Flatmate Search.
 """
 from uuid import uuid4
 from decimal import Decimal
+from datetime import date
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from app.infrastructure.geospatial import haversine_distance, compute_bounding_box, fuzz_coordinates
@@ -36,74 +37,89 @@ def test_bounding_box_computation():
     assert min_lat < 12.9716 < max_lat
     assert min_lon < 77.5946 < max_lon
 
-@pytest.mark.asyncio
-async def test_property_search_with_radius_and_fuzzing():
-    """Properties are filtered by distance radius and unauthenticated viewers receive fuzzed coordinates."""
-    mock_db = AsyncMock()
-    service = SearchService(mock_db)
+# --- Real PostGIS radius search (no mocks) ---------------------------------------------
 
-    # Prop 1: In Koramangala (~5km from MG Road)
-    prop1 = Property(
-        id=uuid4(),
-        owner_id=uuid4(),
-        title="2BHK Koramangala",
-        description="Spacious flat",
-        property_category="apartment",
-        configuration="2BHK",
-        address_display="Koramangala 4th Block",
-        city="Bengaluru",
-        postal_code="560034",
-        monthly_rent=Decimal("30000.00"),
-        security_deposit=Decimal("90000.00"),
-        total_bedrooms=2,
-        total_bathrooms=2,
-        max_capacity=3,
-        current_occupants=0,
-        furnishing_status="semi_furnished",
-        is_active=True,
-        listing_status="published",
+MG_ROAD = (12.9756, 77.6066)  # (lat, lng)
+POINTS = {
+    "koramangala": (12.9352, 77.6245),  # ~5 km from MG Road
+    "whitefield": (12.9698, 77.7500),   # ~15.5 km
+    "mumbai": (19.0760, 72.8777),       # ~840 km
+}
+
+
+@pytest.fixture
+async def geo_listings():
+    from geoalchemy2.elements import WKTElement
+    from sqlalchemy import delete
+    from app.core.database import AsyncSessionLocal
+
+    city = f"Geotest-{uuid4().hex[:8]}"  # isolates these rows from anything else in the test DB
+    async with AsyncSessionLocal() as session:
+        owner = User(id=uuid4(), email=f"geo-{uuid4().hex[:8]}@example.test", hashed_password="x", full_name="Geo Owner")
+        session.add(owner)
+        await session.flush()
+        for name, (lat, lng) in POINTS.items():
+            session.add(Property(
+                id=uuid4(), owner_id=owner.id, title=f"Flat in {name}", description="test",
+                location=WKTElement(f"POINT({lng} {lat})", srid=4326),
+                address_display=name, address_exact=f"1 {name} street", city=city, postal_code="560001",
+                monthly_rent=Decimal("30000.00"), is_active=True, listing_status="published",
+                available_from=date.today(),
+            ))
+        owner_id = owner.id
+        await session.commit()
+        yield session, city
+        await session.rollback()
+        await session.execute(delete(User).where(User.id == owner_id))
+        await session.commit()
+
+
+async def _search(session, city, **kw):
+    filters = PropertySearchFilter(latitude=MG_ROAD[0], longitude=MG_ROAD[1], city=city, **kw)
+    return await SearchService(session).search_properties(filters, is_authenticated_viewer=False)
+
+
+async def test_radius_search_excludes_far_listings(geo_listings):
+    session, city = geo_listings
+    results = await _search(session, city, radius_km=10.0)
+    assert [r.address_display for r in results] == ["koramangala"]
+    assert 4.0 <= results[0].distance_km <= 6.0
+
+
+async def test_radius_search_orders_by_distance_with_real_coordinates(geo_listings):
+    session, city = geo_listings
+    results = await _search(session, city, radius_km=20.0)
+    assert [r.address_display for r in results] == ["koramangala", "whitefield"]
+    assert 14.0 <= results[1].distance_km <= 17.0
+    # Regression: coordinates used to come back as one hardcoded point for every listing.
+    assert results[0].latitude != results[1].latitude or results[0].longitude != results[1].longitude
+    # Privacy: public results are fuzzed to 2 decimals.
+    for r in results:
+        assert r.is_fuzzed_location is True
+        assert round(r.latitude, 2) == r.latitude
+
+
+async def test_radius_filter_applies_before_pagination(geo_listings):
+    """Regression: LIMIT/OFFSET used to run before the radius filter, so pages were wrong."""
+    session, city = geo_listings
+    page2 = await _search(session, city, radius_km=20.0, limit=1, offset=1)
+    assert [r.address_display for r in page2] == ["whitefield"]
+
+
+async def test_location_geography_index_is_usable(geo_listings):
+    from sqlalchemy import text
+
+    session, _ = geo_listings
+    await session.execute(text("SET LOCAL enable_seqscan = off"))
+    plan = " | ".join(
+        row[0] for row in (await session.execute(text(
+            "EXPLAIN SELECT id FROM properties WHERE ST_DWithin(properties.location::geography, "
+            "ST_SetSRID(ST_MakePoint(77.6066, 12.9756), 4326)::geography, 10000)"
+        ))).all()
     )
-    # Prop 2: In Whitefield (~18km from MG Road)
-    prop2 = Property(
-        id=uuid4(),
-        owner_id=uuid4(),
-        title="3BHK Whitefield",
-        description="Luxury apartment",
-        property_category="apartment",
-        configuration="3BHK",
-        address_display="Whitefield Main Road",
-        city="Bengaluru",
-        postal_code="560066",
-        monthly_rent=Decimal("45000.00"),
-        security_deposit=Decimal("150000.00"),
-        total_bedrooms=3,
-        total_bathrooms=3,
-        max_capacity=4,
-        current_occupants=0,
-        furnishing_status="fully_furnished",
-        is_active=True,
-        listing_status="published",
-    )
+    await session.rollback()
+    assert "ix_properties_location_geog" in plan
 
-    mock_res = MagicMock()
-    mock_res.scalars.return_value.all.return_value = [prop1, prop2]
-    mock_db.execute.return_value = mock_res
-
-    # Search with 10km radius from MG Road (12.9756, 77.6066)
-    filters = PropertySearchFilter(
-        latitude=12.9756,
-        longitude=77.6066,
-        radius_km=10.0,
-        city="Bengaluru",
-    )
-
-    # Unauthenticated visitor:
-    results = await service.search_properties(filters, is_authenticated_viewer=False)
-    assert len(results) >= 1
-    # Check that coordinate fuzzing was applied
-    assert results[0].is_fuzzed_location is True
-    assert round(results[0].latitude, 2) == results[0].latitude
-    assert results[0].currency == "INR"
 
 @pytest.mark.asyncio
 async def test_flatmate_discovery_search():

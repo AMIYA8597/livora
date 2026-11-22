@@ -63,3 +63,16 @@ def test_supabase_signed_url_missing_raises():
     provider.client = _Client()
     with pytest.raises(StorageConfigurationError):
         provider.get_signed_url("kyc", "doc.pdf")
+
+
+def test_transaction_pooler_disables_prepared_statement_cache():
+    from app.core.database import engine_options, uses_transaction_pooler
+
+    pooled = "postgresql+asyncpg://u:p@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
+    session = "postgresql+asyncpg://u:p@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+    assert uses_transaction_pooler(pooled)
+    assert not uses_transaction_pooler(session)
+    args = engine_options(pooled)["connect_args"]
+    assert args["statement_cache_size"] == 0
+    assert args["prepared_statement_name_func"]() != args["prepared_statement_name_func"]()
+    assert "connect_args" not in engine_options(session)

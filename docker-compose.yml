@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: ankane/pgvector:v0.7.4-pg16
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.postgres
+    image: flatmate/postgres:16-postgis-pgvector
     container_name: flatmate_postgres
     restart: unless-stopped
     environment:
@@ -18,6 +21,28 @@ services:
       timeout: 5s
       retries: 5
 
+
+  # Disposable database for the backend test suite (apps/api/tests/conftest.py defaults to it).
+  # tmpfs storage: wiped on every container restart, never touches dev data.
+  postgres-test:
+    image: flatmate/postgres:16-postgis-pgvector
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.postgres
+    container_name: flatmate_postgres_test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: flatmate_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d flatmate_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
   redis:
     image: redis:7.2-alpine
     container_name: flatmate_redis

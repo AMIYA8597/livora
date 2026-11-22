@@ -4,6 +4,7 @@ Verifies all 8 Core User Journeys (A through H) across Seeker, Owner, Tenant, PG
 Group, Moderation/Safety, Credentials/Recovery, and DPDP Privacy/Masking.
 """
 import pytest
+from geoalchemy2.elements import WKTElement
 from uuid import uuid4
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta, date
@@ -664,6 +665,7 @@ async def test_phase18_journey_h_dpdp_privacy_and_location_masking():
         configuration="3BHK",
         address_display="HSR Layout Sector 2, Bengaluru",
         address_exact="Flat 302, Green Glen Apartments, 14th Cross",
+        location=WKTElement("POINT(77.6446 12.9121)", srid=4326),
         city="Bengaluru",
         state="Karnataka",
         postal_code="560102",
