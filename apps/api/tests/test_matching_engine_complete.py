@@ -130,7 +130,10 @@ async def test_mutual_match_lifecycle_transactional():
     mock_reciprocal = MagicMock()
     mock_reciprocal.scalar_one_or_none.return_value = None # User B has not liked User A yet
 
-    mock_db.execute.side_effect = [mock_existing_int, mock_reciprocal]
+    mock_no_block = MagicMock()
+    mock_no_block.scalar_one_or_none.return_value = None
+
+    mock_db.execute.side_effect = [mock_no_block, mock_existing_int, mock_reciprocal]
 
     res_a = await service.record_interaction(user_a, user_b, action="like")
     assert res_a.is_mutual_match is False
@@ -159,7 +162,7 @@ async def test_mutual_match_lifecycle_transactional():
     mock_breakdown.model_dump.return_value = {"overall_score": 88.5}
     service.get_pairwise_score.return_value = mock_breakdown
 
-    mock_db.execute.side_effect = [mock_existing_int_b, mock_reciprocal_found, mock_existing_mutual]
+    mock_db.execute.side_effect = [mock_no_block, mock_existing_int_b, mock_reciprocal_found, mock_existing_mutual]
 
     res_b = await service.record_interaction(user_b, user_a, action="like")
     assert res_b.is_mutual_match is True

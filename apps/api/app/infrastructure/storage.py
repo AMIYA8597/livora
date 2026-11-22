@@ -45,38 +45,55 @@ class LocalStorageProvider(StorageProvider):
             raise ValueError("Path traversal attempt detected")
         return f"/uploads/{bucket}/{path}?expires={expires_in}"
 
+class StorageConfigurationError(RuntimeError):
+    """Raised when the configured storage backend cannot be used."""
+
+
+LOCAL_STORAGE_ENVIRONMENTS = {"development", "test", "ci", "local"}
+
+
 class SupabaseStorageProvider(StorageProvider):
     def __init__(self, url: str, key: str):
+        if not url or not key:
+            raise StorageConfigurationError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for Supabase storage")
         try:
             from supabase import create_client, Client
-            self.client: Optional[Client] = create_client(url, key)
-        except Exception:
-            self.client = None
+            self.client: Client = create_client(url, key)
+        except Exception as exc:  # pragma: no cover - depends on SDK/network
+            raise StorageConfigurationError(f"Failed to initialise Supabase storage client: {exc}") from exc
 
     def upload_file(self, bucket: str, destination_path: str, data: bytes, content_type: str = "application/octet-stream") -> str:
-        if not self.client:
-            return f"https://mock.supabase.co/storage/v1/object/public/{bucket}/{destination_path}"
         self.client.storage.from_(bucket).upload(destination_path, data, {"content-type": content_type})
-        return self.client.storage.from_(bucket).get_public_url(destination_path)
+        return str(self.client.storage.from_(bucket).get_public_url(destination_path))
 
     def get_signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str:
-        if not self.client:
-            return f"https://mock.supabase.co/storage/v1/object/sign/{bucket}/{path}?expires={expires_in}"
         res = self.client.storage.from_(bucket).create_signed_url(path, expires_in)
-        if isinstance(res, dict):
-            return str(res.get("signedURL") or "")
-        return str(res or "")
+        url = res.get("signedURL") or res.get("signedUrl") if isinstance(res, dict) else res
+        if not url:
+            raise StorageConfigurationError(f"Supabase returned no signed URL for {bucket}/{path}")
+        return str(url)
 
 _storage_instance: Optional[StorageProvider] = None
 
 def init_storage() -> StorageProvider:
+    """
+    Build the storage backend. Never silently degrades: local disk is only allowed in
+    development/test environments, and a broken Supabase configuration fails startup.
+    """
     global _storage_instance
-    storage_type = getattr(settings, "STORAGE_TYPE", "local").lower()
+    storage_type = (settings.STORAGE_TYPE or "local").lower()
+    environment = (settings.ENVIRONMENT or "development").lower()
 
-    if storage_type == "supabase" and hasattr(settings, "SUPABASE_URL") and settings.SUPABASE_URL:
-        _storage_instance = SupabaseStorageProvider(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY or "")
-    else:
+    if storage_type == "supabase":
+        _storage_instance = SupabaseStorageProvider(settings.SUPABASE_URL or "", settings.SUPABASE_SERVICE_ROLE_KEY or "")
+    elif storage_type == "local":
+        if environment not in LOCAL_STORAGE_ENVIRONMENTS:
+            raise StorageConfigurationError(
+                f"Local filesystem storage is not allowed in '{environment}'. Set STORAGE_TYPE=supabase."
+            )
         _storage_instance = LocalStorageProvider()
+    else:
+        raise StorageConfigurationError(f"Unknown STORAGE_TYPE '{storage_type}'")
     return _storage_instance
 
 def get_storage() -> StorageProvider:

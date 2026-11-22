@@ -42,9 +42,9 @@ CREATE TABLE users (
     PRIMARY KEY (id)
 );
 
-CREATE UNIQUE INDEX ix_users_email ON users (email);
-
 CREATE INDEX ix_users_phone_number ON users (phone_number);
+
+CREATE UNIQUE INDEX ix_users_email ON users (email);
 
 CREATE TABLE professional_domains (
     id UUID NOT NULL, 
@@ -80,11 +80,11 @@ CREATE TABLE outbox_events (
     PRIMARY KEY (id)
 );
 
-CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
+CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
 
 CREATE INDEX ix_outbox_events_status ON outbox_events (status);
 
-CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
+CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
 
 CREATE TABLE subscription_plans (
     id UUID NOT NULL, 
@@ -257,9 +257,9 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_properties_owner_id ON properties (owner_id);
-
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
+
+CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
 CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
@@ -410,9 +410,9 @@ CREATE TABLE cities (
     FOREIGN KEY(state_id) REFERENCES states (id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
-
 CREATE INDEX ix_cities_name ON cities (name);
+
+CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
 
 CREATE TABLE rooms (
     id UUID NOT NULL, 
@@ -519,11 +519,11 @@ CREATE TABLE localities (
     FOREIGN KEY(city_id) REFERENCES cities (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_localities_name ON localities (name);
+CREATE INDEX ix_localities_postal_code ON localities (postal_code);
 
 CREATE INDEX ix_localities_city_id ON localities (city_id);
 
-CREATE INDEX ix_localities_postal_code ON localities (postal_code);
+CREATE INDEX ix_localities_name ON localities (name);
 
 CREATE TABLE beds (
     id UUID NOT NULL, 
@@ -666,13 +666,13 @@ CREATE TABLE conversations (
 
 CREATE INDEX ix_conversations_property_id ON conversations (property_id);
 
-CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
-
 CREATE INDEX ix_conversations_flatmate_match_id ON conversations (flatmate_match_id);
 
 CREATE INDEX ix_conversations_group_id ON conversations (group_id);
 
 CREATE INDEX ix_conversations_application_id ON conversations (application_id);
+
+CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
 
 CREATE TABLE conversation_participants (
     id UUID NOT NULL, 
@@ -690,9 +690,9 @@ CREATE TABLE conversation_participants (
 
 CREATE INDEX ix_conversation_participants_conversation_id ON conversation_participants (conversation_id);
 
-CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
-
 CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
+
+CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
 
 CREATE TABLE messages (
     id UUID NOT NULL, 
@@ -715,15 +715,15 @@ CREATE TABLE messages (
     FOREIGN KEY(reply_to_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_messages_sent_at ON messages (sent_at);
-
-CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
-
 CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
 
 CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE INDEX ix_messages_sender_id ON messages (sender_id);
+
+CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
+
+CREATE INDEX ix_messages_sent_at ON messages (sent_at);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -902,6 +902,50 @@ CREATE TABLE IF NOT EXISTS outbox_events (
 CREATE INDEX IF NOT EXISTS idx_outbox_status_created ON outbox_events(status, created_at);
 
 UPDATE alembic_version SET version_num='002_messaging_realtime' WHERE alembic_version.version_num = '001_initial_schema';
+
+-- Running upgrade 002_messaging_realtime -> 003_pgvector_matching
+
+CREATE INDEX IF NOT EXISTS ix_profiles_budget_range ON profiles (budget_min, budget_max);
+
+CREATE INDEX IF NOT EXISTS ix_user_blocks_user_id ON user_blocks (user_id);
+
+CREATE INDEX IF NOT EXISTS ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
+
+DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector' AND typtype = 'd') THEN
+                DROP DOMAIN vector;
+            END IF;
+        END $$;;
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS lifestyle_embedding vector(64);
+
+CREATE OR REPLACE FUNCTION profiles_sync_lifestyle_embedding() RETURNS trigger AS $$
+        BEGIN
+            IF NEW.lifestyle_vector IS NULL
+               OR cardinality(NEW.lifestyle_vector) <> 64
+               OR NOT EXISTS (SELECT 1 FROM unnest(NEW.lifestyle_vector) v WHERE v <> 0) THEN
+                NEW.lifestyle_embedding := NULL;
+            ELSE
+                NEW.lifestyle_embedding := NEW.lifestyle_vector::vector(64);
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;;
+
+DROP TRIGGER IF EXISTS trg_profiles_sync_lifestyle_embedding ON profiles;
+
+CREATE TRIGGER trg_profiles_sync_lifestyle_embedding
+        BEFORE INSERT OR UPDATE OF lifestyle_vector ON profiles
+        FOR EACH ROW EXECUTE FUNCTION profiles_sync_lifestyle_embedding();
+
+UPDATE profiles SET lifestyle_vector = lifestyle_vector;
+
+CREATE INDEX IF NOT EXISTS ix_profiles_lifestyle_embedding_hnsw ON profiles USING hnsw (lifestyle_embedding vector_cosine_ops);
+
+UPDATE alembic_version SET version_num='003_pgvector_matching' WHERE alembic_version.version_num = '002_messaging_realtime';
 
 COMMIT;
 

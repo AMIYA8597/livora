@@ -67,6 +67,51 @@ def compute_lifestyle_vector(traits: LifestyleTraitsSchema) -> list:
         vec = [x / norm for x in vec]
     return vec
 
+def build_profile_response(
+    profile: Profile,
+    user: User,
+    privacy: Optional[UserPrivacySetting],
+    requester_id: UUID,
+    is_admin: bool = False,
+) -> ProfileResponse:
+    """Serialise a profile for a requester, applying phone masking. Access checks are the caller's job."""
+    show_phone_publicly = bool(privacy and privacy.show_phone_publicly)
+    # Mask phone number if required
+    phone_to_expose = None
+    if requester_id == profile.user_id or is_admin or show_phone_publicly:
+        phone_to_expose = user.phone_number
+    elif user.phone_number:
+        if len(user.phone_number) >= 8:
+            phone_to_expose = f"{user.phone_number[:3]}******{user.phone_number[-2:]}"
+        else:
+            phone_to_expose = "******"
+
+    response_dict = {
+        "id": profile.id,
+        "user_id": profile.user_id,
+        "display_name": profile.display_name,
+        "avatar_url": profile.avatar_url,
+        "bio": profile.bio,
+        "birth_date": profile.birth_date,
+        "gender": profile.gender,
+        "occupation": profile.occupation,
+        "education_institute": profile.education_institute,
+        "education_degree": profile.education_degree,
+        "company_name": profile.company_name,
+        "designation": profile.designation,
+        "budget_min": profile.budget_min or 500,
+        "budget_max": profile.budget_max or 2500,
+        "move_in_date": profile.move_in_date,
+        "lease_duration_months": profile.lease_duration_months or 12,
+        "preferred_locations": profile.preferred_locations or [],
+        "lifestyle_traits": profile.lifestyle_traits or {},
+        "phone_number": phone_to_expose,
+        "created_at": profile.created_at or datetime.now(timezone.utc),
+        "updated_at": profile.updated_at or datetime.now(timezone.utc),
+    }
+    return ProfileResponse.model_validate(response_dict)
+
+
 class ProfileService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -160,37 +205,4 @@ class ProfileService:
                 if not match_res.scalar_one_or_none():
                     raise ForbiddenException("This profile is only visible to mutual matches")
 
-        # Mask phone number if required
-        phone_to_expose = None
-        if requester_id == target_user_id or is_admin or privacy.show_phone_publicly:
-            phone_to_expose = user.phone_number
-        elif user.phone_number:
-            if len(user.phone_number) >= 8:
-                phone_to_expose = f"{user.phone_number[:3]}******{user.phone_number[-2:]}"
-            else:
-                phone_to_expose = "******"
-
-        response_dict = {
-            "id": profile.id,
-            "user_id": profile.user_id,
-            "display_name": profile.display_name,
-            "avatar_url": profile.avatar_url,
-            "bio": profile.bio,
-            "birth_date": profile.birth_date,
-            "gender": profile.gender,
-            "occupation": profile.occupation,
-            "education_institute": profile.education_institute,
-            "education_degree": profile.education_degree,
-            "company_name": profile.company_name,
-            "designation": profile.designation,
-            "budget_min": profile.budget_min or 500,
-            "budget_max": profile.budget_max or 2500,
-            "move_in_date": profile.move_in_date,
-            "lease_duration_months": profile.lease_duration_months or 12,
-            "preferred_locations": profile.preferred_locations or [],
-            "lifestyle_traits": profile.lifestyle_traits or {},
-            "phone_number": phone_to_expose,
-            "created_at": profile.created_at or datetime.now(timezone.utc),
-            "updated_at": profile.updated_at or datetime.now(timezone.utc),
-        }
-        return ProfileResponse.model_validate(response_dict)
+        return build_profile_response(profile, user, privacy, requester_id, is_admin)

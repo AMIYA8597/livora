@@ -70,6 +70,12 @@ jobs:
         run: |
           python -m mypy apps/api/app
 
+      - name: Install pgvector into PostGIS service (matches Supabase extensions)
+        run: |
+          PG_CONTAINER=$(docker ps --filter "ancestor=postgis/postgis:16-3.4" --format "{{.ID}}")
+          docker exec "$PG_CONTAINER" bash -c "apt-get update && apt-get install -y --no-install-recommends postgresql-16-pgvector"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d flatmate_db -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS postgis;"
+
       - name: Database Schema & Migration Verification
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/flatmate_db
@@ -77,11 +83,14 @@ jobs:
         run: |
           cd apps/api
           python -m alembic upgrade head
+          python -m alembic downgrade -1
+          python -m alembic upgrade head
+          PGPASSWORD=postgres psql -h localhost -U postgres -d flatmate_db -tAc             "SELECT 1 FROM pg_indexes WHERE indexname = 'ix_profiles_lifestyle_embedding_hnsw'" | grep -q 1
 
       - name: Execute Pytest Suite with Coverage
         env:
           ENVIRONMENT: test
-          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/flatmate_db
+          TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/flatmate_db
           REDIS_URL: redis://localhost:6379/0
           SECRET_KEY: test_secret_key_minimum_32_characters_1234567890
         run: |

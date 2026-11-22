@@ -1,9 +1,9 @@
 from typing import List, Optional
 from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_, and_, func, text
 from app.modules.profiles.models import Profile
-from app.modules.users.models import User
+from app.modules.users.models import User, UserPrivacySetting
 from app.modules.lifestyle.models import UserDealbreaker
 from app.modules.matching.models import MatchInteraction, MutualMatch
 from app.modules.matching.engine import (
@@ -17,8 +17,16 @@ from app.modules.matching.schemas import (
     MatchInteractionResponse,
     MutualMatchItemResponse,
 )
-from app.modules.profiles.service import ProfileService
-from app.core.exceptions import NotFoundException, BadRequestException
+from app.modules.profiles.service import ProfileService, build_profile_response
+from app.core.exceptions import NotFoundException, BadRequestException, ForbiddenException
+from app.modules.moderation.models import UserBlock
+
+# Retrieval stage size: candidates fetched by SQL before exact re-ranking in Python.
+CANDIDATE_POOL_SIZE = 200
+# Budget ranges may miss each other by up to 25% and still be considered.
+BUDGET_TOLERANCE = 0.25
+# None = not yet probed; set by MatchingService._has_vector_index().
+_VECTOR_SEARCH_AVAILABLE: Optional[bool] = None
 
 VALID_INTERACTION_ACTIONS = {"like", "pass", "save", "super_like"}
 
@@ -26,44 +34,92 @@ class MatchingService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _has_vector_index(self) -> bool:
+        """True when migration 003 created the pgvector `lifestyle_embedding` column (cached per process)."""
+        global _VECTOR_SEARCH_AVAILABLE
+        if _VECTOR_SEARCH_AVAILABLE is None:
+            res = await self.db.execute(text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'profiles' AND column_name = 'lifestyle_embedding'"
+            ))
+            _VECTOR_SEARCH_AVAILABLE = res.scalar_one_or_none() is not None
+        return bool(_VECTOR_SEARCH_AVAILABLE)
+
     async def get_user_recommendations(self, user_id: UUID, limit: int = 10) -> List[FlatmateMatchResponse]:
+        """
+        Two-stage recommender:
+          1. Retrieval (SQL): exclude self, blocked/blocking users, inactive accounts, profiles the
+             requester may not see, and clearly incompatible budgets; order by pgvector cosine
+             distance via the HNSW index when available. One round trip, no per-candidate queries.
+          2. Ranking (Python): exact 10-dimension compatibility score + dealbreakers on the pool.
+        """
         profile_service = ProfileService(self.db)
         my_profile = await profile_service.get_by_user_id(user_id)
         if not my_profile:
             raise NotFoundException("Your profile has not been set up yet. Please complete your profile.")
 
-        # Load user dealbreakers
         db_query = select(UserDealbreaker).where(UserDealbreaker.user_id == user_id)
         dbs_res = await self.db.execute(db_query)
         dealbreakers = [{"rule_key": d.rule_key, "is_strict": d.is_strict, "expected_value": d.expected_value} for d in dbs_res.scalars().all()]
 
-        # Query other candidate profiles excluding blocked users
-        if type(self.db).__name__ != "AsyncMock":
-            from app.modules.moderation.models import UserBlock
-            blocked_q = select(UserBlock.blocked_user_id).where(UserBlock.user_id == user_id)
-            blocker_q = select(UserBlock.user_id).where(UserBlock.blocked_user_id == user_id)
-            blocked_ids = set((await self.db.execute(blocked_q)).scalars().all())
-            blocker_ids = set((await self.db.execute(blocker_q)).scalars().all())
-            excluded_ids = blocked_ids | blocker_ids | {user_id}
-            candidates_query = select(Profile).where(~Profile.user_id.in_(excluded_ids)).limit(50)
+        blocked_q = select(UserBlock.blocked_user_id).where(UserBlock.user_id == user_id)
+        blocker_q = select(UserBlock.user_id).where(UserBlock.blocked_user_id == user_id)
+        is_mutual_match = (
+            select(MutualMatch.id)
+            .where(
+                or_(
+                    and_(MutualMatch.user_one_id == user_id, MutualMatch.user_two_id == Profile.user_id),
+                    and_(MutualMatch.user_one_id == Profile.user_id, MutualMatch.user_two_id == user_id),
+                ),
+                MutualMatch.status == "matched",
+            )
+            .exists()
+        )
+        visibility = func.coalesce(UserPrivacySetting.profile_visibility, "public")
+
+        # Budget pre-filter with tolerance: ranges must overlap once widened by BUDGET_TOLERANCE.
+        my_min = my_profile.budget_min or 0
+        my_max = my_profile.budget_max or 10**9
+        widened_min = int(my_min * (1 - BUDGET_TOLERANCE))
+        widened_max = int(my_max * (1 + BUDGET_TOLERANCE))
+
+        stmt = (
+            select(Profile, User, UserPrivacySetting)
+            .join(User, User.id == Profile.user_id)
+            .outerjoin(UserPrivacySetting, UserPrivacySetting.user_id == Profile.user_id)
+            .where(
+                Profile.user_id != user_id,
+                ~Profile.user_id.in_(blocked_q),
+                ~Profile.user_id.in_(blocker_q),
+                User.is_active.is_(True),
+                or_(visibility == "public", and_(visibility == "matched_only", is_mutual_match)),
+                Profile.budget_min <= widened_max,
+                Profile.budget_max >= widened_min,
+            )
+        )
+
+        my_vector = list(my_profile.lifestyle_vector) if my_profile.lifestyle_vector is not None else []
+        has_signal = any(abs(x) > 0 for x in my_vector)
+        if has_signal and await self._has_vector_index():
+            stmt = stmt.order_by(
+                text("profiles.lifestyle_embedding <=> CAST(:query_vec AS vector) NULLS LAST")
+            ).params(query_vec="[" + ",".join(f"{x:.6f}" for x in my_vector) + "]")
         else:
-            candidates_query = select(Profile).where(Profile.user_id != user_id).limit(50)
-        candidates = (await self.db.execute(candidates_query)).scalars().all()
+            stmt = stmt.order_by(Profile.updated_at.desc().nullslast())
+        stmt = stmt.limit(CANDIDATE_POOL_SIZE)
+
+        rows = (await self.db.execute(stmt)).all()
 
         recommendations = []
         user_budget = (my_profile.budget_min, my_profile.budget_max)
-
-        for cand in candidates:
-            cand_budget = (cand.budget_min, cand.budget_max)
-            v1 = list(my_profile.lifestyle_vector) if my_profile.lifestyle_vector is not None else []
+        for cand, cand_user, cand_privacy in rows:
             v2 = list(cand.lifestyle_vector) if cand.lifestyle_vector is not None else []
-            sim = cosine_similarity(v1, v2)
-
+            sim = cosine_similarity(my_vector, v2)
             breakdown_dict = compute_10_dimension_compatibility(
                 user_traits=my_profile.lifestyle_traits or {},
                 target_traits=cand.lifestyle_traits or {},
                 user_budget=user_budget,
-                target_budget=cand_budget,
+                target_budget=(cand.budget_min, cand.budget_max),
                 user_occupation=my_profile.occupation,
                 target_occupation=cand.occupation,
                 user_preferred_locs=my_profile.preferred_locations or [],
@@ -71,12 +127,9 @@ class MatchingService:
                 vector_sim=sim,
                 user_dealbreakers=dealbreakers,
             )
-
-            score_schema = ScoreBreakdownSchema(**breakdown_dict)
-            cand_resp = await profile_service.get_profile_with_privacy(requester_id=user_id, target_user_id=cand.user_id)
             recommendations.append(FlatmateMatchResponse(
-                profile=cand_resp,
-                match_score=score_schema,
+                profile=build_profile_response(cand, cand_user, cand_privacy, requester_id=user_id),
+                match_score=ScoreBreakdownSchema(**breakdown_dict),
             ))
 
         recommendations.sort(key=lambda r: r.match_score.overall_score, reverse=True)
@@ -124,17 +177,14 @@ class MatchingService:
             raise BadRequestException("Cannot record an interaction with yourself")
 
         # Moderation check: cannot interact with blocked user
-        if type(self.db).__name__ != "AsyncMock":
-            from app.modules.moderation.models import UserBlock
-            block_check = select(UserBlock).where(
-                or_(
-                    and_(UserBlock.user_id == user_id, UserBlock.blocked_user_id == target_user_id),
-                    and_(UserBlock.user_id == target_user_id, UserBlock.blocked_user_id == user_id),
-                )
+        block_check = select(UserBlock).where(
+            or_(
+                and_(UserBlock.user_id == user_id, UserBlock.blocked_user_id == target_user_id),
+                and_(UserBlock.user_id == target_user_id, UserBlock.blocked_user_id == user_id),
             )
-            if (await self.db.execute(block_check)).scalar_one_or_none():
-                from app.core.exceptions import ForbiddenException
-                raise ForbiddenException("Cannot interact with a blocked user")
+        )
+        if (await self.db.execute(block_check)).scalar_one_or_none():
+            raise ForbiddenException("Cannot interact with a blocked user")
 
         # 1. Check or update interaction
         existing_q = select(MatchInteraction).where(

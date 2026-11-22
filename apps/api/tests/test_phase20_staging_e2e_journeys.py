@@ -165,7 +165,7 @@ async def test_journey_a_seeker_complete_lifecycle(mock_db):
     matching_service.get_pairwise_score = AsyncMock(
         return_value=MagicMock(overall_score=94.0, model_dump=MagicMock(return_value={"overall_score": 94.0}))
     )
-    mock_db.execute.side_effect = [mock_no_int, mock_recip_found, mock_no_mutual]
+    mock_db.execute.side_effect = [mock_no_int, mock_no_int, mock_recip_found, mock_no_mutual]
 
     inter_2 = await matching_service.record_interaction(candidate_id, seeker_id, "like")
     assert inter_2.is_mutual_match is True

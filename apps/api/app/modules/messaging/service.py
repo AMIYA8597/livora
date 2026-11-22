@@ -350,8 +350,11 @@ class MessagingService:
         user_id: UUID,
         limit: int = 50,
         before_id: Optional[UUID] = None
-    ) -> List[dict]:
-        """Fetch chronological message history for a conversation with cursor pagination."""
+    ) -> List[Message]:
+        """
+        Fetch the most recent `limit` messages (older than `before_id` when paging back),
+        returned in chronological order.
+        """
         # 1. Authorize active membership
         part_check = select(ConversationParticipant).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -377,9 +380,10 @@ class MessagingService:
             if target_sent_at:
                 query = query.where(Message.sent_at < target_sent_at)
 
-        query = query.order_by(Message.sent_at.asc()).limit(limit)
+        # Newest-first + LIMIT selects the latest page; reverse so the client renders oldest → newest.
+        query = query.order_by(Message.sent_at.desc(), Message.id.desc()).limit(limit)
         result = await self.db.execute(query)
-        return list(result.scalars().all())
+        return list(reversed(result.scalars().all()))
 
     async def send_message(self, sender_id: UUID, req: SendMessageRequest) -> Message:
         """

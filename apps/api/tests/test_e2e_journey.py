@@ -218,7 +218,7 @@ async def test_full_marketplace_end_to_end_journey():
     mock_existing_int.scalar_one_or_none.return_value = None
     mock_reciprocal = MagicMock()
     mock_reciprocal.scalar_one_or_none.return_value = None
-    mock_db.execute.side_effect = [mock_existing_int, mock_reciprocal]
+    mock_db.execute.side_effect = [mock_existing_int, mock_existing_int, mock_reciprocal]
 
     res_a = await matching_service.record_interaction(
         user_id=tenant_a_id,
@@ -240,7 +240,7 @@ async def test_full_marketplace_end_to_end_journey():
     pairwise_mock = MagicMock(overall_score=92.5, model_dump=MagicMock(return_value={"overall_score": 92.5}))
     matching_service.get_pairwise_score = AsyncMock(return_value=pairwise_mock)
 
-    mock_db.execute.side_effect = [mock_existing_int_b, mock_reciprocal_found, mock_existing_mutual]
+    mock_db.execute.side_effect = [mock_existing_int_b, mock_existing_int_b, mock_reciprocal_found, mock_existing_mutual]
     res_b = await matching_service.record_interaction(
         user_id=tenant_b_id,
         target_user_id=tenant_a_id,
