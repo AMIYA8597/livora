@@ -9,7 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic[email]>=2.7.4",
     "pydantic-settings>=2.3.4",
-    "sqlalchemy>=2.0.31",
+    "sqlalchemy[asyncio]>=2.0.31",
     "asyncpg>=0.29.0",
     "alembic>=1.13.1",
     "pgvector>=0.3.1",
@@ -25,6 +25,8 @@ dependencies = [
     "numpy>=1.26.4",
     "scipy>=1.13.1",
     "websockets>=12.0",
+    "bcrypt>=4.1.0",  # used directly by app.core.security
+    "supabase>=2.31.0",  # production storage backend
 ]
 
 [project.optional-dependencies]
@@ -35,17 +37,24 @@ dev = [
     "ruff>=0.4.9",
     "mypy>=1.10.0",
     "black>=24.4.2",
+    "psutil>=5.9.0",  # performance benchmark tests
 ]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+# Only the application package is installable; migrations/ and tests/ are not packages to ship.
+include = ["app*"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
+# Explicit rule set so results do not change when ruff's default rules change between releases.
+select = ["E4", "E7", "E9", "F"]
 ignore = ["E402", "E712"]
 
 [tool.pytest.ini_options]
