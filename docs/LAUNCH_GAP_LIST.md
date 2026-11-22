@@ -129,7 +129,7 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       with psql. *Owner action:* after the hosted migration, run the script on Supabase, put the
       login URL (user `flatmate_api.<project-ref>`) in the runtime secret
       `STAGING_APP_DATABASE_URL`, and keep the owner URL only in the GitHub migration secret.
-- [x] **2h. Supabase Storage access.** *(Done in code; bucket limits await the owner's go-ahead.)*
+- [x] **2h. Supabase Storage access.** *(Done, including the hosted bucket limits.)*
       Verified live on the hosted project: anon-key uploads to every bucket are rejected by RLS,
       anon listing returns nothing (the service key sees 16/25/12 objects), and private
       verification files return 400 to anonymous downloads. Fixed in the API:
@@ -143,7 +143,8 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       image hosting). This now needs a listing role or ownership of the property.
       **(d)** Startup refuses to run if a private bucket is public or missing.
       `scripts/provision_storage.py` applies per-bucket size limits and MIME allow-lists
-      (dry run shows 4 updates; the hosted buckets currently have none).
+      (applied 2026-11-22 to the hosted project: Supabase now answers 415 to an HTML or .exe
+      upload and 413 to an oversized avatar).
       `scripts/check_storage_policies.py` runs in the hosted migration workflow and fails if any
       Storage policy names anon/authenticated/public. Unused buckets `property-photos` and
       `verification-docs` (one object each) are reported for the owner to review.
