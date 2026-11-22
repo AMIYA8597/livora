@@ -82,6 +82,9 @@ jobs:
           echo "=================================================================="
           python -m alembic current
 
+          echo "Checking Supabase Storage policies (no public-role access allowed)..."
+          python ../../scripts/check_storage_policies.py
+
           if [ "${{ github.event.inputs.migration_action }}" = "check_current" ]; then
             echo "Current revision checked successfully."
             exit 0

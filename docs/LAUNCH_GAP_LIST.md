@@ -129,8 +129,24 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       with psql. *Owner action:* after the hosted migration, run the script on Supabase, put the
       login URL (user `flatmate_api.<project-ref>`) in the runtime secret
       `STAGING_APP_DATABASE_URL`, and keep the owner URL only in the GitHub migration secret.
-- [ ] **2h. Supabase Storage bucket policies are unverified.** Check that the KYC/avatars buckets
-      are private and that only the backend's service role can write.
+- [x] **2h. Supabase Storage access.** *(Done in code; bucket limits await the owner's go-ahead.)*
+      Verified live on the hosted project: anon-key uploads to every bucket are rejected by RLS,
+      anon listing returns nothing (the service key sees 16/25/12 objects), and private
+      verification files return 400 to anonymous downloads. Fixed in the API:
+      **(a)** IDOR: `GET /storage/signed-url` signed *any* chat-attachment path for any signed-in
+      user, even after they left the conversation. It now serves only `verification` (owner or
+      admin), and chat files are signed only by the membership-checked conversation endpoint.
+      **(b)** The app wrote to `chat_attachments`, but the hosted bucket is `chat-attachments`, so
+      chat uploads would have failed. A bucket registry (`storage_buckets.py`) now maps logical to
+      physical names (`STORAGE_BUCKET_*`).
+      **(c)** Any account could upload to the public `properties` bucket without a listing (free
+      image hosting). This now needs a listing role or ownership of the property.
+      **(d)** Startup refuses to run if a private bucket is public or missing.
+      `scripts/provision_storage.py` applies per-bucket size limits and MIME allow-lists
+      (dry run shows 4 updates; the hosted buckets currently have none).
+      `scripts/check_storage_policies.py` runs in the hosted migration workflow and fails if any
+      Storage policy names anon/authenticated/public. Unused buckets `property-photos` and
+      `verification-docs` (one object each) are reported for the owner to review.
 
 ## P1 — Required for a quality product
 
@@ -152,7 +168,9 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 - [ ] **11. Payments and subscriptions.** Only the models exist. Needs a Razorpay (INR)
       integration: plans API, checkout, signed webhook verification, entitlement checks.
 - [ ] **12. Identity verification is mocked.** Integrate a real KYC provider, or clearly gate
-      the feature off.
+      the feature off. `verifications.document_url` is free text from the client: store the
+      storage object path from the verification upload instead, and have admins view it through
+      a signed URL.
 - [ ] **13. Web push and in-app notification centre.**
 - [ ] **13b. Admins cannot override application status.** `PATCH /applications/{id}/status`
       never passes `is_admin`, unlike appointments, so moderators cannot intervene.

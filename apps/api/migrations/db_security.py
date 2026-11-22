@@ -44,8 +44,10 @@ BEGIN
 {guard}
     EXECUTE 'GRANT USAGE ON SCHEMA public TO {APP_ROLE}';
 
+    -- Only touch what is missing: ALTER/GRANT take table locks, so a steady-state run
+    -- (every deploy) must not lock every table.
     FOR r IN
-        SELECT c.relname
+        SELECT c.relname, c.relrowsecurity
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public'
@@ -55,11 +57,22 @@ BEGIN
               WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
           )
     LOOP
-        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        IF NOT r.relrowsecurity THEN
+            EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        END IF;
         IF r.relname = 'alembic_version' THEN
-            EXECUTE format('REVOKE ALL ON public.%I FROM {APP_ROLE}', r.relname);
-            EXECUTE format('GRANT SELECT ON public.%I TO {APP_ROLE}', r.relname);
-        ELSE
+            IF has_table_privilege('{APP_ROLE}', format('public.%I', r.relname), 'INSERT, UPDATE, DELETE, TRUNCATE') THEN
+                EXECUTE format('REVOKE ALL ON public.%I FROM {APP_ROLE}', r.relname);
+            END IF;
+            IF NOT has_table_privilege('{APP_ROLE}', format('public.%I', r.relname), 'SELECT') THEN
+                EXECUTE format('GRANT SELECT ON public.%I TO {APP_ROLE}', r.relname);
+            END IF;
+        ELSIF NOT (
+            has_table_privilege('{APP_ROLE}', format('public.%I', r.relname), 'SELECT')
+            AND has_table_privilege('{APP_ROLE}', format('public.%I', r.relname), 'INSERT')
+            AND has_table_privilege('{APP_ROLE}', format('public.%I', r.relname), 'UPDATE')
+            AND has_table_privilege('{APP_ROLE}', format('public.%I', r.relname), 'DELETE')
+        ) THEN
             EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO {APP_ROLE}', r.relname);
         END IF;
         IF NOT EXISTS (

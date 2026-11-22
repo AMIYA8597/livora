@@ -4,7 +4,7 @@ Supports Supabase Storage and Local Filesystem Storage (for development and CI/t
 """
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Dict, Optional
 from pathlib import Path
 from app.core.config import settings
 
@@ -66,6 +66,38 @@ class SupabaseStorageProvider(StorageProvider):
         self.client.storage.from_(bucket).upload(destination_path, data, {"content-type": content_type})
         return str(self.client.storage.from_(bucket).get_public_url(destination_path))
 
+    def list_buckets(self) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for b in self.client.storage.list_buckets():
+            get = (lambda k: b.get(k)) if isinstance(b, dict) else (lambda k: getattr(b, k, None))
+            out[str(get("id") or get("name"))] = {
+                "public": bool(get("public")),
+                "file_size_limit": get("file_size_limit"),
+                "allowed_mime_types": get("allowed_mime_types"),
+            }
+        return out
+
+    def verify_buckets(self) -> None:
+        """
+        Refuse to run when the hosted buckets contradict the registry: a private bucket that is
+        public would expose KYC documents and chat files to anyone with the URL.
+        """
+        from app.infrastructure.storage_buckets import bucket_registry
+
+        actual = self.list_buckets()
+        problems = []
+        for spec in bucket_registry().values():
+            found = actual.get(spec.physical)
+            if found is None:
+                problems.append(f"bucket '{spec.physical}' ({spec.logical}) does not exist")
+            elif found["public"] and not spec.public:
+                problems.append(f"bucket '{spec.physical}' ({spec.logical}) must be PRIVATE but is public")
+        if problems:
+            raise StorageConfigurationError(
+                "Storage buckets are misconfigured: " + "; ".join(problems)
+                + ". Run scripts/provision_storage.py --apply."
+            )
+
     def get_signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str:
         res = self.client.storage.from_(bucket).create_signed_url(path, expires_in)
         url = res.get("signedURL") or res.get("signedUrl") if isinstance(res, dict) else res
@@ -85,7 +117,9 @@ def init_storage() -> StorageProvider:
     environment = (settings.ENVIRONMENT or "development").lower()
 
     if storage_type == "supabase":
-        _storage_instance = SupabaseStorageProvider(settings.SUPABASE_URL or "", settings.SUPABASE_SERVICE_ROLE_KEY or "")
+        provider = SupabaseStorageProvider(settings.SUPABASE_URL or "", settings.SUPABASE_SERVICE_ROLE_KEY or "")
+        provider.verify_buckets()
+        _storage_instance = provider
     elif storage_type == "local":
         if environment not in LOCAL_STORAGE_ENVIRONMENTS:
             raise StorageConfigurationError(

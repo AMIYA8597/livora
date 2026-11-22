@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     WEB_BASE_URL: str = "http://localhost:3000"
     PASSWORD_RESET_EXPIRE_MINUTES: int = 15
 
+    # Physical storage bucket names (logical names in the API stay fixed; see storage_buckets.py)
+    STORAGE_BUCKET_PROPERTIES: str = "properties"
+    STORAGE_BUCKET_AVATARS: str = "avatars"
+    STORAGE_BUCKET_VERIFICATION: str = "verification"
+    STORAGE_BUCKET_CHAT_ATTACHMENTS: str = "chat-attachments"
+
     # Supabase Integration (Free-first / Managed Backend)
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")

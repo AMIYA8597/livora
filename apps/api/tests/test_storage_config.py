@@ -76,3 +76,48 @@ def test_transaction_pooler_disables_prepared_statement_cache():
     assert args["statement_cache_size"] == 0
     assert args["prepared_statement_name_func"]() != args["prepared_statement_name_func"]()
     assert "connect_args" not in engine_options(session)
+
+
+# --- Supabase bucket verification at startup -----------------------------------------------
+
+class _FakeStorage:
+    def __init__(self, buckets):
+        self._buckets = buckets
+
+    def list_buckets(self):
+        return self._buckets
+
+
+def _provider_with(buckets):
+    from app.infrastructure.storage import SupabaseStorageProvider
+
+    provider = SupabaseStorageProvider.__new__(SupabaseStorageProvider)
+    provider.client = type("C", (), {"storage": _FakeStorage(buckets)})()
+    return provider
+
+
+def _hosted(**public_overrides):
+    base = {"properties": True, "avatars": True, "verification": False, "chat-attachments": False}
+    base.update(public_overrides)
+    return [{"id": k, "public": v} for k, v in base.items()]
+
+
+def test_bucket_verification_accepts_correct_hosted_layout():
+    _provider_with(_hosted()).verify_buckets()
+
+
+def test_bucket_verification_refuses_public_private_bucket():
+    import pytest
+    from app.infrastructure.storage import StorageConfigurationError
+
+    with pytest.raises(StorageConfigurationError, match="must be PRIVATE"):
+        _provider_with(_hosted(verification=True)).verify_buckets()
+
+
+def test_bucket_verification_refuses_missing_bucket():
+    import pytest
+    from app.infrastructure.storage import StorageConfigurationError
+
+    buckets = [b for b in _hosted() if b["id"] != "chat-attachments"]
+    with pytest.raises(StorageConfigurationError, match="does not exist"):
+        _provider_with(buckets).verify_buckets()

@@ -234,6 +234,7 @@ async def upload_attachment(
         bucket="chat_attachments",
         purpose="chat_attachment",
         resource_id=str(conversation_id),
+        domain_authorized=True,  # membership checked above
     )
 
     # 3. Create Attachment entity
@@ -289,7 +290,8 @@ async def download_attachment(
         current_user=current_user,
         bucket="chat_attachments",
         path=attachment.file_path,
-        expires_in=3600
+        expires_in=3600,
+        domain_authorized=True,  # active membership checked above
     )
     return {"signed_url": signed_url, "file_name": attachment.file_name, "mime_type": attachment.mime_type}
 
