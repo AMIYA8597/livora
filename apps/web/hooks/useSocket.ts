@@ -22,6 +22,8 @@ export function useSocket(callbacks?: SocketCallbacks | ((msg: MessageDTO) => vo
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const isUnmountedRef = useRef(false);
+  // Reconnects go through a ref so the socket's close handler never captures a stale `connect`.
+  const connectRef = useRef<() => void>(() => {});
 
   // Normalize callbacks
   const cbRef = useRef<SocketCallbacks>({});
@@ -105,7 +107,7 @@ export function useSocket(callbacks?: SocketCallbacks | ((msg: MessageDTO) => vo
         const delay = Math.min(1000 * Math.pow(1.5, attempts) + Math.random() * 500, 15000);
         reconnectAttemptsRef.current += 1;
         reconnectTimeoutRef.current = setTimeout(() => {
-          connect();
+          connectRef.current();
         }, delay);
       }
     };
@@ -114,6 +116,10 @@ export function useSocket(callbacks?: SocketCallbacks | ((msg: MessageDTO) => vo
       ws.close();
     };
   }, []);
+
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   useEffect(() => {
     isUnmountedRef.current = false;

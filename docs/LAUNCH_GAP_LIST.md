@@ -77,7 +77,15 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       decompression bombs (over 40 MP) are rejected, the declared type must match the content,
       and trailing polyglot payloads are dropped. Previously a phone photo of a flat exposed its
       exact coordinates, defeating the platform's location fuzzing.
-- [ ] **6. Next.js 14.2.4 has 41 security advisories.** Upgrade to a patched 14.2.x or to 15.
+- [x] **6. Next.js 14.2.4 had 42 security advisories (4 critical).** *(Done.)* Next 14 is
+      end-of-life, and many fixes exist only in 15.5.29 or later, so a 14.2.x patch could not clear
+      them. Upgraded to Next 16.4.6 and React 19.3 (plus postcss and lucide-react), renamed
+      `middleware.ts` to `proxy.ts` (the Next 16 convention), and moved ESLint to a flat config on
+      ESLint 9. `pnpm audit --prod`: 0 vulnerabilities. The build, 31 web tests, a production-server
+      smoke test of every route type and a browser check (no hydration errors) all pass. CI now
+      runs lint (errors fail the build) and `pnpm audit --audit-level high`. The new React Compiler
+      lint rules also found a stale-closure risk in the socket reconnect and an impure render;
+      both are fixed.
 
 - [x] **2b. Test suite ran against the hosted DB and storage.** `tests/conftest.py` now forces a
       local `flatmate_test` DB plus local storage, and refuses non-local hosts. Result: 136/136
@@ -115,6 +123,9 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 - [ ] **7. Frontend architecture.** 30 pages but only 8 components, and the largest pages are
       about 1,000 lines (`dashboard`, `profile`, `properties/[id]`). Split them into feature
       components, add a shared layout/shell, and handle loading, error and empty states.
+      Add a shared data-fetching hook to replace the 17 fetch-in-effect patterns (lint rule
+      `react-hooks/set-state-in-effect` is set to warn until then), and replace 13
+      `window.location.href` full-page navigations with router navigation.
 - [ ] **8. Responsive and mobile UX audit.** Check every route at 320, 375, 768, 1024 and 1440px:
       a mobile bottom nav, a full-screen mobile chat, and touch targets of at least 44px.
 - [ ] **9. Live chat completeness.** Verify reconnect/backoff, offline queueing, read receipts,

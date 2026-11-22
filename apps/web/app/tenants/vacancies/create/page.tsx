@@ -25,7 +25,7 @@ export default function TenantVacancyCreatePage() {
   const [depositRequired, setDepositRequired] = useState("30000");
   const [preferredGender, setPreferredGender] = useState("any");
   const [vacantFrom, setVacantFrom] = useState(
-    new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]
+    () => new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0]
   );
   const [hasLandlordPermission, setHasLandlordPermission] = useState(true);
 
