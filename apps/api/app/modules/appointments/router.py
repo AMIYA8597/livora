@@ -38,7 +38,7 @@ async def schedule_appointment(
     appointment = await service.create(current_user.id, data)
     prop = await db.get(Property, appointment.property_id)
     if prop:
-        notify.enqueue(background_tasks, await notify.appointment_requested(db, appointment, prop))
+        await notify.enqueue(db, background_tasks, await notify.appointment_requested(db, appointment, prop))
     return appointment
 
 @router.get("/{appointment_id}", response_model=AppointmentResponse)

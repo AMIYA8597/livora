@@ -4,6 +4,7 @@ Enforces validation (magic bytes, MIME type, size limits),
 resource authorization (property ownership, avatar identity, private verification),
 and safe key generation.
 """
+import asyncio
 import uuid
 import re
 from abc import ABC, abstractmethod
@@ -17,6 +18,7 @@ from app.core.exceptions import (
     NotFoundException,
     InternalServerException,
 )
+from app.infrastructure.images import ImageRejected, sanitize_image
 from app.infrastructure.storage import get_storage, StorageProvider
 from app.modules.users.models import User
 from app.modules.properties.models import Property
@@ -164,7 +166,14 @@ class StorageService:
         # 2. Validate content & get safe extension
         safe_ext = self.validate_file(file_bytes, content_type, filename, bucket)
 
-        # 3. Server-side randomized key generation (prevents overwriting & directory traversal)
+        # 3. Re-encode images: strips EXIF/GPS, applies orientation, drops embedded payloads
+        if content_type.startswith("image/"):
+            try:
+                file_bytes = await asyncio.to_thread(sanitize_image, file_bytes, content_type)
+            except ImageRejected as exc:
+                raise BadRequestException(str(exc))
+
+        # 3b. Server-side randomized key generation (prevents overwriting & directory traversal)
         file_id = uuid.uuid4()
         if bucket == "properties" and resource_id:
             dest_path = f"prop_{resource_id}/{file_id}.{safe_ext}"

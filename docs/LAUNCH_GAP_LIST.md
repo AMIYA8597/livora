@@ -59,8 +59,24 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 - [ ] **4b. OTP verification accepts a hard-coded code.** `AuthService.verify_otp` accepts
       `1234`/`123456` in every environment, so any phone number can be "verified". Needs a real
       SMS/OTP provider with hashed, expiring, rate-limited codes, gated to dev/test (pairs with 12).
-- [ ] **5. Workers are stubs.** `workers/tasks.py` only uses `print` and `sleep`. Needs real
-      tasks: match precompute, notifications/email fan-out, image processing, cleanup jobs.
+- [x] **5. Workers are stubs.** *(Done.)* Real background processing built on a transactional
+      outbox (`app/workers/outbox.py`, migration `006_outbox_dispatch`). Emails are written to
+      `outbox_events` before the response, so a crash or provider outage can no longer lose them.
+      The dispatcher claims due rows with `FOR UPDATE SKIP LOCKED` plus a 5-minute lease (no
+      transaction stays open across network calls, and a dead worker's rows come back). It retries
+      with exponential backoff up to 1 h, dead-letters after 8 attempts, and scrubs payloads after
+      delivery (reset links, message text). Requests kick a dispatch right after responding, and
+      Celery beat sweeps every 15 s. Hourly maintenance purges old outbox rows, expires lapsed
+      subscriptions, and cancels unconfirmed visits 24 h past their time. The `message.created`
+      events messaging was already writing are now consumed (the hook for offline notifications,
+      item 9). Celery runs with `acks_late`, prefetch 1 and time limits, plus a `beat` service in
+      docker-compose. *Not built:* match precompute. Recommendations are a live pgvector HNSW
+      query, so a cache would only add staleness until metrics show a need.
+- [x] **5b. Uploaded photos leaked GPS location.** *(Done.)* Images are decoded and re-encoded on
+      upload (`app/infrastructure/images.py`): EXIF/GPS is stripped, orientation is applied,
+      decompression bombs (over 40 MP) are rejected, the declared type must match the content,
+      and trailing polyglot payloads are dropped. Previously a phone photo of a flat exposed its
+      exact coordinates, defeating the platform's location fuzzing.
 - [ ] **6. Next.js 14.2.4 has 41 security advisories.** Upgrade to a patched 14.2.x or to 15.
 
 - [x] **2b. Test suite ran against the hosted DB and storage.** `tests/conftest.py` now forces a
@@ -125,5 +141,10 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       type sniffing and virus scan on uploads, account deletion/export (DPDP Act compliance).
 - [ ] **17. SEO and performance.** Metadata/OG for property pages, image optimisation,
       Lighthouse of at least 90 on mobile.
+- [ ] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a
+      worker, emails still go out immediately (the in-request kick), but retries happen only when a
+      later request triggers a dispatch, and maintenance never runs. Deploy one worker and exactly
+      one beat (e.g. a Cloud Run service with always-on CPU, or Cloud Scheduler calling a Cloud
+      Run job), plus a managed Redis.
 - [ ] **18. Production deploy pipeline.** The staging workflow exists, but production promotion,
       backups and a tested restore do not.

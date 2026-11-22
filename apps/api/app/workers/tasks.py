@@ -1,16 +1,45 @@
+"""
+Celery tasks. Each run uses its own event loop and a NullPool engine: asyncpg
+connections are bound to the loop that created them, so pooled connections must
+never outlive a single `asyncio.run`.
+"""
+from __future__ import annotations
+
+import asyncio
+from dataclasses import asdict
+from typing import Any, Awaitable, Callable, Dict, TypeVar
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from app.core.config import settings
+from app.core.database import engine_options
 from app.workers.celery_app import celery_app
-import time
+from app.workers.maintenance import run_maintenance
+from app.workers.outbox import dispatch_pending
 
-@celery_app.task(name="tasks.recalculate_user_matches")
-def recalculate_user_matches(user_id: str):
-    """Background task to invalidate cache and recalculate top match vector candidates."""
-    print(f"[Worker] Recalculating match recommendations for user {user_id}...")
-    time.sleep(1)
-    print(f"[Worker] Match recommendations updated for {user_id}")
-    return {"status": "success", "user_id": user_id}
+T = TypeVar("T")
 
-@celery_app.task(name="tasks.send_application_notification")
-def send_application_notification(owner_email: str, applicant_name: str, property_title: str):
-    """Sends email/push notification to landlord when new application arrives."""
-    print(f"[Worker] Notification sent to {owner_email} for application from {applicant_name} on '{property_title}'")
-    return {"status": "sent", "recipient": owner_email}
+POOL_KEYS = {"pool_size", "max_overflow"}
+
+
+def run_with_session_factory(job: Callable[[async_sessionmaker[AsyncSession]], Awaitable[T]]) -> T:
+    async def runner() -> T:
+        options = {k: v for k, v in engine_options(settings.DATABASE_URL).items() if k not in POOL_KEYS}
+        engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool, **options)
+        try:
+            return await job(async_sessionmaker(bind=engine, expire_on_commit=False))
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(runner())
+
+
+@celery_app.task(name="outbox.dispatch", ignore_result=True)
+def dispatch_outbox() -> Dict[str, Any]:
+    return asdict(run_with_session_factory(dispatch_pending))
+
+
+@celery_app.task(name="maintenance.run", ignore_result=True)
+def maintenance() -> Dict[str, int]:
+    return run_with_session_factory(run_maintenance)

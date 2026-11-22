@@ -18,11 +18,13 @@ from app.core.exceptions import (
     InternalServerException,
 )
 
-# Real magic byte sample payloads
-VALID_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 100
-VALID_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+from tests.image_samples import make_image
+
+# Real sample payloads (images must decode: uploads are re-encoded)
+VALID_JPEG = make_image("JPEG")
+VALID_PNG = make_image("PNG")
 VALID_PDF = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + b"\x00" * 100
-VALID_WEBP = b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 100
+VALID_WEBP = make_image("WEBP")
 SPOOFED_JPEG = b"NOT_A_REAL_JPEG_FILE_JUST_TEXT"
 MALICIOUS_EXE = b"MZ\x90\x00\x03\x00\x00\x00" + b"\x00" * 100
 
@@ -74,7 +76,7 @@ async def test_valid_property_image_upload(mock_storage, owner_user):
     assert isinstance(res, UploadResponse)
     assert res.bucket == "properties"
     assert res.content_type == "image/jpeg"
-    assert res.size_bytes == len(VALID_JPEG)
+    assert res.size_bytes > 0  # re-encoded size, metadata stripped
     assert res.is_private is False
     assert mock_storage.upload_file.called
 

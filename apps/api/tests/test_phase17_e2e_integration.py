@@ -4,6 +4,7 @@ Executes complete business workflows against real PostgreSQL database and verifi
 full frontend-backend contract fulfillment.
 """
 import pytest
+from tests.image_samples import make_image
 from uuid import uuid4, UUID
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta, date
@@ -140,7 +141,7 @@ async def test_complete_phase17_end_to_end_integration():
         res_upload = await client.post(
             "/api/v1/storage/upload",
             headers=seeker_headers,
-            files={"file": ("avatar.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", "image/png")},
+            files={"file": ("avatar.png", make_image("PNG"), "image/png")},
             data={"bucket": "avatars"},
         )
         assert res_upload.status_code == 201, res_upload.text

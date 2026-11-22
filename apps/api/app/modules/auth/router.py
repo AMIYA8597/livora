@@ -32,14 +32,14 @@ async def refresh_tokens(data: RefreshTokenRequest, db: AsyncSession = Depends(g
 async def forgot_password(data: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)
     res, emails = await service.forgot_password(data)
-    enqueue(background_tasks, emails)
+    await enqueue(db, background_tasks, emails)
     return res
 
 @router.post("/reset-password")
 async def reset_password(data: ResetPasswordRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)
     res, emails = await service.reset_password(data)
-    enqueue(background_tasks, emails)
+    await enqueue(db, background_tasks, emails)
     return res
 
 @router.post("/otp/send")

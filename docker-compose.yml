@@ -133,6 +133,10 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - S3_ENDPOINT_URL=http://minio:9000
+      - ENVIRONMENT=development
+      - EMAIL_PROVIDER=smtp
+      - SMTP_HOST=mailpit
+      - SMTP_PORT=1025
     volumes:
       - ./apps/api:/app/apps/api
     depends_on:
@@ -141,6 +145,21 @@ services:
       redis:
         condition: service_healthy
     command: celery -A app.workers.celery_app worker --loglevel=info
+
+  beat:
+    # Exactly one scheduler: enqueues the outbox sweep (15s) and hourly maintenance.
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.worker
+    container_name: flatmate_beat
+    restart: unless-stopped
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
 
   web:
     build:

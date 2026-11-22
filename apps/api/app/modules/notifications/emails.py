@@ -1,13 +1,16 @@
 """
-Builds transactional emails for domain events.
+Builds transactional emails for domain events and queues them durably.
 
-Builders run inside the request (they need the DB session) and return plain
-`QueuedEmail` values. Routers hand those to FastAPI BackgroundTasks, so delivery
-happens after the response and never touches the request's (closed) session.
+Builders run inside the request and return plain `QueuedEmail` values. `enqueue`
+writes them to the transactional outbox (committed before the response), then kicks
+a dispatch after the response for low latency. The Celery beat sweep retries anything
+that fails, or that was left behind because the process died, so mail is never lost
+to a restart or a provider outage.
 """
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -17,8 +20,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.infrastructure.email import send_templated_email
+from app.core.database import AsyncSessionLocal
+from app.modules.messaging.models import OutboxEvent
 from app.modules.users.models import User
+from app.workers.outbox import EMAIL_EVENT, dispatch_pending
+
+logger = logging.getLogger("flatmate.notifications")
 
 
 @dataclass(frozen=True)
@@ -38,11 +45,31 @@ def idempotency_key(*parts: object) -> str:
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:48]
 
 
-def enqueue(background_tasks: BackgroundTasks, emails: List[QueuedEmail]) -> None:
+async def enqueue(db: AsyncSession, background_tasks: BackgroundTasks, emails: List[QueuedEmail]) -> None:
+    if not emails:
+        return
     for email in emails:
-        background_tasks.add_task(
-            send_templated_email, email.to, email.template, email.context, email.idempotency_key
-        )
+        db.add(OutboxEvent(
+            event_type=EMAIL_EVENT,
+            payload={
+                "to": email.to,
+                "template": email.template,
+                "context": {k: (v if isinstance(v, (int, float, bool)) or v is None else str(v))
+                            for k, v in email.context.items()},
+                "idempotency_key": email.idempotency_key,
+            },
+            status="pending",
+        ))
+    await db.commit()
+    background_tasks.add_task(dispatch_now)
+
+
+async def dispatch_now() -> None:
+    """Best-effort immediate dispatch after the response. Failures stay queued for the sweep."""
+    try:
+        await dispatch_pending(AsyncSessionLocal)
+    except Exception as exc:  # noqa: BLE001 - the beat sweep is the safety net
+        logger.warning("Immediate outbox dispatch failed: %s", type(exc).__name__)
 
 
 async def _users(db: AsyncSession, *ids: UUID) -> Dict[UUID, User]:

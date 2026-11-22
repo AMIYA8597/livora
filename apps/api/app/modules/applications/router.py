@@ -31,7 +31,7 @@ async def submit_application(
     application = await service.create(current_user.id, data)
     prop = await db.get(Property, application.property_id)
     if prop:
-        notify.enqueue(background_tasks, await notify.application_received(db, application, prop))
+        await notify.enqueue(db, background_tasks, await notify.application_received(db, application, prop))
     return application
 
 @router.get("/{application_id}", response_model=ApplicationResponse)
@@ -56,5 +56,5 @@ async def update_application_status(
     application = await service.update_status(application_id, current_user.id, data)
     prop = await db.get(Property, application.property_id)
     if prop:
-        notify.enqueue(background_tasks, await notify.application_status_changed(db, application, prop, current_user.id))
+        await notify.enqueue(db, background_tasks, await notify.application_status_changed(db, application, prop, current_user.id))
     return application

@@ -1,6 +1,7 @@
 import pytest
 from uuid import uuid4
 from httpx import AsyncClient
+from tests.image_samples import make_image
 
 @pytest.mark.asyncio
 async def test_health_check(async_client: AsyncClient):
@@ -83,7 +84,7 @@ async def test_auth_registration_and_password_recovery(async_client: AsyncClient
 
     # 8. Test storage file upload with authenticated token
     auth_headers = {"Authorization": f"Bearer {access_token}"}
-    files = {"file": ("test_avatar.jpg", b"\xff\xd8\xff\xe0test_avatar_bytes", "image/jpeg")}
+    files = {"file": ("test_avatar.jpg", make_image("JPEG"), "image/jpeg")}
     upload_resp = await async_client.post(
         "/api/v1/storage/upload",
         data={"bucket": "avatars"},

@@ -62,6 +62,8 @@ CREATE TABLE outbox_events (
     retry_count INTEGER NOT NULL, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     processed_at TIMESTAMP WITH TIME ZONE, 
+    next_attempt_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    last_error TEXT, 
     PRIMARY KEY (id)
 );
 
@@ -242,13 +244,13 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_properties_owner_id ON properties (owner_id);
-
-CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
-
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
 
+CREATE INDEX ix_properties_owner_id ON properties (owner_id);
+
 CREATE INDEX ix_properties_city ON properties (city);
+
+CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE TABLE groups (
     id UUID NOT NULL, 
@@ -276,9 +278,9 @@ CREATE TABLE match_interactions (
     FOREIGN KEY(target_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
-
 CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
+
+CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
 
 CREATE TABLE mutual_matches (
     id UUID NOT NULL, 
@@ -295,9 +297,9 @@ CREATE TABLE mutual_matches (
     FOREIGN KEY(user_two_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_mutual_matches_user_one_id ON mutual_matches (user_one_id);
-
 CREATE INDEX ix_mutual_matches_user_two_id ON mutual_matches (user_two_id);
+
+CREATE INDEX ix_mutual_matches_user_one_id ON mutual_matches (user_one_id);
 
 CREATE TABLE notifications (
     id UUID NOT NULL, 
@@ -312,9 +314,9 @@ CREATE TABLE notifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_notifications_user_id ON notifications (user_id);
-
 CREATE INDEX ix_notifications_is_read ON notifications (is_read);
+
+CREATE INDEX ix_notifications_user_id ON notifications (user_id);
 
 CREATE TABLE verifications (
     id UUID NOT NULL, 
@@ -355,9 +357,9 @@ CREATE TABLE user_blocks (
     FOREIGN KEY(blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
-
 CREATE INDEX ix_user_blocks_user_id ON user_blocks (user_id);
+
+CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
 
 CREATE TABLE subscriptions (
     id UUID NOT NULL, 
@@ -395,9 +397,9 @@ CREATE TABLE cities (
     FOREIGN KEY(state_id) REFERENCES states (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_cities_name ON cities (name);
-
 CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
+
+CREATE INDEX ix_cities_name ON cities (name);
 
 CREATE TABLE rooms (
     id UUID NOT NULL, 
@@ -725,9 +727,9 @@ CREATE TABLE conversation_preferences (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
-
 CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
+
+CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
 CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
 
@@ -1032,6 +1034,14 @@ BEGIN
 END $$;;
 
 UPDATE alembic_version SET version_num='005_lockdown_data_api' WHERE alembic_version.version_num = '004_real_postgis_location';
+
+-- Running upgrade 005_lockdown_data_api -> 006_outbox_dispatch
+
+ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(), ADD COLUMN IF NOT EXISTS last_error TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_outbox_pending_due ON outbox_events (next_attempt_at) WHERE status = 'pending';
+
+UPDATE alembic_version SET version_num='006_outbox_dispatch' WHERE alembic_version.version_num = '005_lockdown_data_api';
 
 COMMIT;
 
