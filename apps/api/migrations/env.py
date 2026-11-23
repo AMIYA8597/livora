@@ -29,6 +29,7 @@ from app.modules.messaging.models import Conversation, ConversationParticipant, 
 from app.modules.matching.models import MatchInteraction, MutualMatch  # noqa: F401
 from app.modules.notifications.models import Notification  # noqa: F401
 from app.modules.verification.models import Verification  # noqa: F401
+from app.modules.auth.models import PhoneVerification  # noqa: F401
 from app.modules.moderation.models import ModerationReport  # noqa: F401
 from app.modules.subscriptions.models import SubscriptionPlan, Subscription, Payment  # noqa: F401
 

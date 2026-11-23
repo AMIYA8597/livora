@@ -9,6 +9,8 @@ import {
   DealbreakerDTO,
   PrivacySettingsDTO,
   UserTrustStatusDTO,
+  SendOtpResponse,
+  VerifyOtpResponse,
 } from "@flatmate/contracts";
 import { Card, Button, Input, Badge, Avatar } from "@flatmate/ui";
 import {
@@ -44,7 +46,7 @@ interface BlockedUser {
 }
 
 export default function ProfilePage() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, refreshUser } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTab, setActiveTab] = useState<
@@ -99,11 +101,34 @@ export default function ProfilePage() {
   const [verifySuccess, setVerifySuccess] = useState(false);
 
   // Account & Safety Settings
-  const [phoneNumber, setPhoneNumber] = useState(user?.phone_number || "");
-  const [isUpdatingPhone, setIsUpdatingPhone] = useState(false);
+  // null = untouched, so the field follows the saved number once the user has loaded.
+  const [phoneDraft, setPhoneDraft] = useState<string | null>(null);
+  const phoneNumber = phoneDraft ?? user?.phone_number ?? "";
+  const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpBusy, setOtpBusy] = useState<"send" | "verify" | null>(null);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpDevCode, setOtpDevCode] = useState<string | null>(null);
+  const [resendAt, setResendAt] = useState<number | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  // Ticks only while a resend cooldown is running.
+  useEffect(() => {
+    if (resendAt === null) return;
+    const id = setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (now >= resendAt) setResendAt(null);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [resendAt]);
+  const resendIn = resendAt === null ? 0 : Math.max(0, Math.ceil((resendAt - clock) / 1000));
+  const lastTen = (value: string | null | undefined) => (value || "").replace(/\D/g, "").slice(-10);
+  const phoneIsVerified =
+    !!user?.phone_verified && !!user.phone_number && lastTen(phoneNumber) === lastTen(user.phone_number);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -335,21 +360,62 @@ export default function ProfilePage() {
     }
   };
 
-  // Update Phone Number
-  const handleUpdatePhone = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Phone verification: the number is saved on the account only once the SMS code is confirmed.
+  const handleSendPhoneCode = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const phone = phoneNumber.trim();
+    if (!phone) return;
+    setOtpError(null);
+    setOtpBusy("send");
     try {
-      setIsUpdatingPhone(true);
-      await apiClient("/users/me", {
-        method: "PUT",
-        body: JSON.stringify({ phone_number: phoneNumber }),
+      const res = await apiClient<SendOtpResponse>("/auth/otp/send", {
+        method: "POST",
+        body: JSON.stringify({ phone_number: phone }),
       });
-      setActionNotice("Phone number updated successfully.");
+      if (res.already_verified) {
+        setOtpSentTo(null);
+        setActionNotice("This number is already verified.");
+        setTimeout(() => setActionNotice(null), 3000);
+        return;
+      }
+      const now = Date.now();
+      setOtpSentTo(phone);
+      setOtpCode("");
+      setOtpDevCode(res.dev_code ?? null);
+      setClock(now);
+      setResendAt(now + (res.resend_after ?? 60) * 1000);
+    } catch (err: any) {
+      setOtpError(err.message || "Could not send the code. Please try again.");
+    } finally {
+      setOtpBusy(null);
+    }
+  };
+
+  const handleVerifyPhoneCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpSentTo || !/^\d{6}$/.test(otpCode)) {
+      setOtpError("Enter the 6-digit code from the SMS.");
+      return;
+    }
+    setOtpError(null);
+    setOtpBusy("verify");
+    try {
+      await apiClient<VerifyOtpResponse>("/auth/otp/verify", {
+        method: "POST",
+        body: JSON.stringify({ phone_number: otpSentTo, otp_code: otpCode }),
+      });
+      setOtpSentTo(null);
+      setOtpCode("");
+      setOtpDevCode(null);
+      setResendAt(null);
+      setPhoneDraft(null);
+      await refreshUser();
+      setActionNotice("Mobile number verified.");
       setTimeout(() => setActionNotice(null), 3000);
     } catch (err: any) {
-      alert(err.message || "Failed to update phone number");
+      setOtpError(err.message || "Verification failed. Please try again.");
     } finally {
-      setIsUpdatingPhone(false);
+      setOtpBusy(null);
     }
   };
 
@@ -900,23 +966,89 @@ export default function ProfilePage() {
               </div>
 
               {/* Phone Number Edit */}
-              <form onSubmit={handleUpdatePhone} className="p-3 bg-warm rounded-xl border border-slate-200/60 space-y-2">
-                <label className="font-semibold text-charcoal block">Mobile Phone Number</label>
-                <div className="flex gap-2">
+              <div className="p-3 bg-warm rounded-xl border border-slate-200/60 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="phone-number" className="font-semibold text-charcoal block">
+                    Mobile Phone Number
+                  </label>
+                  {phoneIsVerified ? (
+                    <Badge variant="forest">Verified</Badge>
+                  ) : user?.phone_number && phoneDraft === null ? (
+                    <Badge variant="warning">Not verified</Badge>
+                  ) : null}
+                </div>
+                <form onSubmit={handleSendPhoneCode} className="flex flex-col sm:flex-row gap-2">
                   <Input
+                    id="phone-number"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
                     value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    onChange={(e) => {
+                      setPhoneDraft(e.target.value);
+                      setOtpSentTo(null);
+                      setOtpError(null);
+                    }}
                     placeholder="+91 98765 43210"
                     className="flex-1 text-xs"
                   />
-                  <Button type="submit" size="sm" variant="primary" isLoading={isUpdatingPhone}>
-                    Update
-                  </Button>
-                </div>
+                  {!phoneIsVerified && (
+                    <Button
+                      type="submit"
+                      size="sm"
+                      variant="primary"
+                      isLoading={otpBusy === "send"}
+                      disabled={!phoneNumber.trim() || otpBusy !== null || (!!otpSentTo && resendIn > 0)}
+                    >
+                      {otpSentTo ? (resendIn > 0 ? `Resend in ${resendIn}s` : "Resend code") : "Send code"}
+                    </Button>
+                  )}
+                </form>
+
+                {otpSentTo && (
+                  <form onSubmit={handleVerifyPhoneCode} className="space-y-2">
+                    <label htmlFor="phone-otp" className="text-[11px] text-charcoal-muted block">
+                      Enter the 6-digit code sent to {otpSentTo}
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <Input
+                        id="phone-otp"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        placeholder="123456"
+                        className="flex-1 text-xs tracking-[0.3em]"
+                      />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="primary"
+                        isLoading={otpBusy === "verify"}
+                        disabled={otpCode.length !== 6 || otpBusy !== null}
+                      >
+                        Verify
+                      </Button>
+                    </div>
+                    {otpDevCode && (
+                      <span className="text-[10px] text-amber-700 block">
+                        Development server: your code is {otpDevCode}
+                      </span>
+                    )}
+                  </form>
+                )}
+
+                {otpError && (
+                  <p role="alert" className="text-[11px] text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    {otpError}
+                  </p>
+                )}
                 <span className="text-[10px] text-charcoal-muted block">
-                  Used for verified OTP login and urgent tenancy notifications.
+                  We text a one-time code to confirm the number. Used for urgent tenancy notifications.
                 </span>
-              </form>
+              </div>
 
               {/* Password Management */}
               <div className="p-4 bg-warm rounded-xl border border-slate-200/60 flex items-center justify-between">

@@ -22,8 +22,10 @@ class UserService:
     async def update(self, user: User, update_data: UserUpdate) -> User:
         if update_data.full_name is not None:
             user.full_name = update_data.full_name
-        if update_data.phone_number is not None:
+        if update_data.phone_number is not None and update_data.phone_number != user.phone_number:
+            # A new number is unverified until confirmed by SMS code (POST /auth/otp/send).
             user.phone_number = update_data.phone_number
+            user.phone_verified_at = None
         await self.db.commit()
         await self.db.refresh(user)
         return user

@@ -5,6 +5,8 @@ export interface UserDTO {
   email: string;
   full_name: string;
   phone_number?: string | null;
+  /** True once the current phone_number was confirmed by SMS code. */
+  phone_verified?: boolean;
   role: UserRole;
   roles?: string[];
   is_active: boolean;
@@ -59,4 +61,22 @@ export interface SendOtpRequest {
 export interface VerifyOtpRequest {
   phone_number: string;
   otp_code: string;
+}
+
+export interface SendOtpResponse {
+  success: boolean;
+  message: string;
+  already_verified?: boolean;
+  /** Seconds until the code expires. */
+  expires_in?: number;
+  /** Seconds before another code may be requested. */
+  resend_after?: number;
+  /** Only returned by development/test servers. */
+  dev_code?: string;
+}
+
+export interface VerifyOtpResponse {
+  success: boolean;
+  message: string;
+  phone_number: string;
 }

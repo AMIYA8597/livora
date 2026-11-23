@@ -100,3 +100,13 @@ class InternalServerException(AppException):
             detail=detail,
             error_code=error_code,
         )
+
+
+class ServiceUnavailableException(AppException):
+    def __init__(self, detail: str = "This service is temporarily unavailable.", error_code: str = "SERVICE_UNAVAILABLE"):
+        super().__init__(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            title="Service Unavailable",
+            detail=detail,
+            error_code=error_code,
+        )

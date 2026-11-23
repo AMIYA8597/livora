@@ -22,14 +22,15 @@ CREATE TABLE users (
     role VARCHAR(32) NOT NULL, 
     is_active BOOLEAN NOT NULL, 
     is_verified BOOLEAN NOT NULL, 
+    phone_verified_at TIMESTAMP WITH TIME ZONE, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     PRIMARY KEY (id)
 );
 
-CREATE INDEX ix_users_phone_number ON users (phone_number);
-
 CREATE UNIQUE INDEX ix_users_email ON users (email);
+
+CREATE INDEX ix_users_phone_number ON users (phone_number);
 
 CREATE TABLE professional_domains (
     id UUID NOT NULL, 
@@ -69,9 +70,9 @@ CREATE TABLE outbox_events (
 
 CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
 
-CREATE INDEX ix_outbox_events_status ON outbox_events (status);
-
 CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
+
+CREATE INDEX ix_outbox_events_status ON outbox_events (status);
 
 CREATE TABLE subscription_plans (
     id UUID NOT NULL, 
@@ -246,9 +247,9 @@ CREATE TABLE properties (
 
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
 
-CREATE INDEX ix_properties_city ON properties (city);
-
 CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
+
+CREATE INDEX ix_properties_city ON properties (city);
 
 CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
@@ -278,9 +279,9 @@ CREATE TABLE match_interactions (
     FOREIGN KEY(target_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
-
 CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
+
+CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
 
 CREATE TABLE mutual_matches (
     id UUID NOT NULL, 
@@ -297,9 +298,9 @@ CREATE TABLE mutual_matches (
     FOREIGN KEY(user_two_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_mutual_matches_user_two_id ON mutual_matches (user_two_id);
-
 CREATE INDEX ix_mutual_matches_user_one_id ON mutual_matches (user_one_id);
+
+CREATE INDEX ix_mutual_matches_user_two_id ON mutual_matches (user_two_id);
 
 CREATE TABLE notifications (
     id UUID NOT NULL, 
@@ -333,6 +334,23 @@ CREATE TABLE verifications (
 
 CREATE INDEX ix_verifications_user_id ON verifications (user_id);
 
+CREATE TABLE phone_verifications (
+    id UUID NOT NULL, 
+    user_id UUID NOT NULL, 
+    phone_e164 VARCHAR(20) NOT NULL, 
+    code_hash VARCHAR(64) NOT NULL, 
+    attempts INTEGER NOT NULL, 
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    consumed_at TIMESTAMP WITH TIME ZONE, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    PRIMARY KEY (id), 
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_phone_verifications_phone_created ON phone_verifications (phone_e164, created_at);
+
+CREATE INDEX idx_phone_verifications_user_created ON phone_verifications (user_id, created_at);
+
 CREATE TABLE moderation_reports (
     id UUID NOT NULL, 
     reporter_id UUID NOT NULL, 
@@ -357,9 +375,9 @@ CREATE TABLE user_blocks (
     FOREIGN KEY(blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_user_blocks_user_id ON user_blocks (user_id);
-
 CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
+
+CREATE INDEX ix_user_blocks_user_id ON user_blocks (user_id);
 
 CREATE TABLE subscriptions (
     id UUID NOT NULL, 
@@ -603,11 +621,11 @@ CREATE TABLE applications (
     FOREIGN KEY(room_id) REFERENCES rooms (id) ON DELETE SET NULL
 );
 
+CREATE INDEX ix_applications_property_id ON applications (property_id);
+
 CREATE INDEX ix_applications_status ON applications (status);
 
 CREATE INDEX ix_applications_applicant_id ON applications (applicant_id);
-
-CREATE INDEX ix_applications_property_id ON applications (property_id);
 
 CREATE TABLE tenant_memberships (
     id UUID NOT NULL, 
@@ -628,9 +646,9 @@ CREATE TABLE tenant_memberships (
     FOREIGN KEY(tenant_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_tenant_memberships_property_id ON tenant_memberships (property_id);
-
 CREATE INDEX ix_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
+
+CREATE INDEX ix_tenant_memberships_property_id ON tenant_memberships (property_id);
 
 CREATE TABLE conversations (
     id UUID NOT NULL, 
@@ -651,6 +669,8 @@ CREATE TABLE conversations (
     FOREIGN KEY(flatmate_match_id) REFERENCES mutual_matches (id) ON DELETE SET NULL
 );
 
+CREATE INDEX ix_conversations_application_id ON conversations (application_id);
+
 CREATE INDEX ix_conversations_property_id ON conversations (property_id);
 
 CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
@@ -658,8 +678,6 @@ CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at)
 CREATE INDEX ix_conversations_flatmate_match_id ON conversations (flatmate_match_id);
 
 CREATE INDEX ix_conversations_group_id ON conversations (group_id);
-
-CREATE INDEX ix_conversations_application_id ON conversations (application_id);
 
 CREATE TABLE conversation_participants (
     id UUID NOT NULL, 
@@ -675,11 +693,11 @@ CREATE TABLE conversation_participants (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
+
 CREATE INDEX ix_conversation_participants_conversation_id ON conversation_participants (conversation_id);
 
 CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
-
-CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
 
 CREATE TABLE messages (
     id UUID NOT NULL, 
@@ -702,15 +720,15 @@ CREATE TABLE messages (
     FOREIGN KEY(reply_to_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_messages_sent_at ON messages (sent_at);
-
-CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
-
 CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
 
 CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE INDEX ix_messages_sender_id ON messages (sender_id);
+
+CREATE INDEX ix_messages_sent_at ON messages (sent_at);
+
+CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -727,11 +745,11 @@ CREATE TABLE conversation_preferences (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
-
 CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
 
 CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
+
+CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
 CREATE TABLE attachments (
     id UUID NOT NULL, 
@@ -749,11 +767,11 @@ CREATE TABLE attachments (
     FOREIGN KEY(uploader_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
+
 CREATE INDEX ix_attachments_message_id ON attachments (message_id);
 
 CREATE INDEX ix_attachments_uploader_id ON attachments (uploader_id);
-
-CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
 
 CREATE TABLE conversation_read_cursors (
     id UUID NOT NULL, 
@@ -768,9 +786,9 @@ CREATE TABLE conversation_read_cursors (
     FOREIGN KEY(last_read_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_conversation_read_cursors_conversation_id ON conversation_read_cursors (conversation_id);
-
 CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
+
+CREATE INDEX ix_conversation_read_cursors_conversation_id ON conversation_read_cursors (conversation_id);
 
 INSERT INTO alembic_version (version_num) VALUES ('001_initial_schema') RETURNING alembic_version.version_num;
 
@@ -1062,8 +1080,10 @@ BEGIN
 
     EXECUTE 'GRANT USAGE ON SCHEMA public TO flatmate_app';
 
+    -- Only touch what is missing: ALTER/GRANT take table locks, so a steady-state run
+    -- (every deploy) must not lock every table.
     FOR r IN
-        SELECT c.relname
+        SELECT c.relname, c.relrowsecurity
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public'
@@ -1073,11 +1093,22 @@ BEGIN
               WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
           )
     LOOP
-        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        IF NOT r.relrowsecurity THEN
+            EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        END IF;
         IF r.relname = 'alembic_version' THEN
-            EXECUTE format('REVOKE ALL ON public.%I FROM flatmate_app', r.relname);
-            EXECUTE format('GRANT SELECT ON public.%I TO flatmate_app', r.relname);
-        ELSE
+            IF has_table_privilege('flatmate_app', format('public.%I', r.relname), 'INSERT, UPDATE, DELETE, TRUNCATE') THEN
+                EXECUTE format('REVOKE ALL ON public.%I FROM flatmate_app', r.relname);
+            END IF;
+            IF NOT has_table_privilege('flatmate_app', format('public.%I', r.relname), 'SELECT') THEN
+                EXECUTE format('GRANT SELECT ON public.%I TO flatmate_app', r.relname);
+            END IF;
+        ELSIF NOT (
+            has_table_privilege('flatmate_app', format('public.%I', r.relname), 'SELECT')
+            AND has_table_privilege('flatmate_app', format('public.%I', r.relname), 'INSERT')
+            AND has_table_privilege('flatmate_app', format('public.%I', r.relname), 'UPDATE')
+            AND has_table_privilege('flatmate_app', format('public.%I', r.relname), 'DELETE')
+        ) THEN
             EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO flatmate_app', r.relname);
         END IF;
         IF NOT EXISTS (
@@ -1100,6 +1131,29 @@ END $$;;
 
 UPDATE alembic_version SET version_num='007_least_privilege_app_role' WHERE alembic_version.version_num = '006_outbox_dispatch';
 
+-- Running upgrade 007_least_privilege_app_role -> 008_phone_verification
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS phone_verifications (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            phone_e164 VARCHAR(20) NOT NULL,
+            code_hash VARCHAR(64) NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            expires_at TIMESTAMPTZ NOT NULL,
+            consumed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+CREATE INDEX IF NOT EXISTS idx_phone_verifications_user_created ON phone_verifications (user_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_phone_verifications_phone_created ON phone_verifications (phone_e164, created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_verified_phone ON users (phone_number) WHERE phone_verified_at IS NOT NULL;
+
+UPDATE alembic_version SET version_num='008_phone_verification' WHERE alembic_version.version_num = '007_least_privilege_app_role';
+
 DO $$
 DECLARE
     r record;
@@ -1113,8 +1167,10 @@ BEGIN
 
     EXECUTE 'GRANT USAGE ON SCHEMA public TO flatmate_app';
 
+    -- Only touch what is missing: ALTER/GRANT take table locks, so a steady-state run
+    -- (every deploy) must not lock every table.
     FOR r IN
-        SELECT c.relname
+        SELECT c.relname, c.relrowsecurity
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'public'
@@ -1124,11 +1180,22 @@ BEGIN
               WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
           )
     LOOP
-        EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        IF NOT r.relrowsecurity THEN
+            EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.relname);
+        END IF;
         IF r.relname = 'alembic_version' THEN
-            EXECUTE format('REVOKE ALL ON public.%I FROM flatmate_app', r.relname);
-            EXECUTE format('GRANT SELECT ON public.%I TO flatmate_app', r.relname);
-        ELSE
+            IF has_table_privilege('flatmate_app', format('public.%I', r.relname), 'INSERT, UPDATE, DELETE, TRUNCATE') THEN
+                EXECUTE format('REVOKE ALL ON public.%I FROM flatmate_app', r.relname);
+            END IF;
+            IF NOT has_table_privilege('flatmate_app', format('public.%I', r.relname), 'SELECT') THEN
+                EXECUTE format('GRANT SELECT ON public.%I TO flatmate_app', r.relname);
+            END IF;
+        ELSIF NOT (
+            has_table_privilege('flatmate_app', format('public.%I', r.relname), 'SELECT')
+            AND has_table_privilege('flatmate_app', format('public.%I', r.relname), 'INSERT')
+            AND has_table_privilege('flatmate_app', format('public.%I', r.relname), 'UPDATE')
+            AND has_table_privilege('flatmate_app', format('public.%I', r.relname), 'DELETE')
+        ) THEN
             EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO flatmate_app', r.relname);
         END IF;
         IF NOT EXISTS (

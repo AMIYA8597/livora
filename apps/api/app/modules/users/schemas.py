@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -21,4 +21,11 @@ class UserResponse(UserBase):
     is_active: bool
     is_verified: bool
     created_at: datetime
+    # Internal timestamp; clients get the boolean below.
+    phone_verified_at: Optional[datetime] = Field(default=None, exclude=True)
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def phone_verified(self) -> bool:
+        return self.phone_verified_at is not None

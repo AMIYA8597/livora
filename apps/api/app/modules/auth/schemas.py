@@ -26,11 +26,11 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 class SendOtpRequest(BaseModel):
-    phone_number: str = Field(min_length=10, max_length=15, description="E.164 or 10-digit Indian mobile number")
+    phone_number: str = Field(min_length=10, max_length=20, description="E.164 or 10-digit Indian mobile number")
 
 class VerifyOtpRequest(BaseModel):
-    phone_number: str
-    otp_code: str = Field(min_length=4, max_length=6)
+    phone_number: str = Field(min_length=10, max_length=20)
+    otp_code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr

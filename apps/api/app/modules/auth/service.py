@@ -13,7 +13,7 @@ from app.core.logging import logger
 from app.modules.users.models import User, UserRole, UserPrivacySetting
 from app.modules.users.schemas import UserResponse
 from app.modules.auth.schemas import (
-    RegisterRequest, LoginRequest, TokenResponse, SendOtpRequest, VerifyOtpRequest,
+    RegisterRequest, LoginRequest, TokenResponse,
     ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.modules.profiles.models import Profile
@@ -128,18 +128,6 @@ class AuthService:
             user=UserResponse.model_validate(user),
             roles=unique_roles,
         )
-
-    async def send_mobile_otp(self, req: SendOtpRequest) -> dict:
-        """Dispatches mobile OTP (simulated/ready for Twilio / MSG91 provider)."""
-        logger.info(f"Dispatched OTP to mobile {req.phone_number[-4:]}")
-        return {"success": True, "message": "OTP sent successfully to registered mobile number"}
-
-    async def verify_mobile_otp(self, req: VerifyOtpRequest) -> dict:
-        """Validates OTP and updates phone verification flag."""
-        # For testing / readiness, 1234 or 123456 is accepted as standard sandbox OTP
-        if req.otp_code not in ("1234", "123456"):
-            raise BadRequestException("Invalid or expired OTP code")
-        return {"success": True, "message": "Mobile number verified successfully"}
 
     async def forgot_password(self, req: ForgotPasswordRequest) -> tuple[dict, List[QueuedEmail]]:
         """

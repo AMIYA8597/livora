@@ -56,9 +56,22 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       is delivered only by email (echoed only in development/test), and it carries a keyed
       fingerprint of the current password hash, so it is single-use and every outstanding token
       dies when the password changes.
-- [ ] **4b. OTP verification accepts a hard-coded code.** `AuthService.verify_otp` accepts
-      `1234`/`123456` in every environment, so any phone number can be "verified". Needs a real
-      SMS/OTP provider with hashed, expiring, rate-limited codes, gated to dev/test (pairs with 12).
+- [x] **4b. OTP verification accepted a hard-coded code.** *(Done.)* `/auth/otp/verify` took
+      `1234`/`123456` from anyone, with no login, and verified nothing. Now
+      (`app/modules/auth/phone_verification.py`, migration `008_phone_verification`) both OTP
+      endpoints need a logged-in user. Codes are 6 digits from `secrets`, stored only as an HMAC,
+      valid 10 minutes, burned after 5 wrong guesses, and superseded by a newer code. Send limits
+      live in the database: a 60-second resend cooldown and 5 sends per hour per user *and* per
+      phone number (stops SMS bombing a victim from many accounts). Success sets
+      `users.phone_verified_at`; a number can be verified on only one account (partial unique
+      index), and changing the number clears verification. SMS goes through Twilio
+      (`app/infrastructure/sms.py`); the in-memory provider is refused outside dev/test, and the
+      code is echoed in the response only in dev/test. If SMS is not configured the endpoints
+      return 503 (logged at startup) instead of pretending to work. The profile page has the
+      send-code / enter-code flow with a resend countdown and a Verified badge. Tests are in
+      `tests/test_phone_verification.py`. **Owner action before launch:** a Twilio account, a
+      Messaging Service with a DLT-registered sender and template for Indian numbers, and
+      `SMS_PROVIDER=twilio` plus the `TWILIO_*` secrets on staging/production.
 - [x] **5. Workers are stubs.** *(Done.)* Real background processing built on a transactional
       outbox (`app/workers/outbox.py`, migration `006_outbox_dispatch`). Emails are written to
       `outbox_events` before the response, so a crash or provider outage can no longer lose them.
@@ -183,6 +196,11 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 - [ ] **15. Observability.** Sentry (web + api), structured logs shipped somewhere, uptime checks.
 - [ ] **16. Security pass.** CSP headers on the web app, rate limits on auth/chat/upload, file
       type sniffing and virus scan on uploads, account deletion/export (DPDP Act compliance).
+      Note: `RateLimiter` (`app/core/rate_limit.py`) is in-memory per process, so limits reset on
+      restart and multiply with instances. It keys signed-in calls on the token's last 16
+      characters (a fresh token resets the limit) and anonymous calls on a client-supplied
+      `X-Forwarded-For` (spoofable). Move it to Redis, key on the verified user id, and trust
+      forwarded headers only from the platform proxy. (OTP send limits already live in the DB.)
 - [ ] **17. SEO and performance.** Metadata/OG for property pages, image optimisation,
       Lighthouse of at least 90 on mobile.
 - [ ] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a

@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     STORAGE_BUCKET_VERIFICATION: str = "verification"
     STORAGE_BUCKET_CHAT_ATTACHMENTS: str = "chat-attachments"
 
+    # SMS one-time codes: twilio (production) | memory (development/test only)
+    SMS_PROVIDER: str = "memory"
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""
+    TWILIO_MESSAGING_SERVICE_SID: str = ""
+    OTP_TTL_MINUTES: int = 10
+    OTP_MAX_ATTEMPTS: int = 5
+    OTP_RESEND_COOLDOWN_SECONDS: int = 60
+    OTP_MAX_SENDS_PER_HOUR: int = 5
+
     # Supabase Integration (Free-first / Managed Backend)
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")

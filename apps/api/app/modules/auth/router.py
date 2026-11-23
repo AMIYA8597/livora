@@ -9,6 +9,8 @@ from app.modules.auth.schemas import (
     SendOtpRequest, VerifyOtpRequest, ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.modules.auth.service import AuthService
+from app.modules.auth.phone_verification import PhoneVerificationService
+from app.core.rate_limit import RateLimiter
 from app.modules.notifications.emails import enqueue
 
 router = APIRouter(prefix="/auth", tags=["Authentication & Identity"])
@@ -42,15 +44,23 @@ async def reset_password(data: ResetPasswordRequest, background_tasks: Backgroun
     await enqueue(db, background_tasks, emails)
     return res
 
-@router.post("/otp/send")
-async def send_mobile_otp(data: SendOtpRequest, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    return await service.send_mobile_otp(data)
+@router.post("/otp/send", dependencies=[Depends(RateLimiter(max_requests=20, window_seconds=3600, key_prefix="otp_send"))])
+async def send_mobile_otp(
+    data: SendOtpRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a one-time code to verify the caller's mobile number."""
+    return await PhoneVerificationService(db).send_code(current_user, data.phone_number)
 
-@router.post("/otp/verify")
-async def verify_mobile_otp(data: VerifyOtpRequest, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    return await service.verify_mobile_otp(data)
+@router.post("/otp/verify", dependencies=[Depends(RateLimiter(max_requests=30, window_seconds=3600, key_prefix="otp_verify"))])
+async def verify_mobile_otp(
+    data: VerifyOtpRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm the code; on success the number is attached to the caller as verified."""
+    return await PhoneVerificationService(db).verify_code(current_user, data.phone_number, data.otp_code)
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(current_user: User = Depends(get_current_user)):
