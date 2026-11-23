@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useApiQuery } from "@/hooks/useApiQuery";
+import { PageLoading } from "@/components/states/PageLoading";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { PropertyInventoryForm } from "@/features/properties/components/PropertyInventoryForm";
-import { Card, Button, Badge, Modal, Avatar, EmptyState } from "@flatmate/ui";
+import { Card, Button, Badge, Modal, Avatar, EmptyState, ErrorState } from "@flatmate/ui";
 import { formatCurrency, formatIndianCompactCurrency, formatDate, formatDateTimeIST } from "@/lib/utils";
 import {
   Building,
@@ -92,44 +95,34 @@ interface AppointmentItem {
 }
 
 export default function OwnerPortalPage() {
-  const { isAuthenticated, isOwner, isAdmin, user } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, isOwner, isAdmin, user } = useAuth();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"overview" | "properties" | "applications" | "appointments">("overview");
 
-  const [stats, setStats] = useState<any | null>(null);
-  const [properties, setProperties] = useState<OwnerProperty[]>([]);
-  const [applications, setApplications] = useState<ApplicantCard[]>([]);
-  const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const statsQuery = useApiQuery<any>(isAuthenticated ? "/owners/dashboard" : null);
+  const applicationsQuery = useApiQuery<ApplicantCard[]>(isAuthenticated ? "/owners/applications" : null);
+  const propertiesQuery = useApiQuery<OwnerProperty[]>(isAuthenticated ? "/owners/properties" : null);
+  const appointmentsQuery = useApiQuery<AppointmentItem[]>(isAuthenticated ? "/appointments" : null);
+  const stats = statsQuery.data ?? null;
+  const properties = propertiesQuery.data ?? [];
+  const applications = applicationsQuery.data ?? [];
+  const appointments = appointmentsQuery.data ?? [];
+  const setProperties = propertiesQuery.setData;
+  const setApplications = applicationsQuery.setData;
+  const setAppointments = appointmentsQuery.setData;
+  const isLoading =
+    statsQuery.isLoading || applicationsQuery.isLoading || propertiesQuery.isLoading || appointmentsQuery.isLoading;
+  const loadError = statsQuery.error || applicationsQuery.error || propertiesQuery.error || appointmentsQuery.error;
+  const loadOwnerData = () => {
+    statsQuery.refetch();
+    applicationsQuery.refetch();
+    propertiesQuery.refetch();
+    appointmentsQuery.refetch();
+  };
   const [isListingModalOpen, setIsListingModalOpen] = useState(false);
   const [isSubmittingProperty, setIsSubmittingProperty] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [selectedPropertyRooms, setSelectedPropertyRooms] = useState<OwnerProperty | null>(null);
-
-  const loadOwnerData = async () => {
-    try {
-      setIsLoading(true);
-      const [statsData, appsData, propsData, apptsData] = await Promise.all([
-        apiClient<any>("/owners/dashboard").catch(() => null),
-        apiClient<ApplicantCard[]>("/owners/applications").catch(() => []),
-        apiClient<OwnerProperty[]>("/owners/properties").catch(() => []),
-        apiClient<AppointmentItem[]>("/appointments").catch(() => []),
-      ]);
-      setStats(statsData);
-      setApplications(appsData || []);
-      setProperties(propsData || []);
-      setAppointments(apptsData || []);
-    } catch (err) {
-      console.error("Failed to load owner data:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadOwnerData();
-    }
-  }, [isAuthenticated]);
 
   const handleToggleListingStatus = async (propertyId: string, currentStatus: string) => {
     const nextStatus = currentStatus === "published" ? "paused" : "published";
@@ -138,7 +131,7 @@ export default function OwnerPortalPage() {
         method: "PATCH",
         body: JSON.stringify({ listing_status: nextStatus }),
       });
-      setProperties((prev) =>
+      setProperties((prev = []) =>
         prev.map((p) => (p.id === propertyId ? { ...p, listing_status: nextStatus, is_active: nextStatus === "published" } : p))
       );
       setActionNotice(`Property listing status updated to ${nextStatus}.`);
@@ -165,7 +158,7 @@ export default function OwnerPortalPage() {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
-      setApplications((prev) =>
+      setApplications((prev = []) =>
         prev.map((a) => {
           const currentId = a.application?.id || a.application_id;
           if (currentId === appId) {
@@ -190,7 +183,7 @@ export default function OwnerPortalPage() {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
-      setAppointments((prev) =>
+      setAppointments((prev = []) =>
         prev.map((a) => (a.id === apptId ? { ...a, status: newStatus } : a))
       );
       setActionNotice(`Viewing appointment marked as ${newStatus}.`);
@@ -244,6 +237,8 @@ export default function OwnerPortalPage() {
     }
   };
 
+  if (authLoading) return <PageLoading />;
+
   if (!isAuthenticated) {
     return (
       <div className="max-w-md mx-auto py-20 px-4 text-center">
@@ -251,7 +246,7 @@ export default function OwnerPortalPage() {
           <Building className="w-12 h-12 text-forest mx-auto mb-3" />
           <h2 className="text-xl font-bold text-charcoal mb-2">Landlord & Owner Portal</h2>
           <p className="text-xs text-charcoal-muted mb-6">Sign in with an owner or landlord account to manage your listings.</p>
-          <Button variant="primary" onClick={() => (window.location.href = "/login")} className="w-full">
+          <Button variant="primary" onClick={() => router.push("/login")} className="w-full">
             Sign In
           </Button>
         </Card>
@@ -287,6 +282,10 @@ export default function OwnerPortalPage() {
           </Button>
         </div>
       </div>
+
+      {loadError && !isLoading && (
+        <ErrorState title="Some portal data failed to load" message={loadError.message} onRetry={loadOwnerData} />
+      )}
 
       {actionNotice && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center gap-2">

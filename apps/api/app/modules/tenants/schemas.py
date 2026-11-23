@@ -24,7 +24,8 @@ class TenantMembershipResponse(BaseModel):
 
 class ExistingTenantVacancyCreate(BaseModel):
     property_id: uuid.UUID
-    room_id: uuid.UUID
+    # Defaults to the room on the tenant's own lease; any room given must belong to the property.
+    room_id: Optional[uuid.UUID] = None
     title: str = Field(..., description="e.g. Need 1 flatmate for master bedroom in 3BHK HSR Layout")
     description: str = Field(..., description="Room and flatmate requirements")
     vacant_from: date

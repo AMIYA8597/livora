@@ -15,7 +15,7 @@ from app.modules.pg_management.service import PGService
 from app.modules.pg_management.models import PGBuilding
 from app.modules.properties.models import Property, Room, Bed
 from app.modules.users.models import User
-from app.core.exceptions import ForbiddenException, ConflictException
+from app.core.exceptions import BadRequestException, ForbiddenException, ConflictException
 
 @pytest.mark.asyncio
 async def test_owner_tenant_roster_access_and_security():
@@ -96,6 +96,7 @@ async def test_existing_tenant_vacancy_authorization():
     active_membership = TenantMembership(
         id=uuid4(),
         property_id=prop_id,
+        room_id=room_id,
         tenant_id=tenant_id,
         status="active",
         monthly_rent=Decimal("14000.00")
@@ -106,9 +107,60 @@ async def test_existing_tenant_vacancy_authorization():
 
     created = await service.create_vacancy(tenant_id=tenant_id, data=vacancy_data)
     assert created.property_id == prop_id
+    assert created.room_id == room_id
     assert created.expected_rent == Decimal("14000.00")
     assert created.preferred_gender == "female_only"
     assert mock_db.commit.called
+
+
+def _result(value):
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = value
+    return res
+
+
+@pytest.mark.asyncio
+async def test_vacancy_room_defaults_to_lease_and_must_belong_to_property():
+    """No room given -> the lease's room; a room from another listing -> 400; no room at all -> 400."""
+    tenant_id, prop_id, lease_room = uuid4(), uuid4(), uuid4()
+    membership = TenantMembership(
+        id=uuid4(), property_id=prop_id, room_id=lease_room, tenant_id=tenant_id,
+        status="active", monthly_rent=Decimal("9000.00"),
+    )
+    base = dict(
+        property_id=prop_id, title="Room free in 2BHK", description="Furnished room",
+        vacant_from=date.today(), expected_rent=Decimal("9000.00"),
+    )
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    service = TenantService(mock_db)
+
+    mock_db.execute.side_effect = [_result(membership)]
+    created = await service.create_vacancy(tenant_id, ExistingTenantVacancyCreate(**base))
+    assert created.room_id == lease_room
+
+    mock_db.execute.side_effect = [_result(membership), _result(uuid4())]
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_vacancy(tenant_id, ExistingTenantVacancyCreate(**base, room_id=uuid4()))
+    assert exc_info.value.error_code == "ROOM_NOT_IN_PROPERTY"
+
+    mock_db.execute.side_effect = [_result(membership), _result(None)]
+    with pytest.raises(BadRequestException):
+        await service.create_vacancy(tenant_id, ExistingTenantVacancyCreate(**base, room_id=uuid4()))
+
+    other_room = uuid4()
+    mock_db.execute.side_effect = [_result(membership), _result(prop_id)]
+    created = await service.create_vacancy(tenant_id, ExistingTenantVacancyCreate(**base, room_id=other_room))
+    assert created.room_id == other_room
+
+    roomless = TenantMembership(
+        id=uuid4(), property_id=prop_id, room_id=None, tenant_id=tenant_id,
+        status="active", monthly_rent=Decimal("9000.00"),
+    )
+    mock_db.execute.side_effect = [_result(roomless)]
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_vacancy(tenant_id, ExistingTenantVacancyCreate(**base))
+    assert exc_info.value.error_code == "ROOM_REQUIRED"
 
 @pytest.mark.asyncio
 async def test_pg_building_management_and_duplicate_prevention():

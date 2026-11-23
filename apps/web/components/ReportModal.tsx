@@ -20,7 +20,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   targetId,
   targetName,
 }) => {
-  const [reason, setReason] = useState("harassment");
+  // Start on an option that exists for this target type, so the select and the state agree.
+  const [reason, setReason] = useState(() => (targetType === "property" ? "fake_listing" : "harassment"));
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);

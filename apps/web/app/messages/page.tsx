@@ -1,15 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   ConversationDTO, MessageDTO, AttachmentDTO,
   ConversationParticipantDTO
 } from "@flatmate/contracts";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { useSocket } from "@/hooks/useSocket";
 import { Card, Avatar, Button } from "@flatmate/ui";
 import { ChatWindow } from "@/features/messaging/components/ChatWindow";
+import { PageLoading } from "@/components/states/PageLoading";
 import {
   MessageSquare, ShieldCheck, Search, Users, Home, UserCheck,
   Archive, BellOff, MoreVertical, X, AlertCircle, RefreshCw
@@ -17,14 +20,27 @@ import {
 
 type FilterTab = "all" | "direct" | "property_inquiry" | "group" | "archived";
 
-export default function MessagesPage() {
-  const { user, isAuthenticated } = useAuth();
-  const [conversations, setConversations] = useState<ConversationDTO[]>([]);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+function MessagesView() {
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const conversationsQuery = useApiQuery<ConversationDTO[]>(isAuthenticated ? "/messaging/conversations" : null);
+  const conversationsData = conversationsQuery.data;
+  const conversations = useMemo(() => conversationsData ?? [], [conversationsData]);
+  const setConversations = (update: (prev: ConversationDTO[]) => ConversationDTO[]) =>
+    conversationsQuery.setData((prev) => update(prev ?? []));
+  const loadConversations = conversationsQuery.refetch;
+  const isLoading = authLoading || conversationsQuery.isLoading;
+  // Until the user picks one, open the conversation named in the URL (e.g. "Message the host"),
+  // otherwise the newest one.
+  const requestedConvId = useSearchParams().get("conversationId");
+  const [selectedConvId, setActiveConvId] = useState<string | null>(null);
+  const activeConvId =
+    selectedConvId ??
+    (requestedConvId && conversations.some((c) => c.id === requestedConvId) ? requestedConvId : null) ??
+    conversations[0]?.id ??
+    null;
   const [messages, setMessages] = useState<MessageDTO[]>([]);
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [activeConvDetails, setActiveConvDetails] = useState<any>(null);
@@ -103,48 +119,31 @@ export default function MessagesPage() {
     },
   });
 
-  // 1. Fetch conversations
-  const loadConversations = useCallback(async () => {
-    if (!isAuthenticated) return;
-    try {
-      setIsLoading(true);
-      const data = await apiClient<ConversationDTO[]>("/messaging/conversations");
-      setConversations(data);
-      if (data.length > 0 && !activeConvId) {
-        setActiveConvId(data[0].id);
-      }
-    } catch (err) {
-      console.error("Failed to load conversations:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, activeConvId]);
-
+  // Messages & details for the active conversation. Kept in local state because the socket
+  // appends to it; a late response for a conversation the user already left is dropped.
+  const setConversationsData = conversationsQuery.setData;
   useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
-
-  // 2. Fetch messages & details for active conversation
-  useEffect(() => {
-    async function loadActiveConversation() {
-      if (!activeConvId) return;
-      try {
-        const [msgs, details] = await Promise.all([
-          apiClient<MessageDTO[]>(`/messaging/conversations/${activeConvId}/messages`),
-          apiClient<any>(`/messaging/conversations/${activeConvId}`),
-        ]);
+    if (!activeConvId) return;
+    const controller = new AbortController();
+    Promise.all([
+      apiClient<MessageDTO[]>(`/messaging/conversations/${activeConvId}/messages`, { signal: controller.signal }),
+      apiClient<any>(`/messaging/conversations/${activeConvId}`, { signal: controller.signal }),
+    ]).then(
+      ([msgs, details]) => {
+        if (controller.signal.aborted) return;
         setMessages(msgs);
         setActiveConvDetails(details);
         // Reset unread count in sidebar
-        setConversations((prev) =>
+        setConversationsData((prev = []) =>
           prev.map((c) => (c.id === activeConvId ? { ...c, unread_count: 0 } : c))
         );
-      } catch (err) {
-        console.error("Failed to load active conversation messages:", err);
-      }
-    }
-    loadActiveConversation();
-  }, [activeConvId]);
+      },
+      (err) => {
+        if (!controller.signal.aborted) console.error("Failed to load active conversation messages:", err);
+      },
+    );
+    return () => controller.abort();
+  }, [activeConvId, setConversationsData]);
 
   // Handle optimistic message sending
   const handleSendMessage = async (text: string, replyToId?: string, attachmentIds?: string[]) => {
@@ -230,21 +229,13 @@ export default function MessagesPage() {
     if (!activeConvId) throw new Error("No active conversation");
     const formData = new FormData();
     formData.append("file", file);
-
-    const token = localStorage.getItem("flatmate_access_token") || localStorage.getItem("token") || "";
-    const res = await fetch(`/api/v1/messaging/conversations/${activeConvId}/attachments`, {
+    // apiClient targets the API origin (a relative /api/v1 URL hit the Next.js server and 404'd)
+    // and handles token refresh; it leaves Content-Type to the browser for FormData.
+    return apiClient<AttachmentDTO>(`/messaging/conversations/${activeConvId}/attachments`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
       body: formData,
+      timeoutMs: 60000,
     });
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.detail || "Attachment upload failed");
-    }
-    return await res.json();
   };
 
   // Filtered conversations
@@ -361,6 +352,14 @@ export default function MessagesPage() {
               <div className="p-8 text-center text-xs text-charcoal-muted flex flex-col items-center">
                 <RefreshCw className="w-5 h-5 animate-spin mb-2 text-forest" />
                 <span>Loading conversations...</span>
+              </div>
+            ) : conversationsQuery.error ? (
+              <div role="alert" className="p-8 text-center text-xs text-rose-700 flex flex-col items-center gap-2">
+                <AlertCircle className="w-5 h-5" />
+                <span>Couldn&apos;t load conversations.</span>
+                <Button size="sm" variant="outline" onClick={loadConversations}>
+                  Try again
+                </Button>
               </div>
             ) : filteredConversations.length === 0 ? (
               <div className="p-8 text-center text-xs text-charcoal-muted">
@@ -537,5 +536,14 @@ export default function MessagesPage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+export default function MessagesPage() {
+  // useSearchParams needs a Suspense boundary so the rest of the route can prerender.
+  return (
+    <Suspense fallback={<PageLoading text="Loading messages…" />}>
+      <MessagesView />
+    </Suspense>
   );
 }

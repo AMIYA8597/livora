@@ -1,30 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { FlatmateMatchRecommendation } from "@flatmate/contracts";
-import { apiClient } from "@/lib/api-client";
+import { useApiQuery } from "@/hooks/useApiQuery";
+import { useAuth } from "@/hooks/useAuth";
 
+/** Match recommendations for the signed-in user (nothing is requested while signed out). */
 export function useMatches(limit = 10) {
-  const [matches, setMatches] = useState<FlatmateMatchRecommendation[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function loadMatches() {
-      try {
-        setIsLoading(true);
-        const data = await apiClient<FlatmateMatchRecommendation[]>("/matching/recommendations", {
-          params: { limit },
-        });
-        setMatches(data);
-      } catch (err: any) {
-        setError(err.message || "Failed to load matches");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadMatches();
-  }, [limit]);
-
-  return { matches, isLoading, error };
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const query = useApiQuery<FlatmateMatchRecommendation[]>(
+    isAuthenticated ? "/matching/recommendations" : null,
+    { limit },
+  );
+  return {
+    matches: query.data ?? [],
+    isLoading: authLoading || query.isLoading,
+    error: query.error ? query.error.message || "Failed to load matches" : null,
+    refetch: query.refetch,
+  };
 }

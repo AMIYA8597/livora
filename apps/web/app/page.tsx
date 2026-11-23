@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import Link from "next/link";
 import { SearchBar } from "@/components/SearchBar";
 import { PropertyCard } from "@/components/PropertyCard";
 import { FlatmateCard } from "@/components/FlatmateCard";
 import { Button, Card, Badge, Skeleton, EmptyState } from "@flatmate/ui";
 import { PropertyDTO } from "@flatmate/contracts";
-import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Sparkles,
@@ -28,49 +29,16 @@ import {
 } from "lucide-react";
 
 export default function HomePage() {
-  const { isAuthenticated } = useAuth();
-  const [featuredProperties, setFeaturedProperties] = useState<PropertyDTO[]>([]);
-  const [featuredFlatmates, setFeaturedFlatmates] = useState<any[]>([]);
-  const [loadingProps, setLoadingProps] = useState(true);
-  const [loadingFlatmates, setLoadingFlatmates] = useState(true);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const router = useRouter();
+  const propertiesQuery = useApiQuery<PropertyDTO[]>("/properties", { limit: 6 });
+  // The seeker directory is members-only.
+  const flatmatesQuery = useApiQuery<any[]>(isAuthenticated ? "/flatmates/search" : null, { limit: 4 });
+  const featuredProperties = propertiesQuery.data ?? [];
+  const featuredFlatmates = flatmatesQuery.data ?? [];
+  const loadingProps = propertiesQuery.isLoading;
+  const loadingFlatmates = authLoading || flatmatesQuery.isLoading;
   const [openFaq, setOpenFaq] = useState<number | null>(null);
-
-  useEffect(() => {
-    // 1. Fetch real properties from API
-    async function loadProperties() {
-      try {
-        setLoadingProps(true);
-        const data = await apiClient<PropertyDTO[]>("/properties", { params: { limit: 6 } });
-        setFeaturedProperties(data || []);
-      } catch (err) {
-        console.error("Failed to load featured properties:", err);
-        setFeaturedProperties([]);
-      } finally {
-        setLoadingProps(false);
-      }
-    }
-
-    // 2. Fetch real flatmates from API if user is authenticated
-    async function loadFlatmates() {
-      try {
-        setLoadingFlatmates(true);
-        if (typeof window !== "undefined" && localStorage.getItem("flatmate_access_token")) {
-          const seekers = await apiClient<any[]>("/flatmates/search", { params: { limit: 4 } });
-          setFeaturedFlatmates(seekers || []);
-        } else {
-          setFeaturedFlatmates([]);
-        }
-      } catch (err) {
-        console.error("Failed to load featured flatmates:", err);
-        setFeaturedFlatmates([]);
-      } finally {
-        setLoadingFlatmates(false);
-      }
-    }
-
-    loadProperties();
-    loadFlatmates();
-  }, [isAuthenticated]);
 
   const faqs = [
     {
@@ -265,7 +233,7 @@ export default function HomePage() {
             title="No active property listings found"
             description="Be the first verified landlord or tenant to list an accommodation on Flatmate."
             actionLabel="List a Property"
-            onAction={() => (window.location.href = "/owner")}
+            onAction={() => router.push("/owner")}
           />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -332,7 +300,7 @@ export default function HomePage() {
             title="No flatmate profiles found nearby"
             description="Broaden your search or update your preferred localities in your profile settings."
             actionLabel="Update Profile"
-            onAction={() => (window.location.href = "/profile")}
+            onAction={() => router.push("/profile")}
           />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">

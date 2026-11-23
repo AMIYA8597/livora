@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { apiClient } from "@/lib/api-client";
 import { OwnerDashboardStatsDTO, ApplicantReviewCardDTO } from "@flatmate/contracts";
-import { Card, Button, Badge, Modal, Avatar } from "@flatmate/ui";
+import { Card, Button, Badge, Modal, Avatar, ErrorState } from "@flatmate/ui";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
   Building,
@@ -25,33 +26,18 @@ import {
 } from "lucide-react";
 
 export default function OwnerDashboardPage() {
-  const { isAuthenticated, isOwner, isAdmin, user } = useAuth();
-  const [stats, setStats] = useState<OwnerDashboardStatsDTO | null>(null);
-  const [applications, setApplications] = useState<ApplicantReviewCardDTO[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
-
-  const loadOwnerData = async () => {
-    try {
-      setIsLoading(true);
-      const [statsData, appsData] = await Promise.all([
-        apiClient<OwnerDashboardStatsDTO>("/owners/dashboard").catch(() => null),
-        apiClient<ApplicantReviewCardDTO[]>("/owners/applications").catch(() => []),
-      ]);
-      setStats(statsData);
-      setApplications(appsData || []);
-    } catch (err) {
-      console.error("Failed to load owner data:", err);
-    } finally {
-      setIsLoading(false);
-    }
+  const { isAuthenticated, isLoading: authLoading, isOwner, isAdmin, user } = useAuth();
+  const statsQuery = useApiQuery<OwnerDashboardStatsDTO>(isAuthenticated ? "/owners/dashboard" : null);
+  const applicationsQuery = useApiQuery<ApplicantReviewCardDTO[]>(isAuthenticated ? "/owners/applications" : null);
+  const stats = statsQuery.data ?? null;
+  const applications = applicationsQuery.data ?? [];
+  const setApplications = applicationsQuery.setData;
+  const isLoading = authLoading || applicationsQuery.isLoading;
+  const loadOwnerData = () => {
+    statsQuery.refetch();
+    applicationsQuery.refetch();
   };
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadOwnerData();
-    }
-  }, [isAuthenticated]);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const handleUpdateStatus = async (appId: string, newStatus: "approved" | "rejected") => {
     try {
@@ -59,7 +45,7 @@ export default function OwnerDashboardPage() {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
-      setApplications((prev) =>
+      setApplications((prev = []) =>
         prev.map((a) => ((a.application_id || a.id) === appId ? { ...a, status: newStatus } : a))
       );
       setActionNotice(`Application successfully ${newStatus}!`);
@@ -166,6 +152,12 @@ export default function OwnerDashboardPage() {
               <div key={i} className="h-32 bg-slate-100 rounded-2xl animate-pulse" />
             ))}
           </div>
+        ) : applicationsQuery.error || statsQuery.error ? (
+          <ErrorState
+            title="Couldn't load your portal"
+            message={(applicationsQuery.error || statsQuery.error)?.message}
+            onRetry={loadOwnerData}
+          />
         ) : applications.length === 0 ? (
           <Card className="p-12 text-center border-slate-200/80">
             <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />

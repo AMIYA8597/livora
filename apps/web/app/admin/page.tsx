@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { apiClient } from "@/lib/api-client";
-import { Card, Button, Badge, Modal, Input, EmptyState } from "@flatmate/ui";
+import { Card, Button, Badge, Modal, Input, EmptyState, ErrorState, LoadingIndicator } from "@flatmate/ui";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import {
   ShieldCheck,
@@ -66,41 +68,31 @@ interface AdminProperty {
 }
 
 export default function AdminModerationPage() {
-  const { isAuthenticated, isAdmin, user } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, isAdmin, user } = useAuth();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"stats" | "moderation" | "properties" | "users">("stats");
 
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [reports, setReports] = useState<ModerationReport[]>([]);
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [properties, setProperties] = useState<AdminProperty[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
-
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      const [statsData, reportsData, usersData, propsData] = await Promise.all([
-        apiClient<AdminStats>("/admin/stats").catch(() => null),
-        apiClient<ModerationReport[]>("/moderation/reports").catch(() => []),
-        apiClient<AdminUser[]>("/admin/users").catch(() => []),
-        apiClient<AdminProperty[]>("/properties").catch(() => []),
-      ]);
-      setStats(statsData);
-      setReports(reportsData || []);
-      setUsers(usersData || []);
-      setProperties(propsData || []);
-    } catch (err) {
-      console.error("Failed to load admin data:", err);
-    } finally {
-      setIsLoading(false);
-    }
+  const canView = isAuthenticated && (isAdmin || user?.role === "super_admin" || user?.role === "admin");
+  const statsQuery = useApiQuery<AdminStats>(canView ? "/admin/stats" : null);
+  const reportsQuery = useApiQuery<ModerationReport[]>(canView ? "/moderation/reports" : null);
+  const usersQuery = useApiQuery<AdminUser[]>(canView ? "/admin/users" : null);
+  const propertiesQuery = useApiQuery<AdminProperty[]>(canView ? "/properties" : null);
+  const stats = statsQuery.data ?? null;
+  const reports = reportsQuery.data ?? [];
+  const users = usersQuery.data ?? [];
+  const properties = propertiesQuery.data ?? [];
+  const setReports = reportsQuery.setData;
+  const setUsers = usersQuery.setData;
+  const setProperties = propertiesQuery.setData;
+  const isLoading = statsQuery.isLoading || reportsQuery.isLoading || usersQuery.isLoading || propertiesQuery.isLoading;
+  const loadError = statsQuery.error || reportsQuery.error || usersQuery.error || propertiesQuery.error;
+  const reloadAll = () => {
+    statsQuery.refetch();
+    reportsQuery.refetch();
+    usersQuery.refetch();
+    propertiesQuery.refetch();
   };
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadData();
-    }
-  }, [isAuthenticated]);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const handleResolveReport = async (reportId: string, status: "resolved" | "dismissed") => {
     try {
@@ -111,7 +103,7 @@ export default function AdminModerationPage() {
           action_taken: status === "resolved" ? "Account flagged / content moderated" : "No policy violation found",
         }),
       });
-      setReports((prev) =>
+      setReports((prev = []) =>
         prev.map((r) => (r.id === reportId ? { ...r, status } : r))
       );
       setActionNotice(`Report marked as ${status}.`);
@@ -127,7 +119,7 @@ export default function AdminModerationPage() {
         method: "PATCH",
         body: JSON.stringify({ is_active: !currentStatus }),
       });
-      setUsers((prev) =>
+      setUsers((prev = []) =>
         prev.map((u) => (u.id === userId ? { ...u, is_active: !currentStatus } : u))
       );
       setActionNotice(`User account ${!currentStatus ? "activated" : "suspended"}.`);
@@ -143,7 +135,7 @@ export default function AdminModerationPage() {
         method: "PATCH",
         body: JSON.stringify({ listing_status: "published" }),
       });
-      setProperties((prev) =>
+      setProperties((prev = []) =>
         prev.map((p) => (p.id === propId ? { ...p, is_verified: true, listing_status: "published" } : p))
       );
       setActionNotice("Property approved and published to marketplace.");
@@ -153,7 +145,15 @@ export default function AdminModerationPage() {
     }
   };
 
-  if (!isAuthenticated || (!isAdmin && user?.role !== "super_admin" && user?.role !== "admin")) {
+  if (authLoading) {
+    return (
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <LoadingIndicator size="lg" text="Checking access…" />
+      </div>
+    );
+  }
+
+  if (!canView) {
     return (
       <div className="max-w-md mx-auto py-20 px-4 text-center">
         <Card className="p-8">
@@ -162,7 +162,7 @@ export default function AdminModerationPage() {
           <p className="text-xs text-charcoal-muted mb-6">
             Administrator privileges are required to view platform metrics and the moderation queue.
           </p>
-          <Button variant="primary" onClick={() => (window.location.href = "/")} className="w-full">
+          <Button variant="primary" onClick={() => router.push("/")} className="w-full">
             Return Home
           </Button>
         </Card>
@@ -185,6 +185,19 @@ export default function AdminModerationPage() {
           </p>
         </div>
       </div>
+
+      {loadError && !isLoading && (
+        <ErrorState
+          title="Some admin data failed to load"
+          message={loadError.message}
+          onRetry={reloadAll}
+        />
+      )}
+      {isLoading && (
+        <div className="flex justify-center py-6">
+          <LoadingIndicator text="Loading console…" />
+        </div>
+      )}
 
       {actionNotice && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center gap-2">

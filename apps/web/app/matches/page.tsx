@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMatches } from "@/hooks/useMatches";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { Card, Avatar, Button, MatchScoreBadge, Badge, Skeleton, EmptyState } from "@flatmate/ui";
@@ -24,27 +26,14 @@ export default function MatchesPage() {
   const { isAuthenticated } = useAuth();
   const { matches, isLoading, error } = useMatches(15);
   const [activeTab, setActiveTab] = useState<"recommendations" | "mutual">("recommendations");
-  const [mutualMatches, setMutualMatches] = useState<MutualMatchItemResponse[]>([]);
-  const [loadingMutual, setLoadingMutual] = useState(false);
+  const router = useRouter();
+  // Loaded when the tab is first opened; switching to it again shows fresh data.
+  const mutualQuery = useApiQuery<MutualMatchItemResponse[]>(
+    isAuthenticated && activeTab === "mutual" ? "/matching/matches" : null,
+  );
+  const mutualMatches = mutualQuery.data ?? [];
+  const loadingMutual = mutualQuery.isLoading;
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    async function loadMutualMatches() {
-      if (!isAuthenticated) return;
-      try {
-        setLoadingMutual(true);
-        const data = await apiClient<MutualMatchItemResponse[]>("/matching/matches");
-        setMutualMatches(data || []);
-      } catch (err) {
-        console.error("Failed to load mutual matches:", err);
-      } finally {
-        setLoadingMutual(false);
-      }
-    }
-    if (activeTab === "mutual") {
-      loadMutualMatches();
-    }
-  }, [activeTab, isAuthenticated]);
 
   const handleInteraction = async (targetUserId: string, action: "like" | "save" | "pass") => {
     try {
@@ -165,7 +154,7 @@ export default function MatchesPage() {
               title="No match candidates found yet"
               description="Complete or update your 10-dimension questionnaire to activate pairwise vector comparisons."
               actionLabel="Complete Questionnaire"
-              onAction={() => (window.location.href = "/profile")}
+              onAction={() => router.push("/profile")}
             />
           ) : (
             <div className="space-y-4">

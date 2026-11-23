@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, Suspense, useCallback } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PropertyDTO } from "@flatmate/contracts";
-import { apiClient } from "@/lib/api-client";
+import { ApiError } from "@/lib/api-client";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { PropertyCard } from "@/components/PropertyCard";
 import { Input, Button, Badge, Skeleton, EmptyState, ErrorState, Pagination, Drawer } from "@flatmate/ui";
 import { TOP_INDIAN_CITIES, formatCurrency } from "@/lib/utils";
@@ -16,6 +17,16 @@ import {
   X,
   Filter,
 } from "lucide-react";
+
+interface AppliedFilters {
+  city: string;
+  locality: string;
+  minRent: string;
+  maxRent: string;
+  category: string;
+  configuration: string;
+  furnishing: string;
+}
 
 function PropertiesListContent() {
   const router = useRouter();
@@ -31,104 +42,81 @@ function PropertiesListContent() {
   const [furnishing, setFurnishing] = useState(searchParams.get("furnishing") || "");
   const [sortBy, setSortBy] = useState(searchParams.get("sort") || "newest");
   const [page, setPage] = useState(Number(searchParams.get("page")) || 1);
-
-  const [properties, setProperties] = useState<PropertyDTO[]>([]);
-  const [totalCount, setTotalCount] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [correlationId, setCorrelationId] = useState<string | undefined>();
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const PAGE_SIZE = 9;
 
-  const updateURLParams = useCallback(
-    (params: Record<string, string | number>) => {
-      const url = new URL(window.location.href);
-      Object.entries(params).forEach(([k, v]) => {
-        if (v !== undefined && v !== "" && v !== null) {
-          url.searchParams.set(k, String(v));
-        } else {
-          url.searchParams.delete(k);
-        }
-      });
-      window.history.replaceState(null, "", url.toString());
-    },
-    []
-  );
+  // The inputs above are drafts; `applied` is what the search actually uses. Filters apply on
+  // submit, except the city chips and chip removal, which apply at once.
+  const [applied, setApplied] = useState<AppliedFilters>(() => ({
+    city: searchParams.get("city") || "",
+    locality: searchParams.get("locality") || "",
+    minRent: searchParams.get("min_rent") || "",
+    maxRent: searchParams.get("max_rent") || "",
+    category: searchParams.get("category") || "",
+    configuration: searchParams.get("config") || "",
+    furnishing: searchParams.get("furnishing") || "",
+  }));
+  const apply = (overrides: Partial<AppliedFilters> = {}) => {
+    setApplied({ city, locality, minRent, maxRent, category, configuration, furnishing, ...overrides });
+    setPage(1);
+  };
 
-  const fetchProperties = useCallback(
-    async (currentPage = page) => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        setCorrelationId(undefined);
+  const propertiesQuery = useApiQuery<PropertyDTO[]>("/properties", {
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+    city: applied.city.trim() || undefined,
+    min_rent: applied.minRent ? Number(applied.minRent) : undefined,
+    max_rent: applied.maxRent ? Number(applied.maxRent) : undefined,
+    property_category: applied.category || undefined,
+    configuration: applied.configuration || undefined,
+  });
+  const fetched = propertiesQuery.data ?? [];
+  // In-memory sorting for marketplace ordering
+  const properties =
+    sortBy === "price_asc"
+      ? [...fetched].sort((a, b) => Number(a.monthly_rent) - Number(b.monthly_rent))
+      : sortBy === "price_desc"
+        ? [...fetched].sort((a, b) => Number(b.monthly_rent) - Number(a.monthly_rent))
+        : fetched;
+  const totalCount =
+    fetched.length >= PAGE_SIZE ? (page + 1) * PAGE_SIZE : (page - 1) * PAGE_SIZE + fetched.length;
+  const isLoading = propertiesQuery.isLoading;
+  const error = propertiesQuery.error ? propertiesQuery.error.message || "Failed to load properties" : null;
+  const correlationId = (propertiesQuery.error as ApiError | null)?.requestId;
+  const fetchProperties = propertiesQuery.refetch;
 
-        const params: Record<string, any> = {
-          limit: PAGE_SIZE,
-          offset: (currentPage - 1) * PAGE_SIZE,
-        };
-
-        if (city.trim()) params.city = city.trim();
-        if (minRent) params.min_rent = Number(minRent);
-        if (maxRent) params.max_rent = Number(maxRent);
-        if (category) params.property_category = category;
-        if (configuration) params.configuration = configuration;
-
-        const data = await apiClient<PropertyDTO[]>("/properties", { params });
-        let list = data || [];
-
-        // In-memory sorting for marketplace ordering
-        if (sortBy === "price_asc") {
-          list = [...list].sort((a, b) => Number(a.monthly_rent) - Number(b.monthly_rent));
-        } else if (sortBy === "price_desc") {
-          list = [...list].sort((a, b) => Number(b.monthly_rent) - Number(a.monthly_rent));
-        }
-
-        setProperties(list);
-        setTotalCount(list.length >= PAGE_SIZE ? (currentPage + 1) * PAGE_SIZE : (currentPage - 1) * PAGE_SIZE + list.length);
-
-        updateURLParams({
-          city,
-          locality,
-          min_rent: minRent,
-          max_rent: maxRent,
-          category,
-          config: configuration,
-          furnishing,
-          sort: sortBy,
-          page: currentPage,
-        });
-      } catch (err: any) {
-        console.error("Failed to load properties:", err);
-        setError(err.message || "Failed to load properties");
-        setCorrelationId(err.correlation_id || err.request_id);
-        setProperties([]);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [city, locality, minRent, maxRent, category, configuration, furnishing, sortBy, page, updateURLParams]
-  );
-
+  // Keep the URL shareable. replaceState only; no React state is touched here.
   useEffect(() => {
-    fetchProperties(page);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, sortBy]);
+    const url = new URL(window.location.href);
+    const entries: Record<string, string | number> = {
+      city: applied.city,
+      locality: applied.locality,
+      min_rent: applied.minRent,
+      max_rent: applied.maxRent,
+      category: applied.category,
+      config: applied.configuration,
+      furnishing: applied.furnishing,
+      sort: sortBy === "newest" ? "" : sortBy,
+      page: page === 1 ? "" : page,
+    };
+    Object.entries(entries).forEach(([k, v]) => {
+      if (v !== "") url.searchParams.set(k, String(v));
+      else url.searchParams.delete(k);
+    });
+    window.history.replaceState(null, "", url.toString());
+  }, [applied, sortBy, page]);
 
   const handleFilterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
     setMobileFiltersOpen(false);
-    fetchProperties(1);
+    apply();
   };
 
   const handleCitySelect = (selectedCity: string) => {
     const nextCity = city === selectedCity ? "" : selectedCity;
     setCity(nextCity);
-    setPage(1);
-    setTimeout(() => {
-      fetchProperties(1);
-    }, 0);
+    apply({ city: nextCity });
   };
 
   const handleReset = () => {
@@ -140,27 +128,17 @@ function PropertiesListContent() {
     setConfiguration("");
     setFurnishing("");
     setSortBy("newest");
+    setApplied({ city: "", locality: "", minRent: "", maxRent: "", category: "", configuration: "", furnishing: "" });
     setPage(1);
-    const url = new URL(window.location.href);
-    url.search = "";
-    window.history.replaceState(null, "", url.toString());
-    setTimeout(() => {
-      apiClient<PropertyDTO[]>("/properties", { params: { limit: PAGE_SIZE, offset: 0 } })
-        .then((res) => {
-          setProperties(res || []);
-          setTotalCount((res || []).length);
-        })
-        .catch(() => setProperties([]));
-    }, 0);
   };
 
-  // Active filters list for chips
+  // Chips show what is applied; removing one clears both the draft and the applied value.
   const activeFilters = [
-    city && { label: `City: ${city}`, onRemove: () => { setCity(""); setPage(1); fetchProperties(1); } },
-    minRent && { label: `Min: ${formatCurrency(minRent)}`, onRemove: () => { setMinRent(""); setPage(1); fetchProperties(1); } },
-    maxRent && { label: `Max: ${formatCurrency(maxRent)}`, onRemove: () => { setMaxRent(""); setPage(1); fetchProperties(1); } },
-    category && { label: `Category: ${category}`, onRemove: () => { setCategory(""); setPage(1); fetchProperties(1); } },
-    configuration && { label: `Type: ${configuration}`, onRemove: () => { setConfiguration(""); setPage(1); fetchProperties(1); } },
+    applied.city && { label: `City: ${applied.city}`, onRemove: () => { setCity(""); apply({ city: "" }); } },
+    applied.minRent && { label: `Min: ${formatCurrency(applied.minRent)}`, onRemove: () => { setMinRent(""); apply({ minRent: "" }); } },
+    applied.maxRent && { label: `Max: ${formatCurrency(applied.maxRent)}`, onRemove: () => { setMaxRent(""); apply({ maxRent: "" }); } },
+    applied.category && { label: `Category: ${applied.category}`, onRemove: () => { setCategory(""); apply({ category: "" }); } },
+    applied.configuration && { label: `Type: ${applied.configuration}`, onRemove: () => { setConfiguration(""); apply({ configuration: "" }); } },
   ].filter(Boolean) as { label: string; onRemove: () => void }[];
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -443,7 +421,7 @@ function PropertiesListContent() {
           title="Could not load properties"
           message={error}
           correlationId={correlationId}
-          onRetry={() => fetchProperties(page)}
+          onRetry={fetchProperties}
         />
       )}
 

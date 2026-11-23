@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import Link from "next/link";
 import { ProfileDTO } from "@flatmate/contracts";
 import { apiClient } from "@/lib/api-client";
@@ -21,48 +22,27 @@ import {
 
 export default function FlatmatesDirectoryPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const [seekers, setSeekers] = useState<any[]>([]);
   const [city, setCity] = useState("Bengaluru");
   const [maxBudget, setMaxBudget] = useState("");
   const [sleepSchedule, setSleepSchedule] = useState("");
   const [diet, setDiet] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
-  const fetchFlatmates = useCallback(async (targetCity?: string) => {
-    if (!isAuthenticated) return;
-    try {
-      setIsLoading(true);
-      setError(null);
-      const params: Record<string, any> = {};
-      const activeCity = targetCity !== undefined ? targetCity : city;
-      if (activeCity) params.city = activeCity;
-      if (maxBudget) params.max_budget = maxBudget;
-      if (sleepSchedule) params.sleep_schedule = sleepSchedule;
-      if (diet) params.diet = diet;
-
-      const data = await apiClient<any[]>("/flatmates/search", { params });
-      setSeekers(data || []);
-    } catch (err: any) {
-      console.error("Failed to load flatmates:", err);
-      setError(err.message || "Failed to load flatmates");
-      setSeekers([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, city, maxBudget, sleepSchedule, diet]);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchFlatmates();
-    }
-  }, [isAuthenticated, fetchFlatmates]);
+  // Filters refetch automatically; empty filters are omitted.
+  const seekersQuery = useApiQuery<any[]>(isAuthenticated ? "/flatmates/search" : null, {
+    city: city || undefined,
+    max_budget: maxBudget || undefined,
+    sleep_schedule: sleepSchedule || undefined,
+    diet: diet || undefined,
+  });
+  const seekers = seekersQuery.data ?? [];
+  const setSeekers = seekersQuery.setData;
+  const isLoading = authLoading || seekersQuery.isLoading;
+  const error = seekersQuery.error?.message ?? null;
+  const fetchFlatmates = seekersQuery.refetch;
 
   const handleCitySelect = (selectedCity: string) => {
-    const nextCity = city === selectedCity ? "" : selectedCity;
-    setCity(nextCity);
-    fetchFlatmates(nextCity);
+    setCity(city === selectedCity ? "" : selectedCity);
   };
 
   const handleLike = async (userId: string, e: React.MouseEvent) => {
@@ -101,7 +81,7 @@ export default function FlatmatesDirectoryPage() {
         }),
       });
       // Remove passed user from current list view
-      setSeekers((prev) => prev.filter((s) => (s.user_id || s.id) !== userId));
+      setSeekers((prev = []) => prev.filter((s) => (s.user_id || s.id) !== userId));
       setActionNotice("Profile passed.");
       setTimeout(() => setActionNotice(null), 2000);
     } catch {
@@ -114,11 +94,6 @@ export default function FlatmatesDirectoryPage() {
     setMaxBudget("");
     setSleepSchedule("");
     setDiet("");
-    setTimeout(() => {
-      apiClient<any[]>("/flatmates/search")
-        .then((res) => setSeekers(res || []))
-        .catch(() => setSeekers([]));
-    }, 0);
   };
 
   if (!authLoading && !isAuthenticated) {

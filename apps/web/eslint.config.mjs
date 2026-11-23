@@ -5,10 +5,10 @@ const config = [
   {
     rules: {
       "@next/next/no-img-element": "off",
-      "react-hooks/exhaustive-deps": "warn",
-      // Pages fetch data in effects and set loading state synchronously. Replaced by a shared
-      // data-fetching hook in the frontend architecture work (launch gap item 7); warn until then.
-      "react-hooks/set-state-in-effect": "warn",
+      // Data fetching goes through hooks/useApiQuery (no synchronous setState in effects), so
+      // these hold as errors; a new warning would otherwise slip through CI unnoticed.
+      "react-hooks/exhaustive-deps": "error",
+      "react-hooks/set-state-in-effect": "error",
     },
   },
   {

@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { apiClient } from "@/lib/api-client";
 import { AppointmentDTO } from "@flatmate/contracts";
-import { Card, Button, Badge, Modal } from "@flatmate/ui";
+import { Card, Button, Badge, Modal, ErrorState } from "@flatmate/ui";
+import { PageLoading } from "@/components/states/PageLoading";
 import { formatDateTimeIST, formatDate } from "@/lib/utils";
 import {
   Calendar,
@@ -22,29 +24,13 @@ import {
 } from "lucide-react";
 
 export default function AppointmentsPage() {
-  const { isAuthenticated, user } = useAuth();
-  const [appointments, setAppointments] = useState<AppointmentDTO[]>([]);
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
+  const appointmentsQuery = useApiQuery<AppointmentDTO[]>(isAuthenticated ? "/appointments/" : null);
+  const appointments = appointmentsQuery.data ?? [];
+  const setAppointments = appointmentsQuery.setData;
+  const isLoading = appointmentsQuery.isLoading;
   const [activeTab, setActiveTab] = useState<"upcoming" | "past" | "requests">("upcoming");
-  const [isLoading, setIsLoading] = useState(true);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
-
-  const loadAppointments = async () => {
-    try {
-      setIsLoading(true);
-      const data = await apiClient<AppointmentDTO[]>("/appointments/");
-      setAppointments(data || []);
-    } catch (err) {
-      console.error("Failed to load appointments:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadAppointments();
-    }
-  }, [isAuthenticated]);
 
   const handleUpdateStatus = async (
     apptId: string,
@@ -55,12 +41,12 @@ export default function AppointmentsPage() {
         method: "PATCH",
         body: JSON.stringify({ status: newStatus }),
       });
-      setAppointments((prev) =>
+      setAppointments((prev = []) =>
         prev.map((a) => (a.id === apptId ? { ...a, status: newStatus } : a))
       );
       setActionNotice(`Appointment status updated to ${newStatus}.`);
       setTimeout(() => setActionNotice(null), 3000);
-      loadAppointments();
+      appointmentsQuery.refetch();
     } catch (err: any) {
       alert(err.message || "Failed to update appointment");
     }
@@ -73,6 +59,8 @@ export default function AppointmentsPage() {
 
   const currentDisplayList =
     activeTab === "upcoming" ? upcomingList : activeTab === "past" ? pastList : requestsList;
+
+  if (authLoading) return <PageLoading />;
 
   if (!isAuthenticated) {
     return (
@@ -168,6 +156,12 @@ export default function AppointmentsPage() {
             <div key={i} className="h-32 bg-slate-100 rounded-2xl animate-pulse" />
           ))}
         </div>
+      ) : appointmentsQuery.error ? (
+        <ErrorState
+          title="Couldn't load your appointments"
+          message={appointmentsQuery.error.message}
+          onRetry={appointmentsQuery.refetch}
+        />
       ) : currentDisplayList.length === 0 ? (
         <Card className="p-12 text-center border-slate-200/80">
           <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />

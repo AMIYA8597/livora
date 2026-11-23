@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.modules.tenants.models import TenantMembership, ExistingTenantVacancy
 from app.modules.tenants.schemas import ExistingTenantVacancyCreate
-from app.core.exceptions import NotFoundException, ForbiddenException
+from app.modules.properties.models import Room
+from app.core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 
 class TenantService:
     def __init__(self, db: AsyncSession):
@@ -35,9 +36,20 @@ class TenantService:
         if not membership:
             raise ForbiddenException("You must be an active tenant of this property to list a vacancy")
 
+        room_id = data.room_id or membership.room_id
+        if room_id is None:
+            raise BadRequestException("Choose the room that is becoming vacant", error_code="ROOM_REQUIRED")
+        if room_id != membership.room_id:
+            # Another room in the same flat is fine; a room from some other listing is not.
+            room_property_id = (
+                await self.db.execute(select(Room.property_id).where(Room.id == room_id))
+            ).scalar_one_or_none()
+            if room_property_id != data.property_id:
+                raise BadRequestException("That room is not part of this property", error_code="ROOM_NOT_IN_PROPERTY")
+
         vacancy = ExistingTenantVacancy(
             property_id=data.property_id,
-            room_id=data.room_id,
+            room_id=room_id,
             posted_by_tenant_id=tenant_id,
             title=data.title,
             description=data.description,

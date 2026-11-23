@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { PGBuildingDTO, PropertyDTO } from "@flatmate/contracts";
-import { Card, Button, Input, Badge, Modal } from "@flatmate/ui";
+import { Card, Button, Input, Badge, Modal, ErrorState } from "@flatmate/ui";
 import { formatCurrency } from "@/lib/utils";
 import {
   Building2,
@@ -23,17 +24,26 @@ import {
 } from "lucide-react";
 
 export default function PGManagePage() {
-  const { isAuthenticated, isPgOperator, isAdmin, user } = useAuth();
-  const [buildings, setBuildings] = useState<PGBuildingDTO[]>([]);
-  const [properties, setProperties] = useState<PropertyDTO[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { isAuthenticated, isLoading: authLoading, isPgOperator, isAdmin, user } = useAuth();
+  const buildingsQuery = useApiQuery<PGBuildingDTO[]>(authLoading ? null : "/pg/buildings");
+  const propertiesQuery = useApiQuery<PropertyDTO[]>(authLoading ? null : "/properties");
+  const buildings = buildingsQuery.data ?? [];
+  const properties = propertiesQuery.data ?? [];
+  const isLoading = authLoading || buildingsQuery.isLoading || propertiesQuery.isLoading;
+  const loadError = buildingsQuery.error || propertiesQuery.error;
+  const loadData = () => {
+    buildingsQuery.refetch();
+    propertiesQuery.refetch();
+  };
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // PG Building Form State
-  const [propertyId, setPropertyId] = useState("");
+  // Defaults to the first listing until the operator picks one.
+  const [selectedPropertyId, setPropertyId] = useState("");
+  const propertyId = selectedPropertyId || properties[0]?.id || "";
   const [buildingName, setBuildingName] = useState("");
   const [pgType, setPgType] = useState("coed");
   const [totalFloors, setTotalFloors] = useState("3");
@@ -51,28 +61,6 @@ export default function PGManagePage() {
   const [floorRooms, setFloorRooms] = useState("4");
   const [isSubmittingFloor, setIsSubmittingFloor] = useState(false);
 
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      const [bData, pData] = await Promise.all([
-        apiClient<PGBuildingDTO[]>("/pg/buildings").catch(() => []),
-        apiClient<PropertyDTO[]>("/properties").catch(() => []),
-      ]);
-      setBuildings(bData || []);
-      setProperties(pData || []);
-      if (pData && pData.length > 0) {
-        setPropertyId(pData[0].id);
-      }
-    } catch (err) {
-      console.error("Failed to load PG buildings:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-  }, [isAuthenticated]);
 
   const handleCreateBuilding = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,6 +156,8 @@ export default function PGManagePage() {
             <div key={i} className="h-64 bg-slate-100 rounded-2xl animate-pulse" />
           ))}
         </div>
+      ) : loadError ? (
+        <ErrorState title="Couldn't load your PG buildings" message={loadError.message} onRetry={loadData} />
       ) : buildings.length === 0 ? (
         <Card className="p-12 text-center border-slate-200/80 max-w-lg mx-auto">
           <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />

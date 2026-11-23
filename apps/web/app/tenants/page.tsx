@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
-import { ExistingTenantVacancyDTO, TenantMembershipDTO, PropertyDTO } from "@flatmate/contracts";
-import { Card, Button, Input, Badge, Modal, EmptyState } from "@flatmate/ui";
+import { ExistingTenantVacancyDTO, TenantMembershipDTO } from "@flatmate/contracts";
+import { Card, Button, Input, Badge, Modal, EmptyState, ErrorState } from "@flatmate/ui";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { InlineNotice } from "@/components/states/InlineNotice";
 import {
   Users,
   Plus,
@@ -23,11 +26,17 @@ import {
 } from "lucide-react";
 
 export default function TenantsVacancyPage() {
-  const { isAuthenticated, user } = useAuth();
-  const [vacancies, setVacancies] = useState<ExistingTenantVacancyDTO[]>([]);
-  const [memberships, setMemberships] = useState<TenantMembershipDTO[]>([]);
-  const [properties, setProperties] = useState<PropertyDTO[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
+  const router = useRouter();
+  const vacanciesQuery = useApiQuery<ExistingTenantVacancyDTO[]>(authLoading ? null : "/tenants/vacancies");
+  const membershipsQuery = useApiQuery<TenantMembershipDTO[]>(isAuthenticated ? "/tenants/my-memberships" : null);
+  const vacancies = vacanciesQuery.data ?? [];
+  const memberships = membershipsQuery.data ?? [];
+  const isLoading = authLoading || vacanciesQuery.isLoading;
+  const loadData = () => {
+    vacanciesQuery.refetch();
+    membershipsQuery.refetch();
+  };
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
@@ -35,8 +44,14 @@ export default function TenantsVacancyPage() {
   const [filterGender, setFilterGender] = useState<string>("all");
 
   // Form State
-  const [selectedMembershipId, setSelectedMembershipId] = useState("");
-  const [propertyId, setPropertyId] = useState("");
+  // A vacancy belongs to one of the tenant's own leases; default to the first until they pick one.
+  const [pickedMembershipId, setSelectedMembershipId] = useState("");
+  const selectedMembership = memberships.find((m) => m.id === pickedMembershipId) ?? memberships[0] ?? null;
+  const [formError, setFormError] = useState<string | null>(null);
+  const openVacancyForm = () => {
+    setFormError(null);
+    setIsModalOpen(true);
+  };
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [expectedRent, setExpectedRent] = useState("12000");
@@ -45,48 +60,22 @@ export default function TenantsVacancyPage() {
   const [vacantFrom, setVacantFrom] = useState(new Date().toISOString().split("T")[0]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      const [vacs, mems, props] = await Promise.all([
-        apiClient<ExistingTenantVacancyDTO[]>("/tenants/vacancies").catch(() => []),
-        apiClient<TenantMembershipDTO[]>("/tenants/my-memberships").catch(() => []),
-        apiClient<PropertyDTO[]>("/properties").catch(() => []),
-      ]);
-      setVacancies(vacs || []);
-      setMemberships(mems || []);
-      setProperties(props || []);
-
-      if (mems && mems.length > 0) {
-        setSelectedMembershipId(mems[0].id);
-        setPropertyId(mems[0].property_id);
-      } else if (props && props.length > 0) {
-        setPropertyId(props[0].id);
-      }
-    } catch (err) {
-      console.error("Failed to load tenant vacancy data:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-  }, [isAuthenticated]);
 
   const handleCreateVacancy = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!propertyId) {
-      alert("Please select a property where the vacancy exists.");
+    if (!selectedMembership) {
+      setFormError("You need an active tenancy on Flatmate to post a replacement vacancy.");
       return;
     }
+    setFormError(null);
     try {
       setIsSubmitting(true);
       await apiClient("/tenants/vacancies", {
         method: "POST",
         body: JSON.stringify({
-          property_id: propertyId,
-          room_id: "00000000-0000-0000-0000-000000000001",
+          property_id: selectedMembership.property_id,
+          // The API falls back to the lease's room when this is null.
+          room_id: selectedMembership.room_id ?? undefined,
           title,
           description,
           vacant_from: vacantFrom,
@@ -100,7 +89,7 @@ export default function TenantsVacancyPage() {
       setTimeout(() => setActionNotice(null), 3000);
       loadData();
     } catch (err: any) {
-      alert(err.message || "Failed to create vacancy posting");
+      setFormError(err.message || "Failed to create vacancy posting");
     } finally {
       setIsSubmitting(false);
     }
@@ -146,7 +135,7 @@ export default function TenantsVacancyPage() {
             variant="primary"
             size="md"
             className="gap-2 shadow-sm"
-            onClick={() => setIsModalOpen(true)}
+            onClick={openVacancyForm}
           >
             <Plus className="w-4 h-4" />
             <span>Post a Vacancy</span>
@@ -204,12 +193,14 @@ export default function TenantsVacancyPage() {
               <div key={n} className="bg-slate-200 h-64 rounded-2xl" />
             ))}
           </div>
+        ) : vacanciesQuery.error ? (
+          <ErrorState title="Couldn't load vacancies" message={vacanciesQuery.error.message} onRetry={loadData} />
         ) : filteredVacancies.length === 0 ? (
           <EmptyState
             title="No active roommate vacancies"
             description="When tenants in existing leases declare upcoming vacancies, they will appear here."
             actionLabel={isAuthenticated ? "Post Vacancy" : "Sign In to Post"}
-            onAction={() => (isAuthenticated ? setIsModalOpen(true) : (window.location.href = "/login"))}
+            onAction={() => (isAuthenticated ? openVacancyForm() : router.push("/login"))}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -270,18 +261,16 @@ export default function TenantsVacancyPage() {
         description="Share details about the room opening in your apartment."
       >
         <form onSubmit={handleCreateVacancy} className="space-y-4 mt-2">
+          {formError && <InlineNotice tone="error">{formError}</InlineNotice>}
           {memberships.length > 0 ? (
             <div>
-              <label className="block text-xs font-semibold text-charcoal mb-1">Select Leased Property</label>
+              <label htmlFor="vacancy-lease" className="block text-xs font-semibold text-charcoal mb-1">Your tenancy</label>
               <select
-                value={selectedMembershipId}
-                onChange={(e) => {
-                  setSelectedMembershipId(e.target.value);
-                  const mem = memberships.find((m) => m.id === e.target.value);
-                  if (mem) setPropertyId(mem.property_id);
-                }}
+                id="vacancy-lease"
+                value={selectedMembership?.id ?? ""}
+                onChange={(e) => setSelectedMembershipId(e.target.value)}
                 required
-                className="w-full text-xs rounded-xl border border-slate-200 p-2.5 bg-white"
+                className="w-full min-h-[44px] text-xs rounded-xl border border-slate-200 p-2.5 bg-white"
               >
                 {memberships.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -291,21 +280,9 @@ export default function TenantsVacancyPage() {
               </select>
             </div>
           ) : (
-            <div>
-              <label className="block text-xs font-semibold text-charcoal mb-1">Select Property</label>
-              <select
-                value={propertyId}
-                onChange={(e) => setPropertyId(e.target.value)}
-                required
-                className="w-full text-xs rounded-xl border border-slate-200 p-2.5 bg-white"
-              >
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.title} ({p.city})
-                  </option>
-                ))}
-              </select>
-            </div>
+            <InlineNotice tone="error">
+              Only tenants with an active lease on Flatmate can post a replacement vacancy.
+            </InlineNotice>
           )}
 
           <Input
@@ -367,7 +344,13 @@ export default function TenantsVacancyPage() {
             />
           </div>
 
-          <Button type="submit" variant="primary" className="w-full mt-2" isLoading={isSubmitting}>
+          <Button
+            type="submit"
+            variant="primary"
+            className="w-full mt-2 min-h-[44px]"
+            isLoading={isSubmitting}
+            disabled={!selectedMembership}
+          >
             Post Vacancy
           </Button>
         </form>

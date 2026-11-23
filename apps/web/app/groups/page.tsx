@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { GroupDTO, GroupCompatibilityResponse } from "@flatmate/contracts";
 import { apiClient } from "@/lib/api-client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -25,10 +26,12 @@ import {
 
 export default function GroupsPage() {
   const router = useRouter();
-  const { user, isAuthenticated } = useAuth();
-  const [groups, setGroups] = useState<GroupDTO[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  // Wait for the session check so the request carries the token when signed in.
+  const groupsQuery = useApiQuery<GroupDTO[]>(authLoading ? null : "/groups/");
+  const groups = groupsQuery.data ?? [];
+  const isLoading = authLoading || groupsQuery.isLoading;
+  const error = groupsQuery.error?.message ?? null;
 
   // Create Group Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -58,24 +61,7 @@ export default function GroupsPage() {
   const [isInviting, setIsInviting] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
 
-  const fetchGroups = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const data = await apiClient<GroupDTO[]>("/groups/");
-      setGroups(data || []);
-    } catch (err: any) {
-      console.error("Failed to load groups:", err);
-      setError(err.message || "Failed to load hunting groups");
-      setGroups([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchGroups();
-  }, []);
+  const fetchGroups = groupsQuery.refetch;
 
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();

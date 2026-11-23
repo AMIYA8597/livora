@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { PGBuildingDTO, PropertyDTO } from "@flatmate/contracts";
-import { Card, Button, Input, Badge, Modal, EmptyState } from "@flatmate/ui";
+import { Card, Button, Input, Badge, Modal, EmptyState, ErrorState } from "@flatmate/ui";
 import {
   Building2,
   Plus,
@@ -20,17 +22,27 @@ import {
 } from "lucide-react";
 
 export default function PGManagementPage() {
-  const { isAuthenticated, isPgOperator, isAdmin } = useAuth();
-  const [buildings, setBuildings] = useState<PGBuildingDTO[]>([]);
-  const [properties, setProperties] = useState<PropertyDTO[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { isAuthenticated, isLoading: authLoading, isPgOperator, isAdmin } = useAuth();
+  const router = useRouter();
+  const buildingsQuery = useApiQuery<PGBuildingDTO[]>(authLoading ? null : "/pg/buildings");
+  const propertiesQuery = useApiQuery<PropertyDTO[]>(authLoading ? null : "/properties");
+  const buildings = buildingsQuery.data ?? [];
+  const properties = propertiesQuery.data ?? [];
+  const isLoading = authLoading || buildingsQuery.isLoading || propertiesQuery.isLoading;
+  const loadError = buildingsQuery.error || propertiesQuery.error;
+  const loadData = () => {
+    buildingsQuery.refetch();
+    propertiesQuery.refetch();
+  };
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // PG Building Form State
-  const [propertyId, setPropertyId] = useState("");
+  // Defaults to the first listing until the operator picks one.
+  const [selectedPropertyId, setPropertyId] = useState("");
+  const propertyId = selectedPropertyId || properties[0]?.id || "";
   const [buildingName, setBuildingName] = useState("");
   const [pgType, setPgType] = useState("coed");
   const [totalFloors, setTotalFloors] = useState("3");
@@ -48,28 +60,6 @@ export default function PGManagementPage() {
   const [floorRooms, setFloorRooms] = useState("4");
   const [isSubmittingFloor, setIsSubmittingFloor] = useState(false);
 
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      const [bData, pData] = await Promise.all([
-        apiClient<PGBuildingDTO[]>("/pg/buildings").catch(() => []),
-        apiClient<PropertyDTO[]>("/properties").catch(() => []),
-      ]);
-      setBuildings(bData || []);
-      setProperties(pData || []);
-      if (pData && pData.length > 0) {
-        setPropertyId(pData[0].id);
-      }
-    } catch (err) {
-      console.error("Failed to load PG buildings:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-  }, [isAuthenticated]);
 
   const handleCreateBuilding = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,12 +164,14 @@ export default function PGManagementPage() {
               <div key={n} className="bg-slate-200 h-64 rounded-2xl" />
             ))}
           </div>
+        ) : loadError ? (
+          <ErrorState title="Couldn't load PG buildings" message={loadError.message} onRetry={loadData} />
         ) : buildings.length === 0 ? (
           <EmptyState
             title="No PG buildings registered yet"
             description="PG operators can add their co-living facilities, meal inclusions, and curfew policies."
             actionLabel={isAuthenticated ? "Register PG Building" : "Sign In to Register"}
-            onAction={() => (isAuthenticated ? setIsModalOpen(true) : (window.location.href = "/login"))}
+            onAction={() => (isAuthenticated ? setIsModalOpen(true) : router.push("/login"))}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

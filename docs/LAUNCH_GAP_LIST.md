@@ -164,12 +164,27 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 
 ## P1 — Required for a quality product
 
-- [ ] **7. Frontend architecture.** 30 pages but only 8 components, and the largest pages are
-      about 1,000 lines (`dashboard`, `profile`, `properties/[id]`). Split them into feature
-      components, add a shared layout/shell, and handle loading, error and empty states.
-      Add a shared data-fetching hook to replace the 17 fetch-in-effect patterns (lint rule
-      `react-hooks/set-state-in-effect` is set to warn until then), and replace 13
-      `window.location.href` full-page navigations with router navigation.
+- [x] **7. Frontend architecture.** *(Done.)* `dashboard`, `profile` and `properties/[id]` are
+      now 160–220 lines each, built from `features/{dashboard,profile,properties}/components`.
+      One auth store (`lib/auth-store.ts` via `useSyncExternalStore`) replaces a separate copy per
+      `useAuth` caller. Roles come only from `/auth/me` (`roles`), not localStorage, and a network
+      error no longer signs the user out. `hooks/useApiQuery` replaces every fetch-in-effect: it
+      aborts superseded requests and can treat a 404 as "no data". `react-hooks/set-state-in-effect`
+      and `exhaustive-deps` are now errors. Every `window.location.href` navigation is now router
+      navigation, and `?next=` is checked by `safeNextPath` (no open redirect). There are
+      route-level `loading`, `error`, `not-found` and `global-error` pages, and signed-out content
+      no longer flashes while auth loads.
+      Bugs fixed along the way:
+      - Chat attachment upload used a relative URL and always got a 404.
+      - Profile dealbreakers were sent without `expected_value`, so every request got a 422.
+      - Saving lifestyle sent only some fields, which reset the rest.
+      - The profile and dashboard forms used option values the API rejects.
+      - Viewing times were sent as UTC, so 11:00 IST was booked as 16:30.
+      - "Message the host" ignored `?conversationId=`.
+      - The report form's default reason wasn't one of its options.
+      - Tenant vacancies were posted against a hard-coded room ID. The API now defaults to the
+        lease's room and rejects a room from another property.
+      Left for item 8: `owner`, `owner/listings/create` and `groups` are still 580–670 lines.
 - [ ] **8. Responsive and mobile UX audit.** Check every route at 320, 375, 768, 1024 and 1440px:
       a mobile bottom nav, a full-screen mobile chat, and touch targets of at least 44px.
 - [ ] **9. Live chat completeness.** Verify reconnect/backoff, offline queueing, read receipts,

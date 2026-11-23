@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { apiClient } from "@/lib/api-client";
-import { Card, Button, Badge, Modal, Input } from "@flatmate/ui";
+import { Card, Button, Badge, Modal, Input, ErrorState } from "@flatmate/ui";
 import { formatDate } from "@/lib/utils";
 import {
   ShieldAlert,
@@ -34,10 +35,12 @@ interface ModerationReport {
 }
 
 export default function AdminModerationQueuePage() {
-  const { isAuthenticated, isAdmin, user } = useAuth();
-  const [reports, setReports] = useState<ModerationReport[]>([]);
+  const { isAuthenticated, isLoading: authLoading, isAdmin, user } = useAuth();
+  const reportsQuery = useApiQuery<ModerationReport[]>(isAuthenticated ? "/moderation/reports" : null);
+  const reports = reportsQuery.data ?? [];
+  const setReports = reportsQuery.setData;
+  const isLoading = authLoading || reportsQuery.isLoading;
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [isLoading, setIsLoading] = useState(true);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // Review modal
@@ -46,23 +49,6 @@ export default function AdminModerationQueuePage() {
   const [reviewNotes, setReviewNotes] = useState("");
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
-  const loadReports = async () => {
-    try {
-      setIsLoading(true);
-      const data = await apiClient<ModerationReport[]>("/moderation/reports");
-      setReports(data || []);
-    } catch (err) {
-      console.error("Failed to load moderation queue:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadReports();
-    }
-  }, [isAuthenticated]);
 
   const handleResolve = async (reportId: string, finalStatus: "resolved" | "dismissed") => {
     try {
@@ -74,13 +60,13 @@ export default function AdminModerationQueuePage() {
           action_taken: finalStatus === "resolved" ? reviewAction : "none",
         }),
       });
-      setReports((prev) =>
+      setReports((prev = []) =>
         prev.map((r) => (r.id === reportId ? { ...r, status: finalStatus } : r))
       );
       setSelectedReport(null);
       setActionNotice(`Report ${reportId.slice(0, 8)} marked as ${finalStatus}.`);
       setTimeout(() => setActionNotice(null), 3000);
-      loadReports();
+      reportsQuery.refetch();
     } catch (err: any) {
       alert(err.message || "Failed to update moderation report");
     } finally {
@@ -151,6 +137,12 @@ export default function AdminModerationQueuePage() {
             <div key={i} className="h-20 bg-slate-100 rounded-2xl animate-pulse" />
           ))}
         </div>
+      ) : reportsQuery.error ? (
+        <ErrorState
+          title="Couldn't load the moderation queue"
+          message={reportsQuery.error.message}
+          onRetry={reportsQuery.refetch}
+        />
       ) : filteredReports.length === 0 ? (
         <Card className="p-12 text-center border-slate-200/80">
           <ShieldCheck className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
