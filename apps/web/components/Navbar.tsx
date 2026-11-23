@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { Avatar, Button, Badge } from "@flatmate/ui";
@@ -38,7 +38,6 @@ interface NotificationItem {
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
-  const router = useRouter();
   const { user, roles, isAuthenticated, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -119,10 +118,10 @@ export const Navbar: React.FC = () => {
   return (
     <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-warm-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
+        <div className="flex justify-between items-center h-16 gap-2">
           {/* Brand Logo */}
           <div className="flex items-center space-x-3">
-            <Link href="/" className="flex items-center space-x-2.5 focus:outline-none">
+            <Link href="/" className="flex items-center space-x-2.5 min-h-[44px] focus:outline-none" aria-label="Flatmate home">
               <div className="w-9 h-9 rounded-xl bg-forest flex items-center justify-center text-white shadow-sm shadow-forest/20">
                 <Compass className="w-5 h-5 text-pale-green" />
               </div>
@@ -148,7 +147,7 @@ export const Navbar: React.FC = () => {
                   key={item.href}
                   href={item.href}
                   aria-current={isActive ? "page" : undefined}
-                  className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                  className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
                     isActive
                       ? "text-forest bg-pale-green/40 font-semibold"
                       : "text-charcoal-light hover:text-charcoal hover:bg-slate-100/70"
@@ -162,11 +161,11 @@ export const Navbar: React.FC = () => {
           </div>
 
           {/* Right Action & Profile Area */}
-          <div className="hidden sm:flex items-center space-x-3">
+          <div className="flex items-center gap-1 sm:gap-2 ml-auto lg:ml-0">
             {/* Quick Search trigger */}
             <Link
               href="/properties"
-              className="p-2 text-charcoal-muted hover:text-charcoal hover:bg-slate-100 rounded-xl transition-colors"
+              className="hidden sm:inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-charcoal-muted hover:text-charcoal hover:bg-slate-100 rounded-xl transition-colors"
               title="Search accommodation"
               aria-label="Search properties"
             >
@@ -181,7 +180,7 @@ export const Navbar: React.FC = () => {
                     onClick={() => setNotificationsOpen(!notificationsOpen)}
                     aria-label="Notifications"
                     aria-expanded={notificationsOpen}
-                    className="p-2 text-charcoal-light hover:text-forest hover:bg-slate-100 rounded-xl transition-colors relative"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-charcoal-light hover:text-forest hover:bg-slate-100 rounded-xl transition-colors relative"
                   >
                     <Bell className="w-5 h-5" />
                     {unreadCount > 0 && (
@@ -193,7 +192,7 @@ export const Navbar: React.FC = () => {
 
                   {/* Notification Dropdown */}
                   {notificationsOpen && (
-                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="fixed inset-x-2 top-16 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-2 sm:w-80 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                         <span className="text-xs font-bold uppercase tracking-wider text-charcoal">
                           Notifications
@@ -225,7 +224,8 @@ export const Navbar: React.FC = () => {
                                 <button
                                   onClick={(e) => markNotificationAsRead(notif.id, e)}
                                   title="Mark as read"
-                                  className="p-1 text-secondary-green hover:bg-pale-green/30 rounded-lg shrink-0"
+                                  aria-label="Mark as read"
+                                  className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] -m-2 text-secondary-green hover:bg-pale-green/30 rounded-lg shrink-0"
                                 >
                                   <Check className="w-3.5 h-3.5" />
                                 </button>
@@ -246,12 +246,12 @@ export const Navbar: React.FC = () => {
                 </div>
 
                 {/* Profile Menu Dropdown */}
-                <div className="relative" ref={profileRef}>
+                <div className="relative hidden sm:block" ref={profileRef}>
                   <button
                     onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
                     aria-expanded={profileDropdownOpen}
                     aria-label="User menu"
-                    className="flex items-center space-x-2 p-1.5 rounded-xl hover:bg-slate-100 transition-colors border border-transparent hover:border-slate-200"
+                    className="flex items-center space-x-2 min-h-[44px] p-1.5 rounded-xl hover:bg-slate-100 transition-colors border border-transparent hover:border-slate-200"
                   >
                     <Avatar alt={user.full_name} size="sm" isVerified={user.is_verified} />
                     <span className="text-sm font-semibold text-charcoal hidden md:inline-block max-w-[100px] truncate">
@@ -349,7 +349,6 @@ export const Navbar: React.FC = () => {
                           onClick={() => {
                             setProfileDropdownOpen(false);
                             logout();
-                            router.push("/");
                           }}
                           className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-rose-600 hover:bg-rose-50 transition-colors text-left"
                         >
@@ -362,7 +361,7 @@ export const Navbar: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center space-x-2">
+              <div className="hidden sm:flex items-center space-x-2">
                 <Link href="/login">
                   <Button variant="ghost" size="sm">
                     Log in
@@ -378,19 +377,10 @@ export const Navbar: React.FC = () => {
           </div>
 
           {/* Mobile Hamburger Button */}
-          <div className="flex lg:hidden items-center space-x-2">
-            {isAuthenticated && (
-              <Link
-                href="/messages"
-                className="p-2 text-charcoal-light hover:text-forest relative"
-                aria-label="Messages"
-              >
-                <MessageSquare className="w-5 h-5" />
-              </Link>
-            )}
+          <div className="flex lg:hidden items-center">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-xl text-charcoal hover:bg-slate-100"
+              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl text-charcoal hover:bg-slate-100"
               aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
               aria-expanded={mobileMenuOpen}
             >
@@ -402,7 +392,7 @@ export const Navbar: React.FC = () => {
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-b border-warm-200 bg-white px-4 pt-3 pb-6 space-y-2 animate-in fade-in duration-200">
+        <div className="lg:hidden border-b border-warm-200 bg-white px-4 pt-3 pb-6 space-y-2 max-h-[calc(100dvh-4rem)] overflow-y-auto animate-in fade-in duration-200">
           {navLinks.map((item) => {
             if (item.authOnly && !isAuthenticated) return null;
             const Icon = item.icon;
@@ -486,7 +476,6 @@ export const Navbar: React.FC = () => {
                 onClick={() => {
                   setMobileMenuOpen(false);
                   logout();
-                  router.push("/");
                 }}
                 className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-rose-600 hover:bg-rose-50 text-left"
               >

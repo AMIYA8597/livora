@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { apiClient, ApiError, API_BASE_URL } from '../lib/api-client.ts';
+import { apiClient, ApiError, NetworkError, API_BASE_URL } from '../lib/api-client.ts';
 
 // Mock localStorage for Node test environment
 class MockLocalStorage {
@@ -153,6 +153,40 @@ test('apiClient handles 204 No Content smoothly', async () => {
   try {
     const result = await apiClient('/lifestyle/dealbreakers/123', { method: 'DELETE' });
     assert.strictEqual(result, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('apiClient turns a bare "Failed to fetch" into a readable NetworkError (not an ApiError)', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new TypeError('Failed to fetch');
+  }) as typeof fetch;
+  try {
+    await assert.rejects(apiClient('/groups'), (err: unknown) => {
+      assert.ok(err instanceof NetworkError);
+      assert.ok(!(err instanceof ApiError));
+      assert.match((err as Error).message, /Can't reach Flatmate/);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('apiClient passes a caller abort straight through', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    throw init?.signal?.reason ?? new Error('aborted');
+  }) as typeof fetch;
+  const controller = new AbortController();
+  controller.abort(new Error('caller cancelled'));
+  try {
+    await assert.rejects(apiClient('/groups', { signal: controller.signal }), (err: unknown) => {
+      assert.ok(!(err instanceof NetworkError));
+      return true;
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

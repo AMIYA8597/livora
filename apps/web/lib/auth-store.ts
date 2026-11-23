@@ -8,7 +8,9 @@
  * localStorage are never trusted, so editing storage cannot unlock admin or owner UI.
  *
  * A network failure does not sign the user out: tokens are cleared only when the API answers
- * 401/403. Other failures leave status "error" so a reload can recover.
+ * 401/403. Other failures leave status "error" and the store retries by itself (with backoff,
+ * and at once when the browser comes back online or the tab regains focus), so a blip at page
+ * load doesn't leave a signed-in user looking signed out until they reload.
  */
 import type { AuthTokens, UserDTO } from "@flatmate/contracts";
 import { apiClient, ApiError } from "./api-client.ts";
@@ -32,7 +34,38 @@ const listeners = new Set<() => void>();
 let started = false;
 let generation = 0;
 
+const RETRY_BASE_MS = 2_000;
+const RETRY_MAX_MS = 30_000;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryAttempt = 0;
+
+function cancelRetry(): void {
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
+}
+
+function scheduleRetry(): void {
+  cancelRetry();
+  const delay = Math.min(RETRY_BASE_MS * 2 ** retryAttempt, RETRY_MAX_MS);
+  retryAttempt += 1;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void refreshAuth();
+  }, delay);
+  // Never keep a Node test process alive just for this timer.
+  (retryTimer as { unref?: () => void }).unref?.();
+}
+
+/** Retry now if the last check failed on the network (used for online/focus events). */
+function retryIfErrored(): void {
+  if (state.status === "error") void refreshAuth();
+}
+
 function setState(next: AuthState): void {
+  if (next.status !== "error") {
+    cancelRetry();
+    retryAttempt = 0;
+  }
   state = next;
   listeners.forEach((listener) => listener());
 }
@@ -71,6 +104,7 @@ export async function refreshAuth(): Promise<void> {
       setState({ status: "anonymous", user: null, roles: [] });
     } else {
       setState({ status: "error", user: null, roles: [] });
+      scheduleRetry();
     }
   }
 }
@@ -88,6 +122,8 @@ function start(): void {
   window.addEventListener("storage", (event: StorageEvent) => {
     if (event.key === ACCESS_TOKEN_KEY || event.key === null) void refreshAuth();
   });
+  window.addEventListener("online", retryIfErrored);
+  window.addEventListener("focus", retryIfErrored);
   void refreshAuth();
 }
 
@@ -136,4 +172,6 @@ export function __resetAuthStoreForTests(): void {
   listeners.clear();
   started = false;
   generation = 0;
+  cancelRetry();
+  retryAttempt = 0;
 }

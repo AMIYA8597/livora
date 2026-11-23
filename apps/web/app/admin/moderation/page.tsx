@@ -112,14 +112,14 @@ export default function AdminModerationQueuePage() {
       )}
 
       {/* Filter Bar */}
-      <div className="flex items-center space-x-3 text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
         <Filter className="w-4 h-4 text-slate-400" />
         <span className="font-semibold text-slate-700">Filter Status:</span>
         {["all", "pending", "under_investigation", "resolved", "dismissed"].map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
-            className={`px-3 py-1 rounded-lg font-medium transition-colors capitalize ${
+            className={`min-w-[44px] px-3 py-1 rounded-lg font-medium transition-colors capitalize ${
               statusFilter === s
                 ? "bg-indigo-600 text-white shadow-2xs"
                 : "text-slate-600 hover:bg-slate-200/60"

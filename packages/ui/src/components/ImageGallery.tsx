@@ -17,7 +17,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const displayImages = images.length > 0 ? images : ['/placeholder-property.jpg'];
+  // No stand-in photo: a listing without images says so rather than showing someone else's flat.
+  const displayImages = images;
 
   const prev = (e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -33,8 +34,8 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({
     <div className={`relative overflow-hidden rounded-2xl bg-slate-900 group ${className || ''}`}>
       {/* Main image container */}
       <div
-        className="relative aspect-[16/10] sm:aspect-[2/1] w-full cursor-pointer flex items-center justify-center bg-slate-100"
-        onClick={() => setIsFullscreen(true)}
+        className={`relative aspect-[16/10] sm:aspect-[2/1] w-full flex items-center justify-center bg-slate-100 ${displayImages.length ? 'cursor-pointer' : ''}`}
+        onClick={() => displayImages.length > 0 && setIsFullscreen(true)}
       >
         {displayImages[currentIndex] ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -46,7 +47,7 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({
         ) : (
           <div className="flex flex-col items-center justify-center text-slate-400">
             <ImageIcon className="w-12 h-12 mb-2" />
-            <span className="text-sm font-medium">No images available</span>
+            <span className="text-sm font-medium">No photos yet</span>
           </div>
         )}
 

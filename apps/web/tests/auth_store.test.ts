@@ -66,6 +66,41 @@ test("network failure keeps the tokens (no surprise sign-out)", async () => {
   assert.strictEqual(storage.getItem("flatmate_access_token"), "t");
 });
 
+test("after a network failure the store recovers by itself (backoff timer)", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  storage.setItem("flatmate_access_token", "t");
+  let up = false;
+  mockFetch(() => {
+    if (!up) throw new TypeError("Failed to fetch");
+    return json(200, user);
+  });
+  await store.refreshAuth();
+  assert.strictEqual(store.getSnapshot().status, "error");
+
+  up = true;
+  t.mock.timers.tick(2_000);
+  t.mock.timers.reset(); // let the fetch promise chain settle on real timers
+  await flush(); await flush();
+  assert.strictEqual(store.getSnapshot().status, "authenticated");
+});
+
+test("coming back online retries at once; a 401 then still signs out", async () => {
+  storage.setItem("flatmate_access_token", "t");
+  let answer: "down" | "401" = "down";
+  mockFetch(() => {
+    if (answer === "down") throw new TypeError("Failed to fetch");
+    return json(401, { detail: "expired" });
+  });
+  store.subscribe(() => {}); // registers the online/focus listeners
+  await flush(); await flush();
+  assert.strictEqual(store.getSnapshot().status, "error");
+
+  answer = "401";
+  (globalThis as any).window.dispatchEvent({ type: "online" });
+  await flush(); await flush(); await flush();
+  assert.strictEqual(store.getSnapshot().status, "anonymous");
+});
+
 test("403 clears the session", async () => {
   storage.setItem("flatmate_access_token", "t");
   mockFetch(() => json(403, { detail: "User account has been deactivated" }));

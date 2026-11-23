@@ -128,7 +128,7 @@ export default function TenantVacancyCreatePage() {
     <div className="max-w-2xl mx-auto px-4 py-10 space-y-6">
       <Link
         href="/tenants"
-        className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800"
+        className="inline-flex items-center min-h-[44px] text-xs font-semibold text-slate-500 hover:text-slate-800"
       >
         <ArrowLeft className="w-4 h-4 mr-1" />
         Back to Tenancy Hub

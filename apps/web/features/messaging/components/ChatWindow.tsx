@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   Send, ShieldAlert, Check, CheckCheck, Paperclip, X,
   CornerUpLeft, MoreVertical, Edit2, Trash2, FileText, Download,
-  Users, Info, ShieldCheck, Clock
+  Users, Info, ShieldCheck, Clock, ArrowLeft
 } from "lucide-react";
 import { AttachmentDTO } from "@flatmate/contracts";
 
@@ -42,6 +42,8 @@ export interface ChatWindowProps {
   onUploadAttachment?: (file: File) => Promise<AttachmentDTO>;
   onTyping?: (isTyping: boolean) => void;
   onOpenDetails?: () => void;
+  /** Mobile only: return to the conversation list. */
+  onBack?: () => void;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -60,10 +62,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onUploadAttachment,
   onTyping,
   onOpenDetails,
+  onBack,
 }) => {
   const [inputText, setInputText] = useState("");
   const [warning, setWarning] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+  // Touch screens have no hover, so tapping a message shows its actions.
+  const [actionsFor, setActionsFor] = useState<string | null>(null);
   const [editingMessage, setEditingMessage] = useState<MessageItem | null>(null);
   const [stagedAttachments, setStagedAttachments] = useState<AttachmentDTO[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -147,18 +152,28 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="flex flex-col h-full bg-white md:rounded-xl md:border border-slate-200 md:shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-200 bg-slate-50/80">
-        <div className="flex items-center space-x-3">
+      <div className="flex items-center justify-between gap-2 px-2 sm:px-6 py-2 sm:py-3.5 pt-[max(0.5rem,env(safe-area-inset-top))] md:pt-3.5 border-b border-slate-200 bg-slate-50/80">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="md:hidden inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-slate-600 hover:bg-slate-200/50 rounded-lg"
+              aria-label="Back to conversations"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
           <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm ${
             isGroup ? "bg-purple-100 text-purple-700" : "bg-indigo-100 text-indigo-700"
           }`}>
             {isGroup ? <Users className="w-5 h-5" /> : recipientName.slice(0, 2).toUpperCase()}
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center space-x-1.5">
-              <span className="font-semibold text-slate-900 text-sm">{recipientName}</span>
+              <span className="font-semibold text-slate-900 text-sm truncate">{recipientName}</span>
               {isRecipientVerified && (
                 <span title="Identity Verified">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 inline" />
@@ -166,17 +181,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               )}
             </div>
             <div className="flex items-center space-x-2 text-[11px] text-slate-500">
-              <span>{isGroup ? `${participantCount} members` : recipientSubtitle}</span>
-              <span>•</span>
-              <span className="text-emerald-600 font-medium">End-to-end authenticated</span>
+              <span className="truncate">{isGroup ? `${participantCount} members` : recipientSubtitle}</span>
             </div>
           </div>
         </div>
 
         {onOpenDetails && (
           <button
+            type="button"
             onClick={onOpenDetails}
-            className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors"
+            aria-label="Conversation details"
+            className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0 text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors"
             title="Conversation Details"
           >
             <Info className="w-4 h-4" />
@@ -237,6 +252,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
               {/* Main Message Bubble */}
               <div
+                onClick={() => !isDeleted && setActionsFor((cur) => (cur === msg.id ? null : msg.id))}
                 className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-2xs relative break-words ${
                   msg.isSelf
                     ? "bg-indigo-600 text-white rounded-tr-none"
@@ -293,16 +309,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
               </div>
 
-              {/* Hover Action Menu */}
+              {/* Message actions: on hover/focus with a mouse, inline under the bubble after a tap */}
               {!isDeleted && (
                 <div
-                  className={`absolute top-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-1 bg-white border border-slate-200 rounded-lg shadow-sm px-1.5 py-1 z-10 ${
-                    msg.isSelf ? "right-[80%]" : "left-[80%]"
+                  className={`items-center gap-1 bg-white border border-slate-200 rounded-lg shadow-sm px-1 py-0.5 z-10 ${
+                    actionsFor === msg.id
+                      ? "flex mt-1"
+                      : `hidden md:flex absolute top-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity ${
+                          msg.isSelf ? "right-[80%]" : "left-[80%]"
+                        }`
                   }`}
                 >
                   <button
-                    onClick={() => setReplyingTo(msg)}
-                    className="p-1 text-slate-500 hover:text-indigo-600 rounded"
+                    aria-label="Reply"
+                    onClick={() => {
+                      setReplyingTo(msg);
+                      setActionsFor(null);
+                    }}
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 md:p-1 text-slate-500 hover:text-indigo-600 rounded"
                     title="Reply"
                   >
                     <CornerUpLeft className="w-3.5 h-3.5" />
@@ -312,8 +336,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       onClick={() => {
                         setEditingMessage(msg);
                         setInputText(msg.content);
+                        setActionsFor(null);
                       }}
-                      className="p-1 text-slate-500 hover:text-indigo-600 rounded"
+                      aria-label="Edit"
+                      className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 md:p-1 text-slate-500 hover:text-indigo-600 rounded"
                       title="Edit"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
@@ -321,8 +347,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   )}
                   {msg.isSelf && onDeleteMessage && (
                     <button
-                      onClick={() => onDeleteMessage(msg.id)}
-                      className="p-1 text-slate-500 hover:text-rose-600 rounded"
+                      onClick={() => {
+                        setActionsFor(null);
+                        onDeleteMessage(msg.id);
+                      }}
+                      aria-label="Delete"
+                      className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 md:p-1 text-slate-500 hover:text-rose-600 rounded"
                       title="Delete"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -401,7 +431,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
 
       {/* Composer Input Bar */}
-      <form onSubmit={handleSend} className="p-3 border-t border-slate-200 bg-white flex items-center space-x-2">
+      <form onSubmit={handleSend} className="p-2 sm:p-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-slate-200 bg-white flex items-center gap-2">
         {onUploadAttachment && (
           <>
             <input
@@ -415,8 +445,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               type="button"
               disabled={isUploading}
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
-              title="Attach Document or Photo (Max 10MB)"
+              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+              title="Attach a photo or PDF (max 10 MB)"
+              aria-label="Attach a photo or PDF"
             >
               <Paperclip className="w-4 h-4" />
             </button>
@@ -427,15 +458,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           type="text"
           value={inputText}
           onChange={handleInputChange}
-          placeholder="Type your message securely..."
-          className="flex-1 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          placeholder="Type a message…"
+          aria-label="Message"
+          className="flex-1 min-w-0 min-h-[44px] border border-slate-300 rounded-lg px-3 sm:px-4 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
 
         <button
           type="submit"
           disabled={!inputText.trim() && stagedAttachments.length === 0}
-          className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
+          className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors disabled:opacity-50"
           title="Send"
+          aria-label="Send"
         >
           <Send className="w-4 h-4" />
         </button>

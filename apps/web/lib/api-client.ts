@@ -15,6 +15,17 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
+/**
+ * The request never got an HTTP answer: offline, DNS/CORS failure, server down, or timeout.
+ * Kept separate from ApiError so callers (e.g. the auth store) never mistake it for a 401.
+ */
+export class NetworkError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "NetworkError";
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   title: string;
@@ -135,14 +146,28 @@ export async function apiClient<T>(
   }
 
   try {
-    const response = await fetch(url, {
-      ...customConfig,
-      signal: controller.signal,
-      headers: {
-        ...defaultHeaders,
-        ...(headers as Record<string, string>),
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...customConfig,
+        signal: controller.signal,
+        headers: {
+          ...defaultHeaders,
+          ...(headers as Record<string, string>),
+        },
+      });
+    } catch (err) {
+      // A caller cancelling its own request is not a network problem; pass it through.
+      if (callerSignal?.aborted) throw err;
+      // Browsers reject with a bare "Failed to fetch" TypeError; say something a person can act on.
+      const timedOut = controller.signal.aborted;
+      throw new NetworkError(
+        timedOut
+          ? "The server took too long to respond. Please try again."
+          : "Can't reach Flatmate right now. Check your connection and try again.",
+        { cause: err },
+      );
+    }
 
     // Check for HTTP 401 Unauthorized to trigger silent token refresh
     if (response.status === 401 && !skipAuthRefresh && typeof window !== "undefined") {

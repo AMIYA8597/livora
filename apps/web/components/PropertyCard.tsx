@@ -6,7 +6,7 @@ import Link from "next/link";
 import { PropertyDTO } from "@flatmate/contracts";
 import { Card, Badge } from "@flatmate/ui";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { MapPin, Bed, Bath, Sparkles, Heart, ShieldCheck, Check } from "lucide-react";
+import { MapPin, Bed, Bath, Sparkles, Heart, ShieldCheck, Check, ImageOff } from "lucide-react";
 
 export interface PropertyCardProps {
   property: PropertyDTO;
@@ -28,10 +28,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
     onSaveToggle?.(property.id, saved.toggle(property.id));
   };
 
-  const thumbnail =
-    property.images && property.images.length > 0
-      ? property.images[0]
-      : "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=600";
+  const thumbnail = property.images?.[0];
 
   const displayLocation =
     property.address_display || (property.city ? `${property.city}` : "India");
@@ -48,11 +45,18 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
       <Card hoverable className="h-full flex flex-col border border-warm-200 shadow-xs rounded-2xl overflow-hidden bg-white">
         {/* Image Container */}
         <div className="relative aspect-[16/10] w-full overflow-hidden bg-slate-100">
-          <img
-            src={thumbnail}
-            alt={property.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
+          {thumbnail ? (
+            <img
+              src={thumbnail}
+              alt={property.title}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
+              <ImageOff className="w-8 h-8 mb-1" aria-hidden />
+              <span className="text-xs font-medium">No photos yet</span>
+            </div>
+          )}
 
           {/* Save / Favorite Button */}
           <button

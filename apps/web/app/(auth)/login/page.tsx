@@ -10,6 +10,8 @@ import { TokenResponse } from "@flatmate/contracts";
 import { Button, Input, Card } from "@flatmate/ui";
 import { Home, Lock, Mail } from "lucide-react";
 
+const DEMO_LOGIN_ENABLED = process.env.NEXT_PUBLIC_DEMO_LOGIN === "true";
+
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
@@ -86,7 +88,7 @@ export default function LoginPage() {
           />
 
           <div className="flex justify-end">
-            <Link href="/forgot-password" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+            <Link href="/forgot-password" className="inline-flex items-center min-h-[44px] text-xs text-indigo-600 hover:text-indigo-700 font-medium">
               Forgot password?
             </Link>
           </div>
@@ -103,7 +105,9 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        {/* Quick Demo Credentials helper */}
+        {/* Seeded demo accounts: local development only. Off unless explicitly enabled, so the
+            credentials are compiled out of staging and production bundles. */}
+        {DEMO_LOGIN_ENABLED && (
         <div className="mt-6 pt-4 border-t border-slate-100 text-center">
           <span className="text-[11px] text-slate-400 block mb-1">Quick Demo Login:</span>
           <div className="flex justify-center gap-2">
@@ -129,6 +133,7 @@ export default function LoginPage() {
             </button>
           </div>
         </div>
+        )}
       </Card>
     </div>
   );

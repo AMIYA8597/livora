@@ -149,7 +149,6 @@ export function PhoneVerification({ user, onVerified, onNotice }: PhoneVerificat
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
               placeholder="123456"
               className="flex-1 tracking-[0.3em]"
             />

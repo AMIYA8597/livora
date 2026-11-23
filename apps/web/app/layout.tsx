@@ -2,12 +2,15 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { MobileTabBar } from "@/components/MobileTabBar";
 
 export const viewport: Viewport = {
   themeColor: "#173D32",
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
+  // Lets the tab bar and chat composer sit clear of the iPhone home indicator.
+  viewportFit: "cover",
 };
 
 export const metadata: Metadata = {
@@ -67,6 +70,7 @@ export default function RootLayout({
         <Navbar />
         <main className="flex-1" id="main-content">{children}</main>
         <Footer />
+        <MobileTabBar />
       </body>
     </html>
   );

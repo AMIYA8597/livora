@@ -13,6 +13,8 @@ import { useSocket } from "@/hooks/useSocket";
 import { Card, Avatar, Button } from "@flatmate/ui";
 import { ChatWindow } from "@/features/messaging/components/ChatWindow";
 import { PageLoading } from "@/components/states/PageLoading";
+import { loginHref } from "@/lib/navigation";
+import Link from "next/link";
 import {
   MessageSquare, ShieldCheck, Search, Users, Home, UserCheck,
   Archive, BellOff, MoreVertical, X, AlertCircle, RefreshCw
@@ -33,6 +35,8 @@ function MessagesView() {
   // otherwise the newest one.
   const requestedConvId = useSearchParams().get("conversationId");
   const [selectedConvId, setActiveConvId] = useState<string | null>(null);
+  // Phones show one pane at a time: the list, or the open chat full-screen.
+  const [mobilePane, setMobilePane] = useState<"list" | "chat">(() => (requestedConvId ? "chat" : "list"));
   const activeConvId =
     selectedConvId ??
     (requestedConvId && conversations.some((c) => c.id === requestedConvId) ? requestedConvId : null) ??
@@ -265,20 +269,25 @@ function MessagesView() {
     return conversations.find((c) => c.id === activeConvId);
   }, [conversations, activeConvId]);
 
+  if (authLoading) return <PageLoading text="Loading messages…" />;
+
   if (!isAuthenticated) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-20 text-center">
-        <MessageSquare className="w-12 h-12 text-indigo-600 mx-auto mb-3" />
-        <h2 className="text-xl font-bold text-slate-900">Please sign in to access your messages</h2>
+        <MessageSquare className="w-12 h-12 text-forest mx-auto mb-3" />
+        <h2 className="text-xl font-bold text-slate-900">Sign in to see your messages</h2>
+        <Link href={loginHref("/messages")}>
+          <Button variant="primary" className="mt-4 min-h-[44px]">Sign in</Button>
+        </Link>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-[calc(100vh-120px)] flex flex-col">
-      <Card className="h-full border-slate-200/80 flex overflow-hidden shadow-md">
+    <div className="max-w-7xl mx-auto md:px-6 lg:px-8 md:py-6 h-[calc(100dvh-8rem-env(safe-area-inset-bottom))] lg:h-[calc(100dvh-7rem)] flex flex-col">
+      <Card className="h-full border-0 md:border border-slate-200/80 rounded-none md:rounded-2xl flex overflow-hidden md:shadow-md">
         {/* Sidebar: Conversations List */}
-        <div className="w-full md:w-80 lg:w-96 border-r border-slate-200 bg-slate-50/50 flex flex-col">
+        <div className={`${mobilePane === "chat" ? "hidden" : "flex"} md:flex w-full md:w-80 lg:w-96 shrink-0 border-r border-slate-200 bg-slate-50/50 flex-col`}>
           {/* Header & Status */}
           <div className="p-4 border-b border-slate-200">
             <div className="flex items-center justify-between">
@@ -291,13 +300,14 @@ function MessagesView() {
 
             {/* Search Input */}
             <div className="relative mt-3">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Search conversations..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                aria-label="Search conversations"
+                className="w-full pl-9 pr-4 py-2.5 md:py-1.5 text-base md:text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
 
@@ -305,7 +315,7 @@ function MessagesView() {
             <div className="flex items-center space-x-1 mt-3 overflow-x-auto pb-1 text-xs">
               <button
                 onClick={() => setActiveTab("all")}
-                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                className={`px-3 min-h-[44px] md:min-h-0 md:px-2.5 md:py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
                   activeTab === "all" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
                 }`}
               >
@@ -313,7 +323,7 @@ function MessagesView() {
               </button>
               <button
                 onClick={() => setActiveTab("direct")}
-                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                className={`px-3 min-h-[44px] md:min-h-0 md:px-2.5 md:py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
                   activeTab === "direct" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
                 }`}
               >
@@ -321,7 +331,7 @@ function MessagesView() {
               </button>
               <button
                 onClick={() => setActiveTab("property_inquiry")}
-                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                className={`px-3 min-h-[44px] md:min-h-0 md:px-2.5 md:py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
                   activeTab === "property_inquiry" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
                 }`}
               >
@@ -329,7 +339,7 @@ function MessagesView() {
               </button>
               <button
                 onClick={() => setActiveTab("group")}
-                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                className={`px-3 min-h-[44px] md:min-h-0 md:px-2.5 md:py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
                   activeTab === "group" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-200/60"
                 }`}
               >
@@ -337,7 +347,7 @@ function MessagesView() {
               </button>
               <button
                 onClick={() => setActiveTab("archived")}
-                className={`px-2.5 py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
+                className={`px-3 min-h-[44px] md:min-h-0 md:px-2.5 md:py-1 rounded-md font-medium whitespace-nowrap transition-colors ${
                   activeTab === "archived" ? "bg-forest text-white" : "text-charcoal-muted hover:bg-slate-200/60"
                 }`}
               >
@@ -376,7 +386,10 @@ function MessagesView() {
                 return (
                   <button
                     key={c.id}
-                    onClick={() => setActiveConvId(c.id)}
+                    onClick={() => {
+                      setActiveConvId(c.id);
+                      setMobilePane("chat");
+                    }}
                     className={`w-full p-3.5 text-left flex items-start space-x-3 transition-colors ${
                       isActive ? "bg-white border-l-4 border-forest shadow-2xs" : "hover:bg-slate-100/60"
                     }`}
@@ -419,7 +432,11 @@ function MessagesView() {
         </div>
 
         {/* Chat Area & Optional Info Drawer */}
-        <div className="flex-1 flex bg-white overflow-hidden relative">
+        <div
+          className={`${
+            mobilePane === "chat" ? "fixed inset-0 z-50 flex" : "hidden"
+          } md:static md:z-auto md:flex md:relative flex-1 min-w-0 bg-white overflow-hidden`}
+        >
           {activeConvId && currentConv ? (
             <div className="flex-1 flex flex-col h-full">
               <ChatWindow
@@ -459,22 +476,34 @@ function MessagesView() {
                   else stopTyping(activeConvId);
                 }}
                 onOpenDetails={() => setIsDetailsOpen(!isDetailsOpen)}
+                onBack={() => setMobilePane("list")}
               />
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
               <MessageSquare className="w-12 h-12 text-slate-300 mb-3" />
               <p className="text-sm font-medium text-slate-600">Select a conversation to start chatting</p>
-              <p className="text-xs text-slate-400 mt-1">Real-time messages are durably stored in PostgreSQL.</p>
+              <button
+                type="button"
+                onClick={() => setMobilePane("list")}
+                className="md:hidden mt-4 min-h-[44px] px-4 text-sm font-semibold text-forest"
+              >
+                Back to conversations
+              </button>
             </div>
           )}
 
           {/* Details / Participant Drawer */}
           {isDetailsOpen && activeConvDetails && (
-            <div className="w-72 border-l border-slate-200 bg-slate-50/70 p-4 flex flex-col overflow-y-auto">
+            <div className="absolute inset-0 z-10 md:static md:w-72 border-l border-slate-200 bg-slate-50 md:bg-slate-50/70 p-4 flex flex-col overflow-y-auto">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <h3 className="font-bold text-sm text-slate-900">Details</h3>
-                <button onClick={() => setIsDetailsOpen(false)} className="text-slate-400 hover:text-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setIsDetailsOpen(false)}
+                  aria-label="Close details"
+                  className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] -mr-2 text-slate-400 hover:text-slate-700"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>

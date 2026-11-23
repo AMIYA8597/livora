@@ -10,7 +10,10 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, helperText, className, id, ...props }, ref) => {
-    const inputId = id || (label ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
+    // A label-derived id collided whenever a form repeated a label (e.g. one
+    // "Rent" field per room), pointing every <label> at the first input.
+    const generatedId = React.useId();
+    const inputId = id || (label ? generatedId : undefined);
 
     return (
       <div className="w-full">

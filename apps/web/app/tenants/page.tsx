@@ -166,7 +166,7 @@ export default function TenantsVacancyPage() {
       )}
 
       {/* Filter Chips */}
-      <div className="flex items-center space-x-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-charcoal-muted font-semibold">Filter:</span>
         {["all", "any", "female_only", "male_only"].map((g) => (
           <button

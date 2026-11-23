@@ -55,11 +55,11 @@ export function PropertyOverview({ property }: { property: PropertyDTO }) {
         <div className="flex flex-wrap gap-4 mt-5 pt-4 border-t border-slate-100 text-sm text-charcoal">
           <span className="flex items-center gap-1.5">
             <Bed className="w-4 h-4 text-forest" />
-            <span className="font-semibold">{property.total_bedrooms} bedrooms</span>
+            <span className="font-semibold">{property.total_bedrooms} {property.total_bedrooms === 1 ? "bedroom" : "bedrooms"}</span>
           </span>
           <span className="flex items-center gap-1.5">
             <Bath className="w-4 h-4 text-forest" />
-            <span className="font-semibold">{property.total_bathrooms} bathrooms</span>
+            <span className="font-semibold">{property.total_bathrooms} {property.total_bathrooms === 1 ? "bathroom" : "bathrooms"}</span>
           </span>
           {property.available_from && (
             <span className="flex items-center gap-1.5">
