@@ -185,11 +185,52 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - Tenant vacancies were posted against a hard-coded room ID. The API now defaults to the
         lease's room and rejects a room from another property.
       Left for item 8: `owner`, `owner/listings/create` and `groups` are still 580–670 lines.
-- [ ] **8. Responsive and mobile UX audit.** Check every route at 320, 375, 768, 1024 and 1440px:
-      a mobile bottom nav, a full-screen mobile chat, and touch targets of at least 44px.
+- [x] **8. Responsive and mobile UX audit.** *(Done.)* Every route was measured at 320, 375,
+      768, 1024 and 1440px in headless Chrome. Only `/admin/moderation` and `/tenants` overflowed
+      on phones; both are fixed. Key flows were walked through at 375px against a local API.
+      - **Mobile shell:** a bottom tab bar below `lg` (Discover, Flatmates, Matches, Messages,
+        My Space; Home/Sign in when signed out), with safe-area padding (`viewportFit: cover`).
+        The notification bell now shows on phones. On touch screens every button, select and
+        input is at least 44px, and inputs use 16px text so iOS doesn't zoom.
+      - **Chat:** the list and the conversation are separate full-screen views on phones, with a
+        back button. Message actions appear on tap (they were hover-only).
+      - **Shared UI:** `Modal` is now a real dialog (`role="dialog"`, labelled, focus moved in
+        and restored). It shows as a bottom sheet on phones and its body scrolls, so a tall
+        dialog's top is no longer cut off. `Input`, `Select` and `Checkbox` now generate unique
+        IDs; a label-based ID collided whenever a label repeated (one "Rent" per room).
+      - **Page split:** `owner` (227 lines), `owner/listings/create` (167) and `groups` (157) are
+        built from `features/{owner,listings,groups}`; no `alert()` is left.
+      Bugs fixed along the way:
+      - The listing wizard published a fake address, coordinates, stock photo and amenities
+        when left unchanged, and it skipped the room and bed inventory. It now starts empty,
+        validates each step, uses real city-centre coordinates (no geocoding yet) and sends rooms
+        and beds; blank bed rents split the room rent. The "quick add" form that also invented a
+        location was removed.
+      - Listing cards and the gallery showed Unsplash or missing placeholder images; they now say
+        "No photos yet".
+      - Pasting "411 045" into the PIN box, or "123 456" into the SMS code box, lost the last
+        digit (`maxLength` cut the text before non-digits were stripped).
+      - Groups: "Join" always failed (only leaders could add members). Self-join is allowed,
+        always as `member`, and unknown roles are rejected. The wishlist now shows real listings,
+        members can add one by pasting its link, and the invite instruction ("ID on their
+        profile") is true: the profile shows a copyable user ID.
+      - If the API was unreachable when a page loaded, a signed-in user looked signed out until
+        they reloaded. The auth store now retries with backoff, and at once on `online`/`focus`.
+        Network failures read "Can't reach Flatmate…" instead of "Failed to fetch".
+      - The login page's demo accounts (with their password) now show only when
+        `NEXT_PUBLIC_DEMO_LOGIN=true` (local dev only).
+      Follow-ups:
+      - Address geocoding.
+      - A kitchen-policy field (the API has none).
+      - Searching people for invites and listings for the wishlist.
+      - An approval step for joining a group.
+      - The owner portal's "revenue" showed ₹30k with no tenants.
+      - *Owner action:* make sure the demo accounts `priya@example.com` and
+        `sarah.owner@example.com` don't exist on the hosted database.
 - [ ] **9. Live chat completeness.** Verify reconnect/backoff, offline queueing, read receipts,
       typing and presence end to end in the browser, plus image attachments in chat and
-      push/email when the user is offline.
+      push/email when the user is offline. Conversation titles show a placeholder ("Flatmate
+      Seeker") instead of the other person's name.
 - [ ] **10. AI/ML is mostly heuristic or mock.** `MockExternalML*` providers. Add a real
       embedding-based "about me"/listing semantic search, learning-to-rank from like/pass
       interactions, an LLM-assisted scam/abuse moderation provider, and a smart reply/icebreaker
@@ -216,6 +257,8 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       characters (a fresh token resets the limit) and anonymous calls on a client-supplied
       `X-Forwarded-For` (spoofable). Move it to Redis, key on the verified user id, and trust
       forwarded headers only from the platform proxy. (OTP send limits already live in the DB.)
+      Also: the public `GET /groups` response includes members' user IDs; trim it to counts for
+      anyone who isn't a member.
 - [ ] **17. SEO and performance.** Metadata/OG for property pages, image optimisation,
       Lighthouse of at least 90 on mobile.
 - [ ] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a

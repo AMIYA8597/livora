@@ -75,8 +75,16 @@ class GroupService:
         if not group:
             raise NotFoundException("Group not found")
 
-        # Verify requester has authority: must be group creator, leader, or admin
-        if requester_id is not None and requester_id != group.creator_id and not is_admin:
+        if role not in ("member", "leader"):
+            raise BadRequestException("Role must be 'member' or 'leader'")
+
+        # Joining yourself is open (groups are listed publicly with a Join button), but always as a
+        # plain member: otherwise anyone could self-join as leader and then add arbitrary users.
+        is_self_join = requester_id is not None and requester_id == user_id
+        if is_self_join and requester_id != group.creator_id and not is_admin:
+            role = "member"
+        # Adding someone else needs the group creator, a leader, or an admin.
+        elif requester_id is not None and requester_id != group.creator_id and not is_admin:
             leader_q = select(GroupMember).where(
                 GroupMember.group_id == group_id,
                 GroupMember.user_id == requester_id,

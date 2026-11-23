@@ -11,7 +11,7 @@ from app.modules.groups.models import Group, GroupMember
 from app.modules.profiles.models import Profile
 from app.modules.users.models import User
 from app.modules.lifestyle.models import UserDealbreaker
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, ForbiddenException
 
 @pytest.mark.asyncio
 async def test_group_creation_assigns_creator_as_leader():
@@ -63,6 +63,49 @@ async def test_group_duplicate_member_rejected():
     with pytest.raises(BadRequestException) as exc_info:
         await service.add_member(group_id, creator_id)
     assert "already a member" in str(exc_info.value.detail).lower()
+
+def _result(value):
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = value
+    return res
+
+
+@pytest.mark.asyncio
+async def test_self_join_is_allowed_but_only_as_member():
+    """A user may join a listed group themselves; asking for 'leader' still makes them a member."""
+    group_id, creator_id, joiner_id = uuid4(), uuid4(), uuid4()
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    service = GroupService(mock_db)
+    service.get_by_id = AsyncMock(return_value=Group(id=group_id, creator_id=creator_id, name="G", members=[]))
+
+    mock_db.execute.side_effect = [_result(None)]  # not yet a member
+    member = await service.add_member(group_id, joiner_id, requester_id=joiner_id, role="leader")
+    assert member.user_id == joiner_id
+    assert member.role == "member"
+
+
+@pytest.mark.asyncio
+async def test_plain_member_cannot_add_other_users():
+    """Only the creator, a leader or an admin may add someone else."""
+    group_id, creator_id, member_id = uuid4(), uuid4(), uuid4()
+    mock_db = AsyncMock()
+    service = GroupService(mock_db)
+    service.get_by_id = AsyncMock(return_value=Group(id=group_id, creator_id=creator_id, name="G", members=[]))
+
+    mock_db.execute.side_effect = [_result(None)]  # requester is not a leader
+    with pytest.raises(ForbiddenException):
+        await service.add_member(group_id, uuid4(), requester_id=member_id)
+
+
+@pytest.mark.asyncio
+async def test_unknown_member_role_rejected():
+    group_id, creator_id = uuid4(), uuid4()
+    service = GroupService(AsyncMock())
+    service.get_by_id = AsyncMock(return_value=Group(id=group_id, creator_id=creator_id, name="G", members=[]))
+    with pytest.raises(BadRequestException):
+        await service.add_member(group_id, uuid4(), requester_id=creator_id, role="owner")
+
 
 @pytest.mark.asyncio
 async def test_group_collective_compatibility_with_dealbreaker_penalty():

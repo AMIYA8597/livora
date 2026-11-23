@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import type { UserDTO } from "@flatmate/contracts";
 import { Badge, Button, Card } from "@flatmate/ui";
-import { Mail, Shield } from "lucide-react";
+import { Copy, Fingerprint, Mail, Shield } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { InlineNotice } from "@/components/states/InlineNotice";
 import { PhoneVerification } from "./PhoneVerification";
@@ -39,6 +39,31 @@ export function AccountSecurityPanel({ user, onUserChanged, onNotice }: AccountS
         <p className="text-xs text-charcoal-muted mb-4">Sign-in details and contact verification.</p>
 
         <div className="space-y-3 text-xs">
+          {user?.id && (
+            <div className="flex items-center justify-between gap-2 p-3 bg-warm rounded-xl border border-slate-200/60">
+              <div className="flex items-center gap-2 min-w-0">
+                <Fingerprint className="w-4 h-4 text-forest shrink-0" />
+                <div className="min-w-0">
+                  <span className="font-mono text-[11px] text-charcoal block break-all">{user.id}</span>
+                  <span className="text-[10px] text-charcoal-muted">Your user ID: share it so a group can add you</span>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1 shrink-0"
+                onClick={() =>
+                  navigator.clipboard
+                    .writeText(user.id)
+                    .then(() => onNotice("User ID copied."))
+                    .catch(() => onNotice("Couldn't copy. Select the ID and copy it manually."))
+                }
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy</span>
+              </Button>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2 p-3 bg-warm rounded-xl border border-slate-200/60">
             <div className="flex items-center gap-2 min-w-0">
               <Mail className="w-4 h-4 text-forest shrink-0" />
