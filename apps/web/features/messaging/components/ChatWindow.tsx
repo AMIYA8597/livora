@@ -7,6 +7,7 @@ import {
   Users, Info, ShieldCheck, Clock, ArrowLeft
 } from "lucide-react";
 import { AttachmentDTO } from "@flatmate/contracts";
+import { typingLabel } from "../chat-model";
 
 export interface MessageItem {
   id: string;
@@ -36,11 +37,14 @@ export interface ChatWindowProps {
   messages: MessageItem[];
   typingUsers?: string[];
   currentUserId?: string;
-  onSendMessage: (text: string, replyToId?: string, attachmentIds?: string[]) => Promise<void>;
+  /** Sends (optimistically) and returns at once; delivery state shows on the message. */
+  onSendMessage: (text: string, replyToId?: string, attachments?: AttachmentDTO[]) => void | Promise<void>;
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>;
   onDeleteMessage?: (messageId: string) => Promise<void>;
   onUploadAttachment?: (file: File) => Promise<AttachmentDTO>;
   onTyping?: (isTyping: boolean) => void;
+  /** Re-send a message that failed to send. */
+  onRetry?: (messageId: string) => void;
   onOpenDetails?: () => void;
   /** Mobile only: return to the conversation list. */
   onBack?: () => void;
@@ -61,6 +65,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onDeleteMessage,
   onUploadAttachment,
   onTyping,
+  onRetry,
   onOpenDetails,
   onBack,
 }) => {
@@ -125,8 +130,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       return;
     }
 
-    const attIds = stagedAttachments.map((a) => a.id);
-    await onSendMessage(text, replyingTo?.id, attIds);
+    await onSendMessage(text, replyingTo?.id, stagedAttachments);
 
     setInputText("");
     setReplyingTo(null);
@@ -143,8 +147,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       setIsUploading(true);
       const att = await onUploadAttachment(file);
       setStagedAttachments((prev) => [...prev, att]);
-    } catch (err: any) {
-      alert(err.message || "Failed to upload attachment");
+    } catch (err) {
+      setWarning(err instanceof Error ? err.message : "Couldn't upload that file.");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -299,12 +303,29 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               <div className="flex items-center space-x-1.5 mt-1 px-1 text-[10px] text-slate-400">
                 <span>{msg.createdAt}</span>
                 {msg.isEdited && <span className="italic">(edited)</span>}
-                {msg.isSelf && !isDeleted && (
-                  <span>
-                    {msg.status === "sending" && <Clock className="w-3 h-3 text-slate-400" />}
-                    {msg.status === "sent" && <Check className="w-3 h-3 text-slate-400" />}
-                    {msg.status === "delivered" && <CheckCheck className="w-3 h-3 text-slate-400" />}
-                    {msg.status === "read" && <CheckCheck className="w-3 h-3 text-indigo-500 font-bold" />}
+                {msg.isSelf && !isDeleted && msg.status !== "failed" && (
+                  <span className="inline-flex items-center gap-0.5">
+                    {msg.status === "sending" && <Clock className="w-3 h-3 text-slate-400" aria-hidden="true" />}
+                    {msg.status === "sent" && <Check className="w-3 h-3 text-slate-400" aria-hidden="true" />}
+                    {msg.status === "delivered" && <CheckCheck className="w-3 h-3 text-slate-400" aria-hidden="true" />}
+                    {msg.status === "read" && <CheckCheck className="w-3 h-3 text-indigo-500" aria-hidden="true" />}
+                    <span className="sr-only">
+                      {msg.status === "sending" ? "Sending" : msg.status === "read" ? "Read" : "Sent"}
+                    </span>
+                  </span>
+                )}
+                {msg.isSelf && msg.status === "failed" && (
+                  <span className="inline-flex items-center gap-1 text-rose-600 font-semibold">
+                    Not sent
+                    {onRetry && (
+                      <button
+                        type="button"
+                        onClick={() => onRetry(msg.id)}
+                        className="inline-flex items-center min-h-[44px] md:min-h-0 px-1 underline"
+                      >
+                        Retry
+                      </button>
+                    )}
                   </span>
                 )}
               </div>
@@ -366,13 +387,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
         {/* Real-Time Typing Indicator */}
         {typingUsers.length > 0 && (
-          <div className="flex items-center space-x-2 text-xs text-slate-500 italic py-1">
+          <div className="flex items-center space-x-2 text-xs text-slate-500 italic py-1" aria-live="polite">
             <div className="flex space-x-1">
               <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce" />
               <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.2s]" />
               <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:0.4s]" />
             </div>
-            <span>{typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing...</span>
+            <span>{typingLabel(typingUsers)}</span>
           </div>
         )}
 

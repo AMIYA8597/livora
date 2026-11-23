@@ -1,147 +1,205 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { MessageDTO, WebSocketEnvelope } from "@flatmate/contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { MessageDTO, WebSocketEnvelope } from "@flatmate/contracts";
+import { API_BASE_URL, refreshAccessToken } from "@/lib/api-client";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  HEARTBEAT_INTERVAL_MS,
+  closeAction,
+  isStale,
+  reconnectDelay,
+  socketUrl,
+} from "@/lib/realtime";
+
+export type SocketStatus = "idle" | "connecting" | "open" | "offline";
 
 export interface SocketCallbacks {
   onMessageCreated?: (msg: MessageDTO) => void;
   onMessageUpdated?: (data: { id: string; conversation_id: string; content: string; is_edited: boolean; edited_at: string }) => void;
   onMessageDeleted?: (data: { id: string; conversation_id: string; is_deleted: boolean; deleted_at: string }) => void;
-  onMessageRead?: (data: { conversation_id: string; user_id: string; last_read_message_id?: string; read_at: string }) => void;
+  onMessageRead?: (data: { conversation_id: string; user_id: string; last_read_message_id?: string | null; read_at: string }) => void;
   onTypingStarted?: (data: { conversation_id: string; user_id: string }) => void;
   onTypingStopped?: (data: { conversation_id: string; user_id: string }) => void;
-  onPresenceChanged?: (data: { user_id: string; status: string; last_seen_at?: string }) => void;
-  onNotificationCreated?: (notif: any) => void;
-  onConversationUpdated?: (data: any) => void;
+  onPresenceChanged?: (data: { user_id: string; status: string; last_seen_at?: string | null }) => void;
+  onNotificationCreated?: (notif: unknown) => void;
+  onConversationUpdated?: (data: { conversation_id: string; [key: string]: unknown }) => void;
+  /** Fired when the socket comes back after a drop: refetch anything that may have been missed. */
+  onReconnected?: () => void;
 }
 
-export function useSocket(callbacks?: SocketCallbacks | ((msg: MessageDTO) => void)) {
-  const [isConnected, setIsConnected] = useState(false);
-  const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const isUnmountedRef = useRef(false);
-  // Reconnects go through a ref so the socket's close handler never captures a stale `connect`.
-  const connectRef = useRef<() => void>(() => {});
+const WS_URL = socketUrl(API_BASE_URL, process.env.NEXT_PUBLIC_WS_URL);
 
-  // Normalize callbacks
+/**
+ * The signed-in user's realtime channel.
+ *
+ * - Authenticates with the first frame, so the token never appears in a URL or access log.
+ * - Reconnects with backoff, at once when the browser comes back online or the tab is shown, and
+ *   renews the access token when the server says it expired (close code 4001).
+ * - Treats a connection that has gone quiet (no pong) as dead, e.g. after the laptop slept.
+ * - Calls `onReconnected` after every reconnection so the page can catch up on missed events.
+ */
+export function useSocket(callbacks?: SocketCallbacks) {
+  const { isAuthenticated } = useAuth();
+  const [status, setStatus] = useState<SocketStatus>("idle");
+
   const cbRef = useRef<SocketCallbacks>({});
   useEffect(() => {
-    if (typeof callbacks === "function") {
-      cbRef.current = { onMessageCreated: callbacks };
-    } else if (callbacks) {
-      cbRef.current = callbacks;
-    }
+    cbRef.current = callbacks ?? {};
   }, [callbacks]);
 
-  const connect = useCallback(() => {
-    if (typeof window === "undefined" || isUnmountedRef.current) return;
+  const socketRef = useRef<WebSocket | null>(null);
 
-    const token = localStorage.getItem("flatmate_access_token") || localStorage.getItem("token");
-    if (!token) return;
+  useEffect(() => {
+    if (!isAuthenticated || typeof window === "undefined") return;
 
-    // Clean up existing socket
-    if (socketRef.current) {
-      try {
-        socketRef.current.close();
-      } catch (e) {
-        // ignore
+    let disposed = false;
+    let attempts = 0;
+    let everConnected = false;
+    let lastFrameAt = Date.now();
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+    const clearTimers = () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (heartbeat) clearInterval(heartbeat);
+      reconnectTimer = heartbeat = null;
+    };
+
+    const scheduleReconnect = (delay: number) => {
+      if (disposed) return;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => connect(), delay);
+    };
+
+    const dispatch = (envelope: WebSocketEnvelope<any>) => {
+      const cb = cbRef.current;
+      const { event, data } = envelope;
+      switch (event) {
+        case "connection.ready":
+          attempts = 0;
+          setStatus("open");
+          if (everConnected) cb.onReconnected?.();
+          everConnected = true;
+          break;
+        case "message.created": cb.onMessageCreated?.(data); break;
+        case "message.updated": cb.onMessageUpdated?.(data); break;
+        case "message.deleted": cb.onMessageDeleted?.(data); break;
+        case "message.read": cb.onMessageRead?.(data); break;
+        case "typing.started": cb.onTypingStarted?.(data); break;
+        case "typing.stopped": cb.onTypingStopped?.(data); break;
+        case "presence.changed": cb.onPresenceChanged?.(data); break;
+        case "notification.created": cb.onNotificationCreated?.(data); break;
+        case "conversation.updated": cb.onConversationUpdated?.(data); break;
+        default: break; // pong, error and future events
       }
+    };
+
+    function connect() {
+      if (disposed) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        setStatus("offline");
+        return; // the "online" listener reconnects
+      }
+      const token = localStorage.getItem("flatmate_access_token");
+      if (!token) return;
+
+      const previous = socketRef.current;
+      socketRef.current = null; // its close handler must not schedule anything now
+      previous?.close(1000, "replaced");
+      clearTimers();
+
+      setStatus("connecting");
+      const ws = new WebSocket(WS_URL);
+      socketRef.current = ws;
+      lastFrameAt = Date.now();
+
+      ws.onopen = () => {
+        if (socketRef.current !== ws) return;
+        ws.send(JSON.stringify({ version: "1.0", event: "auth", data: { token } }));
+        heartbeat = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (isStale(lastFrameAt, Date.now())) {
+            ws.close(4000, "stale"); // dead connection: reconnect
+            return;
+          }
+          ws.send(JSON.stringify({ version: "1.0", event: "ping", data: {} }));
+        }, HEARTBEAT_INTERVAL_MS);
+      };
+
+      ws.onmessage = (event) => {
+        if (socketRef.current !== ws) return;
+        lastFrameAt = Date.now();
+        try {
+          dispatch(JSON.parse(event.data));
+        } catch {
+          // ignore malformed frames
+        }
+      };
+
+      ws.onclose = (event) => {
+        if (socketRef.current !== ws) return; // a replaced socket: nothing to do
+        socketRef.current = null;
+        clearTimers();
+        if (disposed) return;
+        const action = closeAction(event.code, false);
+        if (action === "stop") {
+          setStatus("idle");
+          return;
+        }
+        setStatus(typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "connecting");
+        if (action === "refresh") {
+          refreshAccessToken().then(
+            (newToken) => {
+              if (newToken) scheduleReconnect(0); // else signed out: the auth store takes over
+            },
+            () => scheduleReconnect(reconnectDelay(attempts++)), // offline: keep the session, retry
+          );
+          return;
+        }
+        scheduleReconnect(reconnectDelay(attempts++));
+      };
+
+      ws.onerror = () => {
+        // onclose follows and decides what to do
+      };
     }
 
-    const baseWsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/api/v1/messaging/ws";
-    const wsUrl = `${baseWsUrl}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(wsUrl);
-    socketRef.current = ws;
-
-    ws.onopen = () => {
-      setIsConnected(true);
-      reconnectAttemptsRef.current = 0;
-
-      // Start ping heartbeat every 25s
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      pingIntervalRef.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ version: "1.0", event: "ping", data: {} }));
-        }
-      }, 25000);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const envelope: WebSocketEnvelope<any> = JSON.parse(event.data);
-        const { event: eventType, data } = envelope;
-
-        if (eventType === "message.created" || envelope.event === ("message_received" as any)) {
-          cbRef.current.onMessageCreated?.(data);
-        } else if (eventType === "message.updated") {
-          cbRef.current.onMessageUpdated?.(data);
-        } else if (eventType === "message.deleted") {
-          cbRef.current.onMessageDeleted?.(data);
-        } else if (eventType === "message.read") {
-          cbRef.current.onMessageRead?.(data);
-        } else if (eventType === "typing.started") {
-          cbRef.current.onTypingStarted?.(data);
-        } else if (eventType === "typing.stopped") {
-          cbRef.current.onTypingStopped?.(data);
-        } else if (eventType === "presence.changed") {
-          cbRef.current.onPresenceChanged?.(data);
-        } else if (eventType === "notification.created") {
-          cbRef.current.onNotificationCreated?.(data);
-        } else if (eventType === "conversation.updated") {
-          cbRef.current.onConversationUpdated?.(data);
-        }
-      } catch (err) {
-        console.error("WebSocket message parsing error:", err);
+    const reconnectNow = () => {
+      const ws = socketRef.current;
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        attempts = 0;
+        connect();
       }
     };
-
-    ws.onclose = () => {
-      setIsConnected(false);
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-
-      if (!isUnmountedRef.current) {
-        // Exponential backoff with jitter: min 1s, max 15s
-        const attempts = reconnectAttemptsRef.current;
-        const delay = Math.min(1000 * Math.pow(1.5, attempts) + Math.random() * 500, 15000);
-        reconnectAttemptsRef.current += 1;
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectRef.current();
-        }, delay);
-      }
+    const onOffline = () => setStatus("offline");
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reconnectNow();
     };
+    window.addEventListener("online", reconnectNow);
+    window.addEventListener("offline", onOffline);
+    document.addEventListener("visibilitychange", onVisible);
 
-    ws.onerror = () => {
-      ws.close();
-    };
-  }, []);
-
-  useEffect(() => {
-    connectRef.current = connect;
-  }, [connect]);
-
-  useEffect(() => {
-    isUnmountedRef.current = false;
     connect();
 
     return () => {
-      isUnmountedRef.current = true;
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      if (socketRef.current) socketRef.current.close();
+      disposed = true;
+      clearTimers();
+      window.removeEventListener("online", reconnectNow);
+      window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisible);
+      const ws = socketRef.current;
+      socketRef.current = null;
+      ws?.close(1000, "unmount");
+      setStatus("idle");
     };
-  }, [connect]);
+  }, [isAuthenticated]);
 
-  const sendEvent = useCallback((event: string, data: any) => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({
-        version: "1.0",
-        event,
-        timestamp: new Date().toISOString(),
-        data,
-      }));
-    }
+  const sendEvent = useCallback((event: string, data: Record<string, unknown>): boolean => {
+    const ws = socketRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ version: "1.0", event, timestamp: new Date().toISOString(), data }));
+    return true;
   }, []);
 
   const startTyping = useCallback((conversationId: string) => {
@@ -153,11 +211,8 @@ export function useSocket(callbacks?: SocketCallbacks | ((msg: MessageDTO) => vo
   }, [sendEvent]);
 
   const markRead = useCallback((conversationId: string, lastReadMessageId?: string) => {
-    sendEvent("message.read", {
-      conversation_id: conversationId,
-      last_read_message_id: lastReadMessageId,
-    });
+    sendEvent("message.read", { conversation_id: conversationId, last_read_message_id: lastReadMessageId });
   }, [sendEvent]);
 
-  return { isConnected, sendEvent, startTyping, stopTyping, markRead };
+  return { status, isConnected: status === "open", sendEvent, startTyping, stopTyping, markRead };
 }

@@ -92,6 +92,10 @@ export interface ConversationDTO {
   status: ConversationStatus;
   context_metadata?: Record<string, unknown>;
   participants: string[] | ConversationParticipantDTO[];
+  /** Active participants with their public profile (names for titles and senders). */
+  participant_details?: ConversationParticipantDTO[];
+  /** Other participants' read positions (single-conversation endpoint only), for read receipts. */
+  read_cursors?: Omit<ConversationReadCursorDTO, "conversation_id">[];
   last_message?: MessageDTO | null;
   unread_count?: number;
   preferences?: ConversationPreferenceDTO;

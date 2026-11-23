@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { apiClient, ApiError, NetworkError, API_BASE_URL } from '../lib/api-client.ts';
+import { apiClient, ApiError, NetworkError, API_BASE_URL, refreshAccessToken } from '../lib/api-client.ts';
 
 // Mock localStorage for Node test environment
 class MockLocalStorage {
@@ -189,5 +189,69 @@ test('apiClient passes a caller abort straight through', async () => {
     });
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+function jsonResponse(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+test('concurrent 401s share one token refresh and both requests are replayed', async () => {
+  const originalFetch = globalThis.fetch;
+  mockStorage.setItem('flatmate_access_token', 'old');
+  mockStorage.setItem('flatmate_refresh_token', 'r1');
+  let refreshCalls = 0;
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    if (u.endsWith('/auth/refresh')) {
+      refreshCalls++;
+      await new Promise((r) => setTimeout(r, 10));
+      return jsonResponse(200, { access_token: 'new', refresh_token: 'r2' });
+    }
+    const auth = (init?.headers as Record<string, string>)?.Authorization;
+    return auth === 'Bearer new' ? jsonResponse(200, { ok: u }) : jsonResponse(401, { detail: 'expired' });
+  }) as typeof fetch;
+  try {
+    const [a, b] = await Promise.all([apiClient<{ ok: string }>('/a'), apiClient<{ ok: string }>('/b')]);
+    assert.ok(a.ok.endsWith('/a') && b.ok.endsWith('/b'));
+    assert.strictEqual(refreshCalls, 1);
+    assert.strictEqual(mockStorage.getItem('flatmate_refresh_token'), 'r2');
+  } finally {
+    globalThis.fetch = originalFetch;
+    mockStorage.clear();
+  }
+});
+
+test('a network failure while refreshing keeps the session', async () => {
+  const originalFetch = globalThis.fetch;
+  mockStorage.setItem('flatmate_access_token', 'old');
+  mockStorage.setItem('flatmate_refresh_token', 'r1');
+  globalThis.fetch = (async () => {
+    throw new TypeError('Failed to fetch');
+  }) as typeof fetch;
+  try {
+    await assert.rejects(refreshAccessToken(), NetworkError);
+    assert.strictEqual(mockStorage.getItem('flatmate_refresh_token'), 'r1');
+  } finally {
+    globalThis.fetch = originalFetch;
+    mockStorage.clear();
+  }
+});
+
+test('a rejected refresh token clears the session and announces it', async () => {
+  const originalFetch = globalThis.fetch;
+  const events: string[] = [];
+  (globalThis as any).window.dispatchEvent = (e: { type: string }) => { events.push(e.type); return true; };
+  mockStorage.setItem('flatmate_access_token', 'old');
+  mockStorage.setItem('flatmate_refresh_token', 'revoked');
+  globalThis.fetch = (async () => jsonResponse(401, { detail: 'invalid' })) as typeof fetch;
+  try {
+    assert.strictEqual(await refreshAccessToken(), null);
+    assert.strictEqual(mockStorage.getItem('flatmate_access_token'), null);
+    assert.deepStrictEqual(events, ['flatmate:auth-expired']);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as any).window.dispatchEvent = () => true;
+    mockStorage.clear();
   }
 });

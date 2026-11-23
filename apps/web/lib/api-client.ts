@@ -67,16 +67,49 @@ export interface RequestOptions extends RequestInit {
   token?: string | null;
 }
 
-let isRefreshing = false;
-let refreshSubscribers: ((newToken: string) => void)[] = [];
+let refreshInFlight: Promise<string | null> | null = null;
 
-function onTokenRefreshed(newToken: string) {
-  refreshSubscribers.forEach((cb) => cb(newToken));
-  refreshSubscribers = [];
-}
-
-function addRefreshSubscriber(cb: (newToken: string) => void) {
-  refreshSubscribers.push(cb);
+/**
+ * Exchange the refresh token for a new access token. Concurrent callers share one request.
+ *
+ * Resolves to the new access token, or null when there is no session or the server rejected the
+ * refresh token (the session is then cleared and `flatmate:auth-expired` fires). A network failure
+ * rejects with NetworkError and keeps the session: being offline must not sign anyone out.
+ */
+export function refreshAccessToken(): Promise<string | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const refreshToken = localStorage.getItem("flatmate_refresh_token");
+    if (!refreshToken) return null;
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+    } catch (err) {
+      throw new NetworkError("Can't reach Flatmate right now. Check your connection and try again.", { cause: err });
+    }
+    const data = res.ok ? await res.json().catch(() => null) : null;
+    if (data?.access_token) {
+      localStorage.setItem("flatmate_access_token", data.access_token);
+      if (data.refresh_token) localStorage.setItem("flatmate_refresh_token", data.refresh_token);
+      return data.access_token as string;
+    }
+    if (res.status >= 500) {
+      // The server is having trouble; that says nothing about the session.
+      throw new ApiError({ status: res.status, detail: "Couldn't renew your session. Please try again." });
+    }
+    localStorage.removeItem("flatmate_access_token");
+    localStorage.removeItem("flatmate_refresh_token");
+    window.dispatchEvent(new CustomEvent("flatmate:auth-expired"));
+    return null;
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 export async function apiClient<T>(
@@ -169,59 +202,11 @@ export async function apiClient<T>(
       );
     }
 
-    // Check for HTTP 401 Unauthorized to trigger silent token refresh
+    // A 401 means the access token expired: renew it once and replay the request.
     if (response.status === 401 && !skipAuthRefresh && typeof window !== "undefined") {
-      const refreshToken = localStorage.getItem("flatmate_refresh_token");
-
-      if (refreshToken) {
-        if (!isRefreshing) {
-          isRefreshing = true;
-          try {
-            const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ refresh_token: refreshToken }),
-            });
-
-            if (refreshRes.ok) {
-              const data = await refreshRes.json();
-              if (data.access_token) {
-                localStorage.setItem("flatmate_access_token", data.access_token);
-                if (data.refresh_token) {
-                  localStorage.setItem("flatmate_refresh_token", data.refresh_token);
-                }
-                isRefreshing = false;
-                onTokenRefreshed(data.access_token);
-                // Replay original call with updated token
-                return apiClient<T>(endpoint, {
-                  ...options,
-                  skipAuthRefresh: true,
-                  token: data.access_token,
-                });
-              }
-            }
-            throw new Error("Token refresh response did not contain access_token");
-          } catch (refreshErr) {
-            isRefreshing = false;
-            refreshSubscribers = [];
-            localStorage.removeItem("flatmate_access_token");
-            localStorage.removeItem("flatmate_refresh_token");
-            window.dispatchEvent(new CustomEvent("flatmate:auth-expired"));
-          }
-        } else {
-          // If refresh is already in flight, queue this request
-          return new Promise<T>((resolve, reject) => {
-            addRefreshSubscriber((newToken) => {
-              apiClient<T>(endpoint, {
-                ...options,
-                skipAuthRefresh: true,
-                token: newToken,
-              })
-                .then(resolve)
-                .catch(reject);
-            });
-          });
-        }
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        return apiClient<T>(endpoint, { ...options, skipAuthRefresh: true, token: newToken });
       }
     }
 

@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Dev only: let http://127.0.0.1:3000 (the host in .env.local) load dev resources such as HMR.
+  allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
   transpilePackages: ["@flatmate/ui", "@flatmate/contracts"],
   images: {

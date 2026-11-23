@@ -227,10 +227,49 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - The owner portal's "revenue" showed ₹30k with no tenants.
       - *Owner action:* make sure the demo accounts `priya@example.com` and
         `sarah.owner@example.com` don't exist on the hosted database.
-- [ ] **9. Live chat completeness.** Verify reconnect/backoff, offline queueing, read receipts,
-      typing and presence end to end in the browser, plus image attachments in chat and
-      push/email when the user is offline. Conversation titles show a placeholder ("Flatmate
-      Seeker") instead of the other person's name.
+- [x] **9. Live chat completeness.** *(Done.)* Checked end to end with two accounts in two
+      browsers: live delivery, typing, read receipts, presence, and an API outage with a message
+      sent during it.
+      - **Socket security:** the token now arrives in the first message instead of the URL, where
+        access logs would record it. Only access tokens for active accounts are accepted; refresh
+        tokens and disabled accounts used to get in. The socket closes when the token expires, and
+        the client renews it and reconnects. Typing and read events need conversation
+        membership; previously anyone could fake read receipts or typing in any conversation, and
+        create read cursors there. Frames are size-limited, and errors no longer echo exceptions.
+      - **Scale:** each socket event uses a short database session; an idle socket used to hold a
+        pooled connection for its whole life. The inbox gets the last message and unread counts
+        from SQL; it used to load every message of every conversation.
+      - **Presence:** only shown to people you share a conversation with. It used to go to every
+        connected user, and anyone could look up anyone's status. A short grace period hides
+        reconnects. With Redis, presence is shared across API instances (heartbeat-scored set
+        per user).
+      - **Client:** reconnects with jittered backoff, and at once on `online`/tab focus. A
+        silent socket counts as dead. The old reconnect loop is fixed: a replaced socket's close
+        handler used to schedule another reconnect.
+      - **After a reconnect:** the inbox and open conversation are refetched. Messages sent while
+        offline stay queued as "Not sent · Retry" and go out by themselves when the connection
+        returns; the idempotency key prevents duplicates.
+      - **Read receipts:** come from the other people's read positions. One read event used to
+        mark all your messages read, and loading an older page used to move your read position
+        back.
+      - **Offline email:** a `new_message` email (sender's name and a link, never the message
+        text) goes to anyone who hasn't read a message after 10 minutes. At most one per
+        conversation per hour, never if muted. In-app notifications also respect mute, which
+        can now be set in the conversation details.
+      - **Messages:** live events now carry attachments. Sends are plain text only (4000-character
+        cap, at least text or an attachment); `system` messages and safety-warning metadata can't
+        be forged.
+      - **Token refresh:** a refresh that hit a network error used to sign the user out, and
+        requests waiting on it hung forever. It's now one shared refresh, and only a rejected
+        refresh token signs out.
+      - **UI:** conversations show the other person's name, not "Flatmate Seeker". The online
+        dot reflects real presence (it was always green). The phone-number safety notice was
+        switched off by a hard-coded "verified" flag; it now uses the recipient's real
+        verification status.
+      Not covered: image upload in chat wasn't re-tried in the browser here (the upload path was
+      fixed in item 7, and live events now include attachments). The 10-minute email depends on
+      the outbox sweep, so it's only timely once the worker and beat run (item 18a). Web push is
+      item 13.
 - [ ] **10. AI/ML is mostly heuristic or mock.** `MockExternalML*` providers. Add a real
       embedding-based "about me"/listing semantic search, learning-to-rank from like/pass
       interactions, an LLM-assisted scam/abuse moderation provider, and a smart reply/icebreaker
