@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
+import { safeNextPath } from "@/lib/navigation";
 import { TokenResponse } from "@flatmate/contracts";
 import { Button, Input, Card } from "@flatmate/ui";
 import { Home, Lock, Mail } from "lucide-react";
@@ -37,7 +38,8 @@ export default function LoginPage() {
         res.user,
         res.roles
       );
-      router.push("/dashboard");
+      // Back to the page that sent the user here, if it is a safe same-site path.
+      router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")));
     } catch (err: any) {
       setError(err.message || "Failed to log in. Please check your credentials.");
     } finally {

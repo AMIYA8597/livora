@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React from "react";
+import { useSavedProperties } from "@/hooks/useSavedProperties";
 import Link from "next/link";
 import { PropertyDTO } from "@flatmate/contracts";
 import { Card, Badge } from "@flatmate/ui";
@@ -18,39 +19,13 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
   matchScore,
   onSaveToggle,
 }) => {
-  const [isSaved, setIsSaved] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = JSON.parse(localStorage.getItem("flatmate_saved_properties") || "[]");
-        setIsSaved(saved.includes(property.id));
-      } catch {
-        setIsSaved(false);
-      }
-    }
-  }, [property.id]);
+  const saved = useSavedProperties();
+  const isSaved = saved.isSaved(property.id);
 
   const toggleSave = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (typeof window === "undefined") return;
-
-    try {
-      const saved = JSON.parse(localStorage.getItem("flatmate_saved_properties") || "[]");
-      let updated: string[];
-      if (saved.includes(property.id)) {
-        updated = saved.filter((id: string) => id !== property.id);
-        setIsSaved(false);
-      } else {
-        updated = [...saved, property.id];
-        setIsSaved(true);
-      }
-      localStorage.setItem("flatmate_saved_properties", JSON.stringify(updated));
-      onSaveToggle?.(property.id, !isSaved);
-    } catch {
-      // Ignored
-    }
+    onSaveToggle?.(property.id, saved.toggle(property.id));
   };
 
   const thumbnail =
@@ -73,7 +48,6 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
       <Card hoverable className="h-full flex flex-col border border-warm-200 shadow-xs rounded-2xl overflow-hidden bg-white">
         {/* Image Container */}
         <div className="relative aspect-[16/10] w-full overflow-hidden bg-slate-100">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={thumbnail}
             alt={property.title}

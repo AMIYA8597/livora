@@ -3,9 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.modules.users.models import User
-from app.modules.users.schemas import UserResponse
 from app.modules.auth.schemas import (
-    RegisterRequest, LoginRequest, TokenResponse, RefreshTokenRequest,
+    RegisterRequest, LoginRequest, TokenResponse, CurrentUserResponse, RefreshTokenRequest,
     SendOtpRequest, VerifyOtpRequest, ForgotPasswordRequest, ResetPasswordRequest
 )
 from app.modules.auth.service import AuthService
@@ -62,7 +61,7 @@ async def verify_mobile_otp(
     """Confirm the code; on success the number is attached to the caller as verified."""
     return await PhoneVerificationService(db).verify_code(current_user, data.phone_number, data.otp_code)
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me", response_model=CurrentUserResponse)
 async def get_current_user_profile(current_user: User = Depends(get_current_user)):
     return current_user
 

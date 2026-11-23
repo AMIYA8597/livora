@@ -114,3 +114,17 @@ async def test_auth_registration_and_password_recovery(async_client: AsyncClient
     assert signed_resp.status_code == 200
     assert "signed_url" in signed_resp.json()
 
+
+
+@pytest.mark.asyncio
+async def test_me_returns_server_roles(async_client: AsyncClient):
+    """The web app takes roles from /auth/me, never from client storage."""
+    resp = await async_client.post("/api/v1/auth/register", json={
+        "email": f"roles_{uuid4().hex[:8]}@example.in", "password": "Password123!",
+        "full_name": "Roles Tester", "role": "seeker", "additional_roles": ["owner"],
+    })
+    assert resp.status_code == 201, resp.text
+    headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    me = (await async_client.get("/api/v1/auth/me", headers=headers)).json()
+    assert me["role"] == "seeker"
+    assert me["roles"] == ["owner", "seeker"]

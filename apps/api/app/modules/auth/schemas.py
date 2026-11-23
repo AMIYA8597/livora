@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from app.modules.users.schemas import UserResponse
 
 class RegisterRequest(BaseModel):
@@ -21,6 +21,20 @@ class TokenResponse(BaseModel):
     expires_in: int
     user: UserResponse
     roles: List[str]
+
+class CurrentUserResponse(UserResponse):
+    """/auth/me: the user plus every role they hold, so clients never trust stored roles."""
+    roles: List[str] = []
+
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _role_names(cls, v):
+        return [getattr(r, "role", r) for r in (v or [])]
+
+    @model_validator(mode="after")
+    def _include_primary_role(self):
+        self.roles = sorted(set(self.roles) | {self.role})
+        return self
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
