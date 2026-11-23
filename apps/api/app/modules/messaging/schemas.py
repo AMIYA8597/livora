@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List, Dict, Any, Literal
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+
+MAX_MESSAGE_CHARS = 4000
 
 class AttachmentResponse(BaseModel):
     id: uuid.UUID
@@ -47,13 +49,42 @@ class MessageBase(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class SendMessageRequest(MessageBase):
+    """A message sent by a user. Only plain text (optionally with attachments): system,
+    property-card and application-update messages are created by the server, and any metadata
+    (such as safety warnings) is set by the server, never taken from the client."""
+    content: str = Field(default="", max_length=MAX_MESSAGE_CHARS)
+    message_type: Literal["text"] = "text"
     conversation_id: uuid.UUID
-    idempotency_key: Optional[str] = None
+    idempotency_key: Optional[str] = Field(default=None, max_length=64)
     reply_to_message_id: Optional[uuid.UUID] = None
-    attachment_ids: List[uuid.UUID] = Field(default_factory=list)
+    attachment_ids: List[uuid.UUID] = Field(default_factory=list, max_length=10)
+
+    @field_validator("content")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("metadata")
+    @classmethod
+    def _drop_client_metadata(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "SendMessageRequest":
+        if not self.content and not self.attachment_ids:
+            raise ValueError("A message needs text or an attachment")
+        return self
 
 class EditMessageRequest(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+
+    @field_validator("content")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("A message can't be empty")
+        return v
 
 class MessageResponse(MessageBase):
     id: uuid.UUID

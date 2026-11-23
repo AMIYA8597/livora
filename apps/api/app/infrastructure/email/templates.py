@@ -93,12 +93,27 @@ def _appointment_requested(c: Mapping[str, str]) -> RenderedEmail:
     return RenderedEmail(subject, _layout(subject, body), text)
 
 
+def _new_message(c: Mapping[str, str]) -> RenderedEmail:
+    # The message text is deliberately not included: it may hold addresses or phone numbers,
+    # and scam messages shouldn't get a second channel. The recipient reads it in the app.
+    subject = f"New message from {c['raw_sender_name']}"
+    body = (f"<p>Hi {c['name']},</p><p><strong>{c['sender_name']}</strong> sent you a message on Flatmate.</p>"
+            f"{_button(c['conversation_url'], 'Read and reply')}"
+            "<p style=\"font-size:13px;color:#52606d\">Never pay a deposit or token amount before you have "
+            "visited the place in person.</p>")
+    text = (f"Hi {c['raw_name']},\n\n{c['raw_sender_name']} sent you a message on Flatmate.\n"
+            f"Read and reply: {c['raw_conversation_url']}\n\n"
+            "Never pay a deposit or token amount before you have visited the place in person.")
+    return RenderedEmail(subject, _layout(subject, body), text)
+
+
 TEMPLATES: Dict[str, Callable[[Mapping[str, str]], RenderedEmail]] = {
     "password_reset": _password_reset,
     "password_changed": _password_changed,
     "application_received": _application_received,
     "application_status": _application_status,
     "appointment_requested": _appointment_requested,
+    "new_message": _new_message,
 }
 
 

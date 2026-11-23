@@ -1,14 +1,18 @@
+import asyncio
 import json
-from typing import List, Optional
+import logging
+from datetime import datetime, timezone
+from typing import List, Optional, Tuple
 from uuid import UUID
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, Query, UploadFile, File, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.dependencies import get_current_user
 from app.core.security import decode_token
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import AppException, ForbiddenException, NotFoundException
 from app.modules.users.models import User
 from app.modules.messaging.models import Attachment, ConversationParticipant
 from app.modules.messaging.schemas import (
@@ -17,9 +21,11 @@ from app.modules.messaging.schemas import (
     ConversationPreferenceRequest, ConversationPreferenceResponse,
     AddParticipantRequest, AttachmentResponse
 )
-from app.modules.messaging.service import MessagingService
-from app.modules.messaging.websocket import manager
+from app.modules.messaging.service import MessagingService, message_dict
+from app.modules.messaging.websocket import manager, shares_conversation
 from app.modules.storage.service import StorageService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/messaging", tags=["Messaging"])
 
@@ -67,49 +73,15 @@ async def get_messages(
         limit=limit,
         before_id=before_id
     )
-    if messages:
+    # Opening the conversation (the newest page) marks it read. Loading older pages must not.
+    if messages and before_id is None:
         try:
             await service.mark_read(conversation_id, current_user.id, messages[-1].id)
         except Exception:
             pass
 
-    return [
-        {
-            "id": m.id,
-            "conversation_id": m.conversation_id,
-            "sender_id": m.sender_id,
-            "content": m.content if not getattr(m, "is_deleted", False) else "This message was deleted.",
-            "message_type": m.message_type,
-            "idempotency_key": getattr(m, "idempotency_key", None),
-            "reply_to_message_id": getattr(m, "reply_to_message_id", None),
-            "reply_to": {
-                "id": m.reply_to.id,
-                "sender_id": m.reply_to.sender_id,
-                "content": m.reply_to.content if not getattr(m.reply_to, "is_deleted", False) else "This message was deleted.",
-            } if getattr(m, "reply_to", None) else None,
-            "is_edited": getattr(m, "is_edited", False),
-            "edited_at": getattr(m, "edited_at", None),
-            "is_deleted": getattr(m, "is_deleted", False),
-            "deleted_at": getattr(m, "deleted_at", None),
-            "metadata": getattr(m, "metadata_", {}),
-            "is_read": m.is_read,
-            "sent_at": m.sent_at,
-            "attachments": [
-                {
-                    "id": a.id,
-                    "conversation_id": a.conversation_id,
-                    "message_id": a.message_id,
-                    "uploader_id": a.uploader_id,
-                    "file_name": a.file_name,
-                    "file_path": a.file_path,
-                    "mime_type": a.mime_type,
-                    "file_size_bytes": a.file_size_bytes,
-                    "created_at": a.created_at,
-                } for a in getattr(m, "attachments", [])
-            ],
-        }
-        for m in messages
-    ]
+    return [message_dict(m, list(m.attachments), include_reply=True) for m in messages]
+
 
 @router.post("/messages", status_code=status.HTTP_201_CREATED)
 async def send_message(
@@ -119,21 +91,7 @@ async def send_message(
 ):
     service = MessagingService(db)
     msg = await service.send_message(current_user.id, req)
-    return {
-        "id": msg.id,
-        "conversation_id": msg.conversation_id,
-        "sender_id": msg.sender_id,
-        "content": msg.content,
-        "message_type": msg.message_type,
-        "idempotency_key": msg.idempotency_key,
-        "reply_to_message_id": msg.reply_to_message_id,
-        "is_edited": msg.is_edited,
-        "is_deleted": msg.is_deleted,
-        "metadata": msg.metadata_,
-        "is_read": msg.is_read,
-        "sent_at": msg.sent_at,
-        "attachments": [],
-    }
+    return message_dict(msg, await service.attachments_for(msg.id))
 
 @router.patch("/messages/{message_id}")
 async def edit_message(
@@ -300,118 +258,191 @@ async def get_user_presence(
     user_id: UUID,
     current_user: User = Depends(get_current_user),
 ):
-    return manager.get_presence(str(user_id))
+    # Presence is visible only to people who share a conversation with the user.
+    if not await shares_conversation(current_user.id, user_id):
+        raise NotFoundException("User not found")
+    return await manager.presence_of(str(user_id))
 
-@router.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    token: str = Query(...),
-    db: AsyncSession = Depends(get_db)
-):
-    # 1. Authenticate JWT token
+
+WS_AUTH_TIMEOUT_SECONDS = 10
+WS_MAX_FRAME_CHARS = 16_000
+# Application close codes (4000-4999). The client renews its token on 4001 and stops on 4003.
+WS_CLOSE_TOKEN_EXPIRED = 4001
+WS_CLOSE_UNAUTHORIZED = 4003
+
+
+async def authenticate_socket_token(token: object) -> Optional[Tuple[UUID, Optional[datetime]]]:
+    """Validate a socket token exactly like an HTTP request would.
+
+    Only access tokens are accepted (never refresh or reset tokens), and the account must still
+    exist and be active. Returns (user_id, expiry) or None.
+    """
+    if not isinstance(token, str) or not token:
+        return None
     try:
         payload = decode_token(token)
-        user_id_str = payload.get("sub")
-        if not user_id_str:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token subject")
-            return
-        user_id = UUID(user_id_str)
+        if payload.get("type", "access") != "access":
+            return None
+        user_id = UUID(str(payload.get("sub")))
     except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed")
+        return None
+    async with AsyncSessionLocal() as db:
+        is_active = (await db.execute(select(User.is_active).where(User.id == user_id))).scalar_one_or_none()
+    if not is_active:
+        return None
+    exp = payload.get("exp")
+    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if isinstance(exp, (int, float)) else None
+    return user_id, expires_at
+
+
+async def _active_recipients(db: AsyncSession, conversation_id: UUID, user_id: UUID) -> Optional[List[UUID]]:
+    """Other active participants, or None if `user_id` is not an active participant."""
+    rows = (await db.execute(
+        select(ConversationParticipant.user_id).where(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.is_active.is_(True),
+        )
+    )).scalars().all()
+    if user_id not in rows:
+        return None
+    return [uid for uid in rows if uid != user_id]
+
+
+def _envelope(event: str, data: dict, correlation_id: Optional[str] = None) -> str:
+    return json.dumps({
+        "version": "1.0",
+        "event": event,
+        "correlation_id": correlation_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "data": data,
+    })
+
+
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """Realtime channel.
+
+    The client opens the socket and sends `{"event": "auth", "data": {"token": "<access token>"}}`
+    as its first frame. The token is never put in the URL, where proxies and access logs would
+    record it. The socket closes with 4001 when the token expires (the client renews and
+    reconnects) and with 4003 when the token is invalid or the account is disabled.
+    """
+    await websocket.accept()
+    try:
+        first = await asyncio.wait_for(websocket.receive_text(), timeout=WS_AUTH_TIMEOUT_SECONDS)
+        frame = json.loads(first) if len(first) <= WS_MAX_FRAME_CHARS else {}
+        if not isinstance(frame, dict):
+            frame = {}
+    except (asyncio.TimeoutError, WebSocketDisconnect, ValueError):
+        await _close_quietly(websocket, WS_CLOSE_UNAUTHORIZED, "Authentication required")
+        return
+    data = frame.get("data") if isinstance(frame.get("data"), dict) else {}
+    auth = await authenticate_socket_token(data.get("token")) if frame.get("event") == "auth" else None
+    if auth is None:
+        await _close_quietly(websocket, WS_CLOSE_UNAUTHORIZED, "Authentication failed")
+        return
+    user_id, expires_at = auth
+    user_id_str = str(user_id)
+
+    if not await manager.connect(user_id_str, websocket):
         return
 
-    # 2. Accept and connect socket
-    connected = await manager.connect(user_id_str, websocket)
-    if not connected:
-        return
-
-    service = MessagingService(db)
-
+    expiry_task = asyncio.create_task(_close_at_expiry(websocket, expires_at)) if expires_at else None
     try:
         while True:
-            data_str = await websocket.receive_text()
-            try:
-                frame = json.loads(data_str)
-            except Exception:
-                await websocket.send_text(json.dumps({
-                    "version": "1.0",
-                    "event": "error",
-                    "data": {"code": "INVALID_JSON", "message": "Malformed JSON payload"}
-                }))
+            raw = await websocket.receive_text()
+            if len(raw) > WS_MAX_FRAME_CHARS:
+                await websocket.send_text(_envelope("error", {"code": "FRAME_TOO_LARGE", "message": "Message too large"}))
                 continue
-
-            event_type = frame.get("event")
-            correlation_id = frame.get("correlation_id")
-            event_data = frame.get("data", {})
-
-            # 3. Dispatch incoming WebSocket events
-            if event_type == "ping":
-                await websocket.send_text(json.dumps({
-                    "version": "1.0",
-                    "event": "pong",
-                    "correlation_id": correlation_id,
-                    "data": {}
-                }))
-
-            elif event_type in ("typing.started", "typing.stopped"):
-                conv_id_str = event_data.get("conversation_id")
-                if conv_id_str:
-                    try:
-                        conv_id = UUID(conv_id_str)
-                        # Verify membership
-                        part_q = select(ConversationParticipant.user_id).where(
-                            ConversationParticipant.conversation_id == conv_id,
-                            ConversationParticipant.user_id != user_id,
-                            ConversationParticipant.is_active.is_(True)
-                        )
-                        recipients = list((await db.execute(part_q)).scalars().all())
-                        if event_type == "typing.started":
-                            manager.handle_typing_start(conv_id_str, user_id_str, recipients)
-                        else:
-                            manager.handle_typing_stop(conv_id_str, user_id_str, recipients)
-                    except Exception:
-                        pass
-
-            elif event_type == "message.send":
-                try:
-                    conv_id_str = event_data.get("conversation_id")
-                    content = event_data.get("content", "").strip()
-                    idempotency_key = event_data.get("idempotency_key")
-                    reply_to_id = UUID(event_data["reply_to_message_id"]) if event_data.get("reply_to_message_id") else None
-                    att_ids = [UUID(a) for a in event_data.get("attachment_ids", [])]
-
-                    send_req = SendMessageRequest(
-                        conversation_id=UUID(conv_id_str),
-                        content=content,
-                        message_type=event_data.get("message_type", "text"),
-                        idempotency_key=idempotency_key,
-                        reply_to_message_id=reply_to_id,
-                        attachment_ids=att_ids,
-                        metadata=event_data.get("metadata", {})
-                    )
-                    await service.send_message(user_id, send_req)
-                except Exception as err:
-                    await websocket.send_text(json.dumps({
-                        "version": "1.0",
-                        "event": "error",
-                        "correlation_id": correlation_id,
-                        "data": {"code": "SEND_ERROR", "message": str(err)}
-                    }))
-
-            elif event_type == "message.read":
-                try:
-                    conv_id_str = event_data.get("conversation_id")
-                    last_read_id_str = event_data.get("last_read_message_id")
-                    if conv_id_str:
-                        await service.mark_read(
-                            conversation_id=UUID(conv_id_str),
-                            user_id=user_id,
-                            last_read_message_id=UUID(last_read_id_str) if last_read_id_str else None
-                        )
-                except Exception:
-                    pass
-
+            try:
+                frame = json.loads(raw)
+                if not isinstance(frame, dict):
+                    raise ValueError("frame must be an object")
+            except ValueError:
+                await websocket.send_text(_envelope("error", {"code": "INVALID_JSON", "message": "Malformed JSON payload"}))
+                continue
+            await _handle_frame(websocket, user_id, frame)
     except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001 - one bad socket must not crash the worker
+        logger.warning("WebSocket loop ended: %s", type(exc).__name__)
+    finally:
+        if expiry_task:
+            expiry_task.cancel()
         manager.disconnect(user_id_str, websocket)
+
+
+async def _close_quietly(websocket: WebSocket, code: int, reason: str) -> None:
+    try:
+        await websocket.close(code=code, reason=reason)
     except Exception:
-        manager.disconnect(user_id_str, websocket)
+        pass
+
+
+async def _close_at_expiry(websocket: WebSocket, expires_at: datetime) -> None:
+    delay = (expires_at - datetime.now(timezone.utc)).total_seconds()
+    try:
+        await asyncio.sleep(max(delay, 0))
+    except asyncio.CancelledError:
+        return
+    await _close_quietly(websocket, WS_CLOSE_TOKEN_EXPIRED, "Token expired")
+
+
+async def _handle_frame(websocket: WebSocket, user_id: UUID, frame: dict) -> None:
+    """Handle one client frame. Each frame gets its own short database session, so an idle
+    socket never holds a pooled connection."""
+    event_type = frame.get("event")
+    correlation_id = frame.get("correlation_id")
+    data = frame.get("data") if isinstance(frame.get("data"), dict) else {}
+
+    if event_type == "ping":
+        await manager.heartbeat(str(user_id), websocket)
+        await websocket.send_text(_envelope("pong", {}, correlation_id))
+        return
+
+    if event_type in ("typing.started", "typing.stopped"):
+        try:
+            conv_id = UUID(str(data.get("conversation_id")))
+        except ValueError:
+            return
+        async with AsyncSessionLocal() as db:
+            recipients = await _active_recipients(db, conv_id, user_id)
+        if recipients is None:
+            return  # not a member: ignore silently
+        if event_type == "typing.started":
+            manager.handle_typing_start(str(conv_id), str(user_id), recipients)
+        else:
+            manager.handle_typing_stop(str(conv_id), str(user_id), recipients)
+        return
+
+    if event_type == "message.send":
+        try:
+            req = SendMessageRequest(
+                conversation_id=data.get("conversation_id"),
+                content=(data.get("content") or "").strip(),
+                message_type=data.get("message_type", "text"),
+                idempotency_key=data.get("idempotency_key"),
+                reply_to_message_id=data.get("reply_to_message_id"),
+                attachment_ids=data.get("attachment_ids") or [],
+                metadata=data.get("metadata") or {},
+            )
+            async with AsyncSessionLocal() as db:
+                await MessagingService(db).send_message(user_id, req)
+        except AppException as exc:
+            await websocket.send_text(_envelope("error", {"code": "SEND_ERROR", "message": exc.detail}, correlation_id))
+        except ValidationError:
+            await websocket.send_text(_envelope("error", {"code": "SEND_ERROR", "message": "Invalid message"}, correlation_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("WebSocket send failed: %s", type(exc).__name__)
+            await websocket.send_text(_envelope("error", {"code": "SEND_ERROR", "message": "Couldn't send the message"}, correlation_id))
+        return
+
+    if event_type == "message.read":
+        try:
+            conv_id = UUID(str(data.get("conversation_id")))
+            last_id = UUID(str(data["last_read_message_id"])) if data.get("last_read_message_id") else None
+            async with AsyncSessionLocal() as db:
+                await MessagingService(db).mark_read(conv_id, user_id, last_id)
+        except (ValueError, AppException):
+            pass
+        return

@@ -45,14 +45,25 @@ async def _handle_email(payload: Dict[str, Any]) -> Dict[str, Any]:
     await deliver_templated_email(
         payload["to"], payload["template"], payload.get("context") or {}, payload.get("idempotency_key")
     )
-    # Scrub: the context can hold single-use reset links and personal details.
-    return {"template": payload["template"], "scrubbed": True}
+    # Scrub: the context can hold single-use reset links and personal details. Keep only the
+    # throttle key, which later sends check to avoid emailing the same person too often.
+    scrubbed: Dict[str, Any] = {"template": payload["template"], "scrubbed": True}
+    if payload.get("throttle_key"):
+        scrubbed["throttle_key"] = payload["throttle_key"]
+    return scrubbed
 
 
 async def _handle_message_created(payload: Dict[str, Any]) -> Dict[str, Any]:
-    # Live delivery already happened over WebSocket during the request. This is the hook for
-    # offline push/email notifications (launch gap item 9). Drop the message text from the copy.
-    return {k: payload.get(k) for k in ("id", "conversation_id", "sender_id", "sent_at")}
+    # Live delivery already happened over WebSocket during the request. This event is scheduled
+    # CHAT_UNREAD_EMAIL_DELAY_MINUTES later: recipients who still haven't read the message get
+    # an email. Imported here to avoid an import cycle (notifications -> outbox).
+    from app.core.database import AsyncSessionLocal
+    from app.modules.notifications.emails import queue_unread_message_emails
+
+    async with AsyncSessionLocal() as db:
+        queued = await queue_unread_message_emails(db, payload)
+    kept = {k: payload.get(k) for k in ("id", "conversation_id", "sender_id", "sent_at")}
+    return {**kept, "emails_queued": queued}
 
 
 HANDLERS: Dict[str, Handler] = {

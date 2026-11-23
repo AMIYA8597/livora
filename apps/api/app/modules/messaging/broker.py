@@ -53,6 +53,11 @@ class DistributedEventBroker:
             self._redis_client = None
         self._is_redis_connected = False
 
+    @property
+    def redis(self) -> Optional[aioredis.Redis]:
+        """The shared Redis client, or None when running standalone."""
+        return self._redis_client if self._is_redis_connected else None
+
     def register_local_listener(self, listener) -> None:
         """Register the local ConnectionManager to receive events from the broker."""
         self._local_listeners.add(listener)

@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # Public web origin used to build links in emails (reset password, dashboards)
     WEB_BASE_URL: str = "http://localhost:3000"
     PASSWORD_RESET_EXPIRE_MINUTES: int = 15
+    # Chat: email a recipient who hasn't read a message after this long, at most once per
+    # conversation per throttle window.
+    CHAT_UNREAD_EMAIL_DELAY_MINUTES: int = 10
+    CHAT_EMAIL_THROTTLE_MINUTES: int = 60
 
     # Physical storage bucket names (logical names in the API stay fixed; see storage_buckets.py)
     STORAGE_BUCKET_PROPERTIES: str = "properties"

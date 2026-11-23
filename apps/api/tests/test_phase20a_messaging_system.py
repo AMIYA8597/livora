@@ -312,28 +312,7 @@ async def test_group_participant_management_and_access_revocation():
     assert mock_target_part.is_active is False
     assert mock_target_part.left_at is not None
 
-@pytest.mark.asyncio
-async def test_read_cursor_update():
-    """Updating read cursor moves user pointer and broadcasts message.read."""
-    user_id = uuid.uuid4()
-    conv_id = uuid.uuid4()
-    msg_id = uuid.uuid4()
-
-    mock_db = AsyncMock()
-    service = MessagingService(mock_db)
-
-    # Cursor does not exist yet -> creates new cursor
-    mock_cursor_res = MagicMock()
-    mock_cursor_res.scalar_one_or_none.return_value = None
-
-    other_user = uuid.uuid4()
-    mock_recips = MagicMock()
-    mock_recips.scalars.return_value.all.return_value = [other_user]
-
-    mock_db.execute.side_effect = [mock_cursor_res, mock_recips]
-
-    await service.mark_read(conv_id, user_id, msg_id)
-    assert mock_db.commit.called
+# Read-cursor rules are covered against a real database in test_chat_realtime_db.py.
 
 @pytest.mark.asyncio
 async def test_websocket_connection_lifecycle_and_presence():

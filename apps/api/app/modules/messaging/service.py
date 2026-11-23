@@ -3,9 +3,9 @@ Production-Grade Messaging and Communication Service.
 Handles conversation lifecycle, message durability, idempotency, read cursors,
 group permissions, moderation blocking, attachments, and real-time dispatch.
 """
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func, update
 from sqlalchemy.orm import selectinload
@@ -21,7 +21,92 @@ from app.modules.messaging.schemas import (
 from app.modules.messaging.websocket import manager
 from app.modules.moderation.models import UserBlock
 from app.modules.notifications.service import NotificationService
+from app.core.config import settings
 from app.core.exceptions import ForbiddenException, NotFoundException, BadRequestException
+
+DELETED_TEXT = "This message was deleted."
+
+
+def attachment_dict(a: Attachment) -> Dict[str, Any]:
+    return {
+        "id": a.id,
+        "conversation_id": a.conversation_id,
+        "message_id": a.message_id,
+        "uploader_id": a.uploader_id,
+        "file_name": a.file_name,
+        "file_path": a.file_path,
+        "mime_type": a.mime_type,
+        "file_size_bytes": a.file_size_bytes,
+        "created_at": a.created_at,
+    }
+
+
+def message_dict(m: Message, attachments: Optional[List[Attachment]] = None, include_reply: bool = False) -> Dict[str, Any]:
+    """One message as the API returns it. Deleted messages never expose their text."""
+    reply = getattr(m, "reply_to", None) if include_reply else None
+    return {
+        "id": m.id,
+        "conversation_id": m.conversation_id,
+        "sender_id": m.sender_id,
+        "content": DELETED_TEXT if m.is_deleted else m.content,
+        "message_type": m.message_type,
+        "idempotency_key": m.idempotency_key,
+        "reply_to_message_id": m.reply_to_message_id,
+        "reply_to": {
+            "id": reply.id,
+            "sender_id": reply.sender_id,
+            "content": DELETED_TEXT if reply.is_deleted else reply.content,
+        } if reply else None,
+        "is_edited": m.is_edited,
+        "edited_at": m.edited_at,
+        "is_deleted": m.is_deleted,
+        "deleted_at": m.deleted_at,
+        "metadata": m.metadata_ or {},
+        "is_read": m.is_read,
+        "sent_at": m.sent_at,
+        "attachments": [attachment_dict(a) for a in (attachments if attachments is not None else [])],
+    }
+
+
+def jsonable(value: Any) -> Any:
+    """UUIDs and datetimes to strings, for realtime payloads."""
+    if isinstance(value, dict):
+        return {k: jsonable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [jsonable(v) for v in value]
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def is_muted(pref: Optional[ConversationPreference], now: Optional[datetime] = None) -> bool:
+    if pref is None or not pref.is_muted:
+        return False
+    if pref.muted_until is None:
+        return True
+    return pref.muted_until > (now or datetime.now(timezone.utc))
+
+
+def _participant_dict(p: ConversationParticipant) -> Dict[str, Any]:
+    return {
+        "id": p.id,
+        "conversation_id": p.conversation_id,
+        "user_id": p.user_id,
+        "role": p.role,
+        "joined_at": p.joined_at,
+        "left_at": p.left_at,
+        "is_active": p.is_active,
+        "user": {
+            "id": p.user.id,
+            "full_name": getattr(p.user, "full_name", "User"),
+            "avatar_url": getattr(p.user, "avatar_url", None),
+            "is_verified": getattr(p.user, "is_verified", False),
+            "role": getattr(p.user, "role", "user"),
+        } if p.user else None,
+    }
+
 
 class MessagingService:
     def __init__(self, db: AsyncSession):
@@ -44,13 +129,16 @@ class MessagingService:
         status_filter: Optional[str] = None,
         search_query: Optional[str] = None
     ) -> List[dict]:
-        """Fetch all conversations where user is an active participant."""
-        # Find active conversation IDs for user
-        subq = (
+        """Conversations where the user is an active participant, newest first.
+
+        The last message and unread count are computed in SQL. (This used to load every
+        message of every conversation into memory just to find the latest one.)
+        """
+        my_convs = (
             select(ConversationParticipant.conversation_id)
             .where(
                 ConversationParticipant.user_id == user_id,
-                ConversationParticipant.is_active.is_(True)
+                ConversationParticipant.is_active.is_(True),
             )
         )
 
@@ -58,67 +146,63 @@ class MessagingService:
             select(Conversation)
             .options(
                 selectinload(Conversation.participants).selectinload(ConversationParticipant.user),
-                selectinload(Conversation.messages).selectinload(Message.attachments),
                 selectinload(Conversation.preferences),
-                selectinload(Conversation.read_cursors),
             )
-            .where(Conversation.id.in_(subq))
+            .where(Conversation.id.in_(my_convs))
         )
-
         if status_filter:
             query = query.where(Conversation.status == status_filter)
-
         query = query.order_by(Conversation.last_message_at.desc())
-        result = await self.db.execute(query)
-        convs = result.scalars().all()
+        convs = (await self.db.execute(query)).scalars().all()
+        if not convs:
+            return []
+        conv_ids = [c.id for c in convs]
+
+        # Latest message per conversation, preferring one that isn't deleted (DISTINCT ON).
+        last_q = (
+            select(Message)
+            .options(selectinload(Message.attachments))
+            .where(Message.conversation_id.in_(conv_ids))
+            .distinct(Message.conversation_id)
+            .order_by(Message.conversation_id, Message.is_deleted.asc(), Message.sent_at.desc(), Message.id.desc())
+        )
+        last_by_conv = {m.conversation_id: m for m in (await self.db.execute(last_q)).scalars().all()}
+
+        # Unread = messages from others, not deleted, sent after the user's read cursor.
+        cursor = (
+            select(ConversationReadCursor.conversation_id, ConversationReadCursor.last_read_at)
+            .where(ConversationReadCursor.user_id == user_id)
+            .subquery()
+        )
+        unread_q = (
+            select(Message.conversation_id, func.count(Message.id))
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .outerjoin(cursor, cursor.c.conversation_id == Message.conversation_id)
+            .where(
+                Message.conversation_id.in_(conv_ids),
+                Message.sender_id != user_id,
+                Message.is_deleted.is_(False),
+                Message.sent_at > func.coalesce(cursor.c.last_read_at, Conversation.created_at),
+            )
+            .group_by(Message.conversation_id)
+        )
+        unread_by_conv = dict((await self.db.execute(unread_q)).all())
 
         formatted = []
+        sq = search_query.lower() if search_query else None
         for c in convs:
-            # Participant details
-            p_details = []
-            p_ids = []
-            for p in c.participants:
-                if p.is_active:
-                    p_ids.append(p.user_id)
-                    p_details.append({
-                        "id": p.id,
-                        "conversation_id": p.conversation_id,
-                        "user_id": p.user_id,
-                        "role": p.role,
-                        "joined_at": p.joined_at,
-                        "left_at": p.left_at,
-                        "is_active": p.is_active,
-                        "user": {
-                            "id": p.user.id,
-                            "full_name": getattr(p.user, "full_name", "User"),
-                            "avatar_url": getattr(p.user, "avatar_url", None),
-                            "is_verified": getattr(p.user, "is_verified", False),
-                            "role": getattr(p.user, "role", "user"),
-                        } if p.user else None
-                    })
-
-            # Last non-deleted message
-            active_messages = [m for m in c.messages if not m.is_deleted]
-            last_msg = active_messages[-1] if active_messages else (c.messages[-1] if c.messages else None)
-
-            # Read cursor & unread count
-            user_cursor = next((rc for rc in c.read_cursors if rc.user_id == user_id), None)
-            last_read_at = user_cursor.last_read_at if user_cursor else c.created_at
-
-            unread_count = sum(
-                1 for m in c.messages
-                if m.sent_at > last_read_at and m.sender_id != user_id and not m.is_deleted
-            )
-
-            # User preference
+            p_details = [_participant_dict(p) for p in c.participants if p.is_active]
+            last_msg = last_by_conv.get(c.id)
             pref = next((p for p in c.preferences if p.user_id == user_id), None)
 
-            # Optional search filtering
-            if search_query:
-                sq = search_query.lower()
+            if sq:
                 matches_title = c.title and sq in c.title.lower()
-                matches_msg = last_msg and sq in last_msg.content.lower()
-                if not (matches_title or matches_msg):
+                matches_msg = last_msg and not last_msg.is_deleted and sq in last_msg.content.lower()
+                matches_name = any(
+                    d["user"] and sq in (d["user"]["full_name"] or "").lower()
+                    for d in p_details if d["user_id"] != user_id
+                )
+                if not (matches_title or matches_msg or matches_name):
                     continue
 
             formatted.append({
@@ -131,39 +215,15 @@ class MessagingService:
                 "flatmate_match_id": c.flatmate_match_id,
                 "status": c.status,
                 "context_metadata": c.context_metadata or {},
-                "participants": p_ids,
+                "participants": [d["user_id"] for d in p_details],
                 "participant_details": p_details,
-                "last_message": {
-                    "id": last_msg.id,
-                    "conversation_id": last_msg.conversation_id,
-                    "sender_id": last_msg.sender_id,
-                    "content": last_msg.content if not last_msg.is_deleted else "This message was deleted.",
-                    "message_type": last_msg.message_type,
-                    "metadata": last_msg.metadata_,
-                    "is_read": last_msg.is_read,
-                    "is_edited": last_msg.is_edited,
-                    "is_deleted": last_msg.is_deleted,
-                    "sent_at": last_msg.sent_at,
-                    "attachments": [
-                        {
-                            "id": a.id,
-                            "conversation_id": a.conversation_id,
-                            "message_id": a.message_id,
-                            "uploader_id": a.uploader_id,
-                            "file_name": a.file_name,
-                            "file_path": a.file_path,
-                            "mime_type": a.mime_type,
-                            "file_size_bytes": a.file_size_bytes,
-                            "created_at": a.created_at,
-                        } for a in getattr(last_msg, "attachments", [])
-                    ]
-                } if last_msg else None,
-                "unread_count": unread_count,
+                "last_message": message_dict(last_msg, last_msg.attachments) if last_msg else None,
+                "unread_count": int(unread_by_conv.get(c.id, 0)),
                 "preferences": {
                     "conversation_id": c.id,
-                    "is_muted": pref.is_muted if pref else False,
-                    "muted_until": pref.muted_until if pref else None,
-                    "is_archived": pref.is_archived if pref else False,
+                    "is_muted": pref.is_muted,
+                    "muted_until": pref.muted_until,
+                    "is_archived": pref.is_archived,
                 } if pref else None,
                 "created_at": c.created_at,
                 "last_message_at": c.last_message_at,
@@ -191,23 +251,17 @@ class MessagingService:
         if not user_part:
             raise ForbiddenException("You are not an active participant in this conversation")
 
-        p_details = [
+        p_details = [_participant_dict(p) for p in conv.participants if p.is_active]
+        active_ids = {p.user_id for p in conv.participants if p.is_active}
+        # Where everyone else has read up to, so the client can show read receipts.
+        read_cursors = [
             {
-                "id": p.id,
-                "conversation_id": p.conversation_id,
-                "user_id": p.user_id,
-                "role": p.role,
-                "joined_at": p.joined_at,
-                "left_at": p.left_at,
-                "is_active": p.is_active,
-                "user": {
-                    "id": p.user.id,
-                    "full_name": getattr(p.user, "full_name", "User"),
-                    "avatar_url": getattr(p.user, "avatar_url", None),
-                    "is_verified": getattr(p.user, "is_verified", False),
-                    "role": getattr(p.user, "role", "user"),
-                } if p.user else None
-            } for p in conv.participants if p.is_active
+                "user_id": rc.user_id,
+                "last_read_message_id": rc.last_read_message_id,
+                "last_read_at": rc.last_read_at,
+            }
+            for rc in conv.read_cursors
+            if rc.user_id != user_id and rc.user_id in active_ids
         ]
 
         pref = next((p for p in conv.preferences if p.user_id == user_id), None)
@@ -224,6 +278,7 @@ class MessagingService:
             "context_metadata": conv.context_metadata or {},
             "participants": [p["user_id"] for p in p_details],
             "participant_details": p_details,
+            "read_cursors": read_cursors,
             "preferences": {
                 "conversation_id": conv.id,
                 "is_muted": pref.is_muted if pref else False,
@@ -343,6 +398,11 @@ class MessagingService:
         )
 
         return conv
+
+    async def attachments_for(self, message_id: UUID) -> List[Attachment]:
+        return list((await self.db.execute(
+            select(Attachment).where(Attachment.message_id == message_id).order_by(Attachment.created_at)
+        )).scalars().all())
 
     async def get_messages(
         self,
@@ -492,51 +552,50 @@ class MessagingService:
                 last_read_at=now_dt,
             ))
 
-        # Add outbox event for at-least-once distributed delivery
-        outbox = OutboxEvent(
+        # Outbox event, processed after a delay: recipients who still haven't read the message
+        # by then get an email (see workers/outbox.py). No message text is stored here.
+        self.db.add(OutboxEvent(
             event_type="message.created",
             payload={
                 "id": str(msg.id),
                 "conversation_id": str(msg.conversation_id),
                 "sender_id": str(msg.sender_id),
-                "content": msg.content,
-                "message_type": msg.message_type,
-                "idempotency_key": msg.idempotency_key,
-                "reply_to_message_id": str(msg.reply_to_message_id) if msg.reply_to_message_id else None,
+                "recipient_ids": [str(r) for r in recipient_ids],
                 "sent_at": msg.sent_at.isoformat(),
             },
-            status="pending"
-        )
-        self.db.add(outbox)
+            status="pending",
+            next_attempt_at=now_dt + timedelta(minutes=settings.CHAT_UNREAD_EMAIL_DELAY_MINUTES),
+        ))
 
         await self.db.commit()
         await self.db.refresh(msg)
 
-        # 8. Real-time broadcast to participants via WebSocket manager
-        event_payload = {
-            "id": str(msg.id),
-            "conversation_id": str(msg.conversation_id),
-            "sender_id": str(msg.sender_id),
-            "content": msg.content,
-            "message_type": msg.message_type,
-            "idempotency_key": msg.idempotency_key,
-            "reply_to_message_id": str(msg.reply_to_message_id) if msg.reply_to_message_id else None,
-            "sent_at": msg.sent_at.isoformat(),
-            "status": "sent",
-        }
+        # 8. Real-time broadcast to participants, including any attachments.
+        attachments = await self.attachments_for(msg.id)
+        event_payload = jsonable({**message_dict(msg, attachments), "status": "sent"})
         await manager.broadcast_to_users(
             event_type="message.created",
             data=event_payload,
             user_ids=[sender_id] + recipient_ids
         )
 
-        # 9. Deliver in-app notification to offline or unmuted recipients
+        # 9. In-app notification for recipients who haven't muted the conversation.
+        prefs = {
+            p.user_id: p for p in (await self.db.execute(
+                select(ConversationPreference).where(
+                    ConversationPreference.conversation_id == conv.id,
+                    ConversationPreference.user_id.in_(recipient_ids),
+                )
+            )).scalars().all()
+        } if recipient_ids else {}
         notif_service = NotificationService(self.db)
         for r_id in recipient_ids:
+            if is_muted(prefs.get(r_id), now_dt):
+                continue
             try:
                 await notif_service.create_notification(
                     user_id=r_id,
-                    title="New Message",
+                    title="New message",
                     body=req.content[:100],
                     notification_type="new_message",
                     reference_id=conv.id
@@ -626,42 +685,67 @@ class MessagingService:
         return msg
 
     async def mark_read(self, conversation_id: UUID, user_id: UUID, last_read_message_id: Optional[UUID] = None) -> None:
-        """Update read cursor for user and broadcast message.read."""
-        cursor_q = select(ConversationReadCursor).where(
-            ConversationReadCursor.conversation_id == conversation_id,
-            ConversationReadCursor.user_id == user_id,
-        )
-        cursor = (await self.db.execute(cursor_q)).scalar_one_or_none()
+        """Move the user's read cursor forward and tell the other participants.
+
+        Only active participants can mark a conversation read, the message must belong to it,
+        and the cursor never moves backwards (e.g. when an older page is loaded).
+        """
+        rows = (await self.db.execute(
+            select(ConversationParticipant.user_id).where(
+                ConversationParticipant.conversation_id == conversation_id,
+                ConversationParticipant.is_active.is_(True),
+            )
+        )).scalars().all()
+        if user_id not in rows:
+            raise ForbiddenException("You are not a participant in this conversation")
+        recipients = [uid for uid in rows if uid != user_id]
+
+        target_sent_at = None
+        if last_read_message_id is not None:
+            target_sent_at = (await self.db.execute(
+                select(Message.sent_at).where(
+                    Message.id == last_read_message_id,
+                    Message.conversation_id == conversation_id,
+                )
+            )).scalar_one_or_none()
+            if target_sent_at is None:
+                raise NotFoundException("Message not found in this conversation")
+
+        cursor = (await self.db.execute(
+            select(ConversationReadCursor).where(
+                ConversationReadCursor.conversation_id == conversation_id,
+                ConversationReadCursor.user_id == user_id,
+            )
+        )).scalar_one_or_none()
         now_dt = datetime.now(timezone.utc)
 
-        if cursor:
-            cursor.last_read_message_id = last_read_message_id
-            cursor.last_read_at = now_dt
-        else:
+        if cursor is None:
             cursor = ConversationReadCursor(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 last_read_message_id=last_read_message_id,
-                last_read_at=now_dt
+                last_read_at=now_dt,
             )
             self.db.add(cursor)
+        else:
+            if cursor.last_read_message_id and target_sent_at is not None:
+                current_sent_at = (await self.db.execute(
+                    select(Message.sent_at).where(Message.id == cursor.last_read_message_id)
+                )).scalar_one_or_none()
+                if current_sent_at is not None and target_sent_at < current_sent_at:
+                    return  # already read further than this
+            if last_read_message_id is not None:
+                cursor.last_read_message_id = last_read_message_id
+            cursor.last_read_at = now_dt
 
         await self.db.commit()
-
-        # Broadcast message.read to other conversation members
-        parts_q = select(ConversationParticipant.user_id).where(
-            ConversationParticipant.conversation_id == conversation_id,
-            ConversationParticipant.user_id != user_id,
-            ConversationParticipant.is_active.is_(True)
-        )
-        recipients = list((await self.db.execute(parts_q)).scalars().all())
 
         await manager.broadcast_to_users(
             event_type="message.read",
             data={
                 "conversation_id": str(conversation_id),
                 "user_id": str(user_id),
-                "last_read_message_id": str(last_read_message_id) if last_read_message_id else None,
+                "last_read_message_id": str(cursor.last_read_message_id) if cursor.last_read_message_id else None,
                 "read_at": now_dt.isoformat(),
             },
             user_ids=recipients
