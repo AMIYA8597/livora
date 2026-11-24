@@ -53,6 +53,23 @@ def test_restore_skips_creating_schemas_the_target_already_has():
     assert "220; 1259 16390 TABLE public users postgres" in out
 
 
+
+def test_restore_skips_default_privileges_for_roles_it_cant_act_for():
+    toc = "\n".join([
+        "220; 1259 16390 TABLE public users postgres",
+        "7001; 826 16500 DEFAULT ACL public DEFAULT PRIVILEGES FOR TABLES supabase_admin",
+        "7002; 826 16501 DEFAULT ACL - DEFAULT PRIVILEGES FOR SEQUENCES supabase_admin",
+        "7003; 826 16502 DEFAULT ACL public DEFAULT PRIVILEGES FOR TABLES postgres",
+    ])
+    assert db_backup.default_acl_roles(toc) == {"supabase_admin", "postgres"}
+    out = db_backup.restore_list(toc, set(), frozenset({"supabase_admin"})).splitlines()
+    assert ";7001; 826 16500 DEFAULT ACL public DEFAULT PRIVILEGES FOR TABLES supabase_admin" in out
+    assert ";7002; 826 16501 DEFAULT ACL - DEFAULT PRIVILEGES FOR SEQUENCES supabase_admin" in out
+    assert "7003; 826 16502 DEFAULT ACL public DEFAULT PRIVILEGES FOR TABLES postgres" in out  # ours: kept
+    assert "220; 1259 16390 TABLE public users postgres" in out
+    # Nothing to skip: unchanged.
+    assert db_backup.restore_list(toc, set()).splitlines() == toc.splitlines()
+
 def test_compare_reports_every_kind_of_mismatch():
     manifest = {
         "alembic_revision": "014",
@@ -182,3 +199,54 @@ def test_supabase_layout_extensions_in_their_own_schema_restore(tmp_path):
     finally:
         for name in (source, target):
             asyncio.run(run(admin_url, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+
+
+def test_restoring_as_a_non_superuser_skips_other_roles_default_privileges(tmp_path):
+    """Hosted Supabase restores as `postgres`, which isn't a superuser or a member of
+    supabase_admin; the dump's default privileges for supabase_admin can't be replayed there."""
+    _tools_or_skip()
+    base, _, _ = TEST_DATABASE_URL.rpartition("/")
+    plain = base.replace("+asyncpg", "")
+    admin_url = plain + "/postgres"
+    tag = uuid.uuid4().hex[:8]
+    source, target = f"flatmate_restore_src_{tag}", f"flatmate_restore_dst_{tag}"
+    platform_role, restorer = f"l12_platform_{tag}", f"l12_restorer_{tag}"
+    password = uuid.uuid4().hex
+
+    async def run(url: str, sql: str) -> None:
+        conn = await asyncpg.connect(url)
+        try:
+            await conn.execute(sql)
+        finally:
+            await conn.close()
+
+    asyncio.run(run(admin_url, f'CREATE ROLE "{platform_role}" NOLOGIN'))
+    asyncio.run(run(admin_url, f"CREATE ROLE \"{restorer}\" LOGIN PASSWORD '{password}'"))
+    asyncio.run(run(admin_url, f'CREATE DATABASE "{source}"'))
+    asyncio.run(run(admin_url, f'CREATE DATABASE "{target}" OWNER "{restorer}"'))
+    try:
+        asyncio.run(run(f"{plain}/{source}", f"""
+            CREATE TABLE public.listings (id serial PRIMARY KEY, title text NOT NULL);
+            INSERT INTO public.listings (title) SELECT 'Room ' || g FROM generate_series(1, 5) g;
+            ALTER DEFAULT PRIVILEGES FOR ROLE "{platform_role}" IN SCHEMA public GRANT SELECT ON TABLES TO PUBLIC;
+            ALTER DEFAULT PRIVILEGES FOR ROLE "{platform_role}" GRANT USAGE ON SEQUENCES TO PUBLIC;
+        """))
+        dump, _ = asyncio.run(db_backup.backup(f"{base}/{source}", tmp_path, ["public"], "acl"))
+        host = base.split("@", 1)[1]
+        target_url = f"postgresql+asyncpg://{restorer}:{password}@{host}/{target}"
+        result = asyncio.run(db_backup.restore(dump, target_url, target))
+        assert result["ok"], result["problems"]
+        assert result["rows"] == 5
+        assert result["skipped_default_privileges_for"] == [platform_role]
+
+        # As a superuser nothing is skipped and the defaults come across.
+        dump2, _ = asyncio.run(db_backup.backup(f"{base}/{source}", tmp_path, ["public"], "acl2"))
+        asyncio.run(run(admin_url, f'DROP DATABASE "{target}" WITH (FORCE)'))
+        asyncio.run(run(admin_url, f'CREATE DATABASE "{target}"'))
+        result = asyncio.run(db_backup.restore(dump2, f"{base}/{target}", target))
+        assert result["ok"] and result["skipped_default_privileges_for"] == []
+    finally:
+        for name in (source, target):
+            asyncio.run(run(admin_url, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        asyncio.run(run(admin_url, f'DROP ROLE IF EXISTS "{restorer}"'))
+        asyncio.run(run(admin_url, f'DROP ROLE IF EXISTS "{platform_role}"'))

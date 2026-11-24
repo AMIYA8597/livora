@@ -346,18 +346,32 @@ def compare(manifest: Dict[str, Any], revision: Optional[str], counts: Dict[str,
 
 
 _SCHEMA_ENTRY = re.compile(r"^\d+; \d+ \d+ (?:SCHEMA - |COMMENT - SCHEMA )(\S+) ")
+# "1234; 826 16500 DEFAULT ACL public DEFAULT PRIVILEGES FOR TABLES supabase_admin": the last
+# word is the role whose future objects the defaults apply to (ALTER DEFAULT PRIVILEGES FOR ROLE).
+_DEFAULT_ACL_ENTRY = re.compile(r"^\d+; \d+ \d+ DEFAULT ACL \S+ DEFAULT PRIVILEGES FOR \S+ (\S+)\s*$")
 
 
-def restore_list(toc: str, existing_schemas: set) -> str:
+def default_acl_roles(toc: str) -> set:
+    """Roles the dump sets default privileges for."""
+    return {m.group(1) for m in map(_DEFAULT_ACL_ENTRY.match, toc.splitlines()) if m}
+
+
+def restore_list(toc: str, existing_schemas: set, skip_default_acl_for: frozenset = frozenset()) -> str:
     """
-    pg_restore's table of contents with the CREATE SCHEMA (and COMMENT ON SCHEMA) entries for
-    schemas the target already has commented out. pg_dump --schema=public emits
-    CREATE SCHEMA public, which fails on every real database; the schema's grants are kept.
+    pg_restore's table of contents, with entries that can't be replayed commented out:
+    - CREATE SCHEMA (and COMMENT ON SCHEMA) for schemas the target already has. pg_dump
+      --schema=public emits CREATE SCHEMA public, which fails on every real database; the
+      schema's grants are kept.
+    - Default privileges set for roles in `skip_default_acl_for`: only a member of a role may
+      change its defaults, and on hosted Supabase the restoring `postgres` user isn't a member of
+      supabase_admin. The platform sets those itself; they aren't app data.
     """
     lines = []
     for line in toc.splitlines():
-        match = _SCHEMA_ENTRY.match(line)
-        lines.append(f";{line}" if match and match.group(1) in existing_schemas else line)
+        schema = _SCHEMA_ENTRY.match(line)
+        acl = _DEFAULT_ACL_ENTRY.match(line)
+        skip = (schema and schema.group(1) in existing_schemas) or (acl and acl.group(1) in skip_default_acl_for)
+        lines.append(f";{line}" if skip else line)
     return "\n".join(lines) + "\n"
 
 
@@ -386,6 +400,16 @@ async def restore(dump: Path, target_url: str, confirm_database: str,
                 "restore into a new, empty database"
             )
         existing_schemas = {r["nspname"] for r in await conn.fetch("SELECT nspname FROM pg_namespace")}
+        pg_restore = tool("pg_restore")
+        toc = subprocess.run([pg_restore, "--list", str(dump)], capture_output=True, text=True, check=True).stdout
+        # Default privileges can only be replayed for roles this user may act for (itself, roles
+        # it is a member of, or any role as superuser). The rest are skipped and reported.
+        skipped_default_acls = sorted([
+            role for role in default_acl_roles(toc)
+            if not await conn.fetchval(
+                "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) "
+                "THEN pg_has_role(current_user, $1, 'MEMBER') ELSE false END", role)
+        ])
         for role in manifest.get("roles", []):
             if not await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", role):
                 await conn.execute(f"CREATE ROLE {_ident(role)} NOLOGIN")
@@ -397,10 +421,8 @@ async def restore(dump: Path, target_url: str, confirm_database: str,
     finally:
         await conn.close()
 
-    pg_restore = tool("pg_restore")
-    toc = subprocess.run([pg_restore, "--list", str(dump)], capture_output=True, text=True, check=True).stdout
     list_file = dump.with_name(dump.name + ".restore-list")
-    list_file.write_text(restore_list(toc, existing_schemas), encoding="utf-8")
+    list_file.write_text(restore_list(toc, existing_schemas, frozenset(skipped_default_acls)), encoding="utf-8")
     try:
         cmd = [pg_restore, f"--dbname={info.libpq_url}", "--no-owner", "--exit-on-error",
                "--single-transaction", f"--use-list={list_file}", str(dump)]
@@ -424,6 +446,7 @@ async def restore(dump: Path, target_url: str, confirm_database: str,
         "rows": sum(counts.values()),
         "rls_tables": len(security["rls_tables"]),
         "policies": security["policies"],
+        "skipped_default_privileges_for": skipped_default_acls,
     }
 
 
@@ -460,6 +483,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         result = asyncio.run(restore(args.dump, args.target_url, args.confirm_database, args.manifest))
         print(f"restore: {result['tables']} tables, {result['rows']} rows, revision {result['alembic_revision']}, "
               f"RLS on {result['rls_tables']} tables with {result['policies']} policies")
+        if result["skipped_default_privileges_for"]:
+            print("skipped default privileges for (not a member of): "
+                  + ", ".join(result["skipped_default_privileges_for"]))
         for problem in result["problems"]:
             print(f"MISMATCH: {problem}", file=sys.stderr)
         print("restore check: " + ("OK" if result["ok"] else "FAILED"))

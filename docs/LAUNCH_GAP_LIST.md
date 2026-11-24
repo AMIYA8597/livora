@@ -148,8 +148,43 @@ Gathered from the open items below and every item's "Not covered" notes.
         loads it and the event is sent. The client runs with `traceLifecycle: "static"` and
         without replay or feedback. Tests: `tests/deferred_errors.test.ts` and
         `tests/sentry-scrub.test.ts`.
-- [ ] **L12. Restoring a backup into hosted Supabase:** skip default-privilege entries for roles
+- [x] **L12. Restoring a backup into hosted Supabase:** skip default-privilege entries for roles
       the restoring user can't act for.
+      *Done:* `scripts/db_backup.py restore` reads the dump's `ALTER DEFAULT PRIVILEGES`
+      entries and keeps only those for roles the restoring user can act for (itself, roles
+      it's a member of, or any role as superuser). The others, like `supabase_admin` on
+      hosted Supabase, are left out and listed in the output ("skipped default privileges
+      for"). Without this the single-transaction restore stopped at "permission denied to
+      change default privileges". Supabase sets its own defaults; they aren't app data.
+      `tests/test_db_backup.py` restores as a non-superuser into a throwaway database (and
+      as a superuser, which skips nothing). It fails without the fix. The end-to-end backup
+      tests need `PG_BIN` pointing at PostgreSQL 18's `bin` folder on this machine.
+
+### Next phase: India-wide, smarter search, app-ready (collected 2026-11-24)
+Asked for after L1-L12: every state's capital, current location, smarter room finding, chat where
+it helps, clear layers, and later Android/iOS apps. Same workflow: one at a time, tested, then
+committed on your OK.
+- [ ] **P1. Every state and union territory capital.** The `countries`/`states`/`cities` tables
+      exist but nothing uses them; the web hardcodes six cities. Seed 28 states + 8 UTs and their
+      capitals (keeping Pune and the current metros), serve them from `GET /locations/...`, and
+      use that list in listing creation, search and profiles instead of the hardcoded one.
+- [ ] **P2. Current location and real addresses.** "Near me" from the browser's location (asked,
+      never stored), nearest supported city, radius search (PostGIS is ready), and geocoding a
+      listing's address instead of using the city centre. *Needs your choice of map provider.*
+- [ ] **P3. Room-finding ranking.** Rank listings per person: relevance, distance, budget fit,
+      move-in date, verified owner, photo/description quality, freshness, owner response rate,
+      and what the person saved, viewed or applied to; spam and duplicate listings pushed down.
+      Starts as a weighted score, then learns from real behaviour like the flatmate ranker does.
+- [ ] **P4. Ask-before-applying chat.** A "Ask the owner" chat from a listing (with quick
+      questions such as deposit, food, visitors), owner response-time badge, and contact details
+      kept inside chat until a visit is confirmed.
+- [ ] **P5. Architecture write-up.** One document with each layer's job (web, API routers,
+      services, models, workers, ML, storage), how a request flows, and the rules each layer keeps,
+      so new code (and the mobile apps) follow it.
+- [ ] **P6. Ready for the mobile apps.** A stable versioned API contract for the apps, push
+      notifications through Firebase (Android) and APNs (iOS) next to web push, deep links, and
+      an installable website (PWA) in the meantime. The apps themselves come after the website
+      launch.
 
 ### Needs you (accounts, keys, decisions)
 - [ ] **E1. Rotate the Supabase keys and database password.** They were pasted into a chat. Do
