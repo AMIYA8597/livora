@@ -2,10 +2,12 @@
 Administration Service
 Privileged user management, role granting, account moderation, and platform statistics.
 """
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
+from sqlalchemy.orm import aliased
+from app.modules.applications.models import Application
 from app.modules.users.models import User, UserRole
 from app.modules.properties.models import Property
 from app.modules.matching.models import MutualMatch
@@ -22,6 +24,41 @@ class AdminService:
         query = select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    async def list_applications(
+        self, status: Optional[str] = None, q: Optional[str] = None, limit: int = 25, offset: int = 0
+    ) -> List[dict]:
+        """Applications for staff to find and act on, newest activity first. ``q`` matches the
+        listing title or the applicant's name or email."""
+        applicant, owner = aliased(User), aliased(User)
+        query = (
+            select(Application, applicant, Property.title, owner.full_name)
+            .join(applicant, applicant.id == Application.applicant_id)
+            .join(Property, Property.id == Application.property_id)
+            .outerjoin(owner, owner.id == Property.owner_id)
+            .order_by(Application.updated_at.desc(), Application.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        if status:
+            query = query.where(Application.status == status)
+        if q and q.strip():
+            term = q.strip()
+            query = query.where(or_(
+                Property.title.icontains(term, autoescape=True),
+                applicant.full_name.icontains(term, autoescape=True),
+                applicant.email.icontains(term, autoescape=True),
+            ))
+        rows = (await self.db.execute(query)).all()
+        return [
+            {
+                "id": app.id, "status": app.status, "applicant_id": app.applicant_id,
+                "applicant_name": person.full_name, "applicant_email": person.email,
+                "property_id": app.property_id, "property_title": title, "owner_name": owner_name,
+                "proposed_rent": app.proposed_rent, "submitted_at": app.submitted_at, "updated_at": app.updated_at,
+            }
+            for app, person, title, owner_name in rows
+        ]
 
     async def update_user_status(self, user_id: UUID, is_active: bool) -> User:
         query = select(User).where(User.id == user_id)

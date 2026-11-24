@@ -56,7 +56,7 @@ def _import_models():
         from app.modules.pg_management.models import PGBuilding, PGFloor  # noqa: F401
         from app.modules.appointments.models import Appointment  # noqa: F401
         from app.modules.groups.models import Group, GroupMember, GroupWishlistItem  # noqa: F401
-        from app.modules.applications.models import Application  # noqa: F401
+        from app.modules.applications.models import Application, ApplicationStatusEvent  # noqa: F401
         from app.modules.messaging.models import (  # noqa: F401
             Conversation, ConversationParticipant, Message,
             Attachment, ConversationReadCursor, ConversationPreference, OutboxEvent

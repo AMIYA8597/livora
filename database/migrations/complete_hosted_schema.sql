@@ -68,9 +68,9 @@ CREATE TABLE outbox_events (
     PRIMARY KEY (id)
 );
 
-CREATE INDEX ix_outbox_events_status ON outbox_events (status);
-
 CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
+
+CREATE INDEX ix_outbox_events_status ON outbox_events (status);
 
 CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
 
@@ -327,9 +327,9 @@ CREATE TABLE match_interactions (
     FOREIGN KEY(target_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
-
 CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
+
+CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
 
 CREATE TABLE mutual_matches (
     id UUID NOT NULL, 
@@ -365,9 +365,9 @@ CREATE TABLE notifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_notifications_is_read ON notifications (is_read);
-
 CREATE INDEX ix_notifications_user_created ON notifications (user_id, created_at);
+
+CREATE INDEX ix_notifications_is_read ON notifications (is_read);
 
 CREATE INDEX ix_notifications_user_id ON notifications (user_id);
 
@@ -419,9 +419,9 @@ CREATE TABLE verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
-
 CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
+
+CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
 
 CREATE INDEX ix_verifications_subject_created ON verifications (subject_hash, created_at);
 
@@ -760,6 +760,22 @@ CREATE INDEX ix_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
 
 CREATE INDEX ix_tenant_memberships_property_id ON tenant_memberships (property_id);
 
+CREATE TABLE application_status_events (
+    id UUID NOT NULL, 
+    application_id UUID NOT NULL, 
+    actor_id UUID, 
+    from_status VARCHAR(32) NOT NULL, 
+    to_status VARCHAR(32) NOT NULL, 
+    note TEXT, 
+    by_staff BOOLEAN NOT NULL, 
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    PRIMARY KEY (id), 
+    FOREIGN KEY(application_id) REFERENCES applications (id) ON DELETE CASCADE, 
+    FOREIGN KEY(actor_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_application_status_events_app_created ON application_status_events (application_id, created_at);
+
 CREATE TABLE conversations (
     id UUID NOT NULL, 
     type VARCHAR(32) NOT NULL, 
@@ -805,9 +821,9 @@ CREATE TABLE conversation_participants (
 
 CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
 
-CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
-
 CREATE INDEX ix_conversation_participants_conversation_id ON conversation_participants (conversation_id);
+
+CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
 
 CREATE TABLE messages (
     id UUID NOT NULL, 
@@ -830,15 +846,15 @@ CREATE TABLE messages (
     FOREIGN KEY(reply_to_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_messages_sent_at ON messages (sent_at);
-
-CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
-
 CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
 
 CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE INDEX ix_messages_sender_id ON messages (sender_id);
+
+CREATE INDEX ix_messages_sent_at ON messages (sent_at);
+
+CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -855,11 +871,11 @@ CREATE TABLE conversation_preferences (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
-
 CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
 CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
+
+CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
 
 CREATE TABLE attachments (
     id UUID NOT NULL, 
@@ -877,9 +893,9 @@ CREATE TABLE attachments (
     FOREIGN KEY(uploader_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
-
 CREATE INDEX ix_attachments_message_id ON attachments (message_id);
+
+CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
 
 CREATE INDEX ix_attachments_uploader_id ON attachments (uploader_id);
 
@@ -896,9 +912,9 @@ CREATE TABLE conversation_read_cursors (
     FOREIGN KEY(last_read_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
-
 CREATE INDEX ix_conversation_read_cursors_conversation_id ON conversation_read_cursors (conversation_id);
+
+CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
 
 INSERT INTO alembic_version (version_num) VALUES ('001_initial_schema') RETURNING alembic_version.version_num;
 
@@ -1506,6 +1522,24 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
            );
 
 UPDATE alembic_version SET version_num='012_notifications_push' WHERE alembic_version.version_num = '011_email_verification';
+
+-- Running upgrade 012_notifications_push -> 013_application_status_history
+
+CREATE TABLE IF NOT EXISTS application_status_events (
+               id UUID PRIMARY KEY,
+               application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+               actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+               from_status VARCHAR(32) NOT NULL,
+               to_status VARCHAR(32) NOT NULL,
+               note TEXT,
+               by_staff BOOLEAN NOT NULL DEFAULT false,
+               created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+           );
+
+CREATE INDEX IF NOT EXISTS ix_application_status_events_app_created
+               ON application_status_events (application_id, created_at);
+
+UPDATE alembic_version SET version_num='013_application_status_history' WHERE alembic_version.version_num = '012_notifications_push';
 
 DO $$
 DECLARE

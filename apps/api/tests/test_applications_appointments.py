@@ -14,7 +14,7 @@ from app.modules.appointments.schemas import AppointmentCreate, AppointmentStatu
 from app.modules.appointments.service import AppointmentService
 from app.modules.appointments.models import Appointment
 from app.modules.properties.models import Property
-from app.core.exceptions import ConflictException, ForbiddenException
+from app.core.exceptions import BadRequestException, ConflictException, ForbiddenException
 
 @pytest.mark.asyncio
 async def test_application_duplicate_prevention():
@@ -180,3 +180,51 @@ async def test_appointment_host_confirmation_and_cancellation():
     )
     assert appt.status == "cancelled"
     assert appt.cancellation_reason == "Found another flat"
+
+
+@pytest.mark.asyncio
+async def test_application_admin_status_override():
+    """An admin can intervene and override application status regardless of owner/applicant."""
+    from app.modules.applications.schemas import ApplicationStatusUpdate
+    from app.modules.applications.service import ApplicationService
+
+    admin_id = uuid4()
+    app_id = uuid4()
+    prop_id = uuid4()
+    owner_id = uuid4()
+    applicant_id = uuid4()
+
+    mock_db = AsyncMock()
+    service = ApplicationService(mock_db)
+
+    app = Application(
+        id=app_id,
+        property_id=prop_id,
+        applicant_id=applicant_id,
+        status="submitted",
+    )
+    service.get_by_id = AsyncMock(return_value=app)
+
+    prop = Property(id=prop_id, owner_id=owner_id, title="1BHK Flat")
+    mock_prop_res = MagicMock()
+    mock_prop_res.scalar_one_or_none.return_value = prop
+    mock_db.execute.return_value = mock_prop_res
+
+    # Non-admin non-owner non-applicant cannot update
+    other_user_id = uuid4()
+    with pytest.raises(ForbiddenException):
+        await service.update_status(app_id, other_user_id, ApplicationStatusUpdate(status="accepted"), is_admin=False)
+
+    # Admin overrides need a reason
+    with pytest.raises(BadRequestException):
+        await service.update_status(app_id, admin_id, ApplicationStatusUpdate(status="accepted"), is_admin=True)
+
+    # With one, an admin CAN override to accepted, and the change is recorded
+    mock_db.add = MagicMock()
+    updated = await service.update_status(
+        app_id, admin_id, ApplicationStatusUpdate(status="accepted", note="Owner confirmed by phone"), is_admin=True
+    )
+    assert updated.status == "accepted"
+    assert mock_db.commit.called
+    [event] = [c.args[0] for c in mock_db.add.call_args_list]
+    assert (event.from_status, event.to_status, event.by_staff) == ("submitted", "accepted", True)

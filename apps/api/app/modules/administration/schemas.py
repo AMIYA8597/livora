@@ -3,6 +3,7 @@ Administration Schemas
 """
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,3 +32,17 @@ class PlatformStatsResponse(BaseModel):
     pending_verifications: int
     open_moderation_reports: int
 
+
+
+class AdminApplicationListItem(BaseModel):
+    id: uuid.UUID
+    status: str
+    applicant_id: uuid.UUID
+    applicant_name: str
+    applicant_email: str
+    property_id: uuid.UUID
+    property_title: str
+    owner_name: Optional[str] = None
+    proposed_rent: Decimal
+    submitted_at: datetime
+    updated_at: datetime

@@ -100,11 +100,22 @@ async def application_received(db: AsyncSession, application: Any, prop: Any) ->
 
 
 @fail_safe
-async def application_status_changed(db: AsyncSession, application: Any, prop: Any, actor_id: UUID) -> None:
+async def application_status_changed(db: AsyncSession, application: Any, prop: Any, actor_id: UUID,
+                                     by_staff: bool = False) -> None:
     text = APPLICATION_STATUS_TEXT.get(application.status)
     if not text:
         return
-    if actor_id == application.applicant_id:  # the applicant withdrew: tell the owner
+    if by_staff:  # Flatmate support stepped in: both sides should know it wasn't the other one
+        await _notify(db, user_id=application.applicant_id, title=f"Your application {text}",
+                      body=f"For {prop.title}. Updated by Flatmate support.",
+                      notification_type="application_status_change", reference_id=application.id,
+                      link="/dashboard?tab=applications", idempotency_window_minutes=1)
+        name = await first_name(db, application.applicant_id)
+        await _notify(db, user_id=prop.owner_id, title=f"{name}'s application {text}",
+                      body=f"For {prop.title}. Updated by Flatmate support.",
+                      notification_type="application_status_change", reference_id=application.id,
+                      link="/owner?tab=applications", idempotency_window_minutes=1)
+    elif actor_id == application.applicant_id:  # the applicant withdrew: tell the owner
         name = await first_name(db, application.applicant_id)
         await _notify(db, user_id=prop.owner_id, title=f"{name} withdrew their application",
                       body=f"For {prop.title}", notification_type="application_status_change",

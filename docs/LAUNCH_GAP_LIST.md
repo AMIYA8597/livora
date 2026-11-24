@@ -547,8 +547,50 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - `/messages` and `/notifications` open a second WebSocket, because the bell has its own.
       - Production needs its own VAPID keys. Changing them later makes every browser
         subscribe again.
-- [ ] **13b. Admins cannot override application status.** `PATCH /applications/{id}/status`
-      never passes `is_admin`, unlike appointments, so moderators cannot intervene.
+- [x] **13b. Admins cannot override application status.** *(Done.)* `PATCH /applications/{id}/status`
+      never passed `is_admin`, unlike appointments, so moderators could not intervene.
+      Migration `013_application_status_history`.
+      - **Who:** staff means moderators, admins and super admins (`is_staff`, which reads roles
+        the same way `require_roles` does). Staff acting on someone else's application is an
+        override. On their own application they follow the normal rules.
+      - **Override rules (one code path, the same PATCH):**
+        - A reason (`note`, 5–500 characters) is required.
+        - It can't set the current status, or `submitted` (use `under_review` to reopen).
+        - A reopen is refused if the applicant already has another active application for that
+          listing.
+        - Statuses are now a fixed list for everyone, so unknown values get a 422. Before, an
+          admin bypass could have stored any string.
+        - The row is locked (`FOR UPDATE`), so an owner's decision and an override can't
+          interleave.
+      - **History:** every status change (owner, applicant or staff) is written to
+        `application_status_events`: who, from what, to what, the reason, and whether it was
+        staff.
+      - **Who is told:** after an override, both the applicant and the owner get "… Updated by
+        Flatmate support". The reason stays with staff. The applicant's status email still goes
+        out as before.
+      - **Admin console:** a new Applications tab (`GET /admin/applications`, staff only):
+        - search by listing title or applicant name or email (wildcards are literal)
+        - filter by status, and page through results
+        - "Change status" opens a dialog with the new status, the required reason and the
+          history (`GET /admin/applications/{id}/history`)
+      - **Tests:**
+        - `tests/test_application_override_db.py` (4 tests): permissions and unknown statuses;
+          reason, same-status and no-`submitted` rules; history; what each side is told;
+          reopen conflicts; search and access.
+        - The mocked admin test in `test_applications_appointments.py` now needs a reason and
+          checks the history row.
+        - Web helpers are covered in `apps/web/tests/admin-applications.test.ts`.
+      - **Checked in the browser** (local, as the seeded admin):
+        - search
+        - the missing-reason message
+        - overriding to Rejected
+        - the history in the dialog
+        - Priya's notification
+        - mobile layout
+      Not covered:
+      - The admin console page itself still only opens for admins. Moderators can use the API
+        and `/admin/moderation`, but not this tab.
+      - Owners and applicants don't see the history; only staff do.
 
 ## P2 — Operations and hardening
 

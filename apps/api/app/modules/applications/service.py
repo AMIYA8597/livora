@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.modules.notifications import events as notification_events
-from app.modules.applications.models import Application
+from app.modules.applications.models import Application, ApplicationStatusEvent
+from app.modules.users.models import User
 from app.modules.properties.models import Property
 from app.modules.applications.schemas import ApplicationCreate, ApplicationStatusUpdate
 from app.core.exceptions import NotFoundException, ForbiddenException, ConflictException, BadRequestException
@@ -24,8 +25,10 @@ class ApplicationService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_by_id(self, application_id: UUID) -> Optional[Application]:
+    async def get_by_id(self, application_id: UUID, for_update: bool = False) -> Optional[Application]:
         query = select(Application).where(Application.id == application_id)
+        if for_update:
+            query = query.with_for_update()
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
@@ -87,7 +90,10 @@ class ApplicationService:
         return app
 
     async def update_status(self, application_id: UUID, current_user_id: UUID, data: ApplicationStatusUpdate, is_admin: bool = False) -> Application:
-        app = await self.get_by_id(application_id)
+        """Owners move an application along, applicants withdraw, and staff (``is_admin``: moderators
+        and admins) can override any status with a reason. Every change is recorded."""
+        # Locked, so an owner's decision and a staff override can't interleave.
+        app = await self.get_by_id(application_id, for_update=True)
         if not app:
             raise NotFoundException("Application not found")
 
@@ -95,25 +101,73 @@ class ApplicationService:
         prop_query = select(Property).where(Property.id == app.property_id)
         prop = (await self.db.execute(prop_query)).scalar_one_or_none()
 
-        is_owner = prop and prop.owner_id == current_user_id
+        is_owner = bool(prop and prop.owner_id == current_user_id)
         is_applicant = app.applicant_id == current_user_id
 
         if not is_owner and not is_applicant and not is_admin:
             raise ForbiddenException("Not authorized to modify this application")
 
-        if is_applicant and not is_owner and not is_admin:
+        # Staff acting on someone else's application is an override; their own follows the normal rules.
+        override = is_admin and not is_owner and not is_applicant
+        note = (data.note or "").strip() or None
+
+        if is_applicant and not is_owner and not override:
             if data.status != "withdrawn":
                 raise ForbiddenException("Applicants can only withdraw their application")
 
-        # State transition validation
-        allowed_next_states = VALID_STATUS_TRANSITIONS.get(app.status, set())
-        if data.status not in allowed_next_states and not is_admin:
-            raise BadRequestException(f"Invalid status transition from '{app.status}' to '{data.status}'")
+        if override:
+            if not note or len(note) < 5:
+                raise BadRequestException("Give a reason for changing this application's status")
+            if data.status == app.status:
+                raise ConflictException(f"The application is already '{app.status}'")
+            if data.status == "submitted":
+                raise BadRequestException("Use 'under_review' to reopen an application")
+            if data.status in ACTIVE_APPLICATION_STATUSES and app.status not in ACTIVE_APPLICATION_STATUSES:
+                # Reopening must not leave the applicant with two live applications for one place.
+                other = (await self.db.execute(
+                    select(Application.id).where(
+                        Application.applicant_id == app.applicant_id,
+                        Application.property_id == app.property_id,
+                        Application.status.in_(ACTIVE_APPLICATION_STATUSES),
+                        Application.id != app.id,
+                    ).limit(1)
+                )).scalar_one_or_none()
+                if other:
+                    raise ConflictException("The applicant already has another active application for this property")
+        else:
+            allowed_next_states = VALID_STATUS_TRANSITIONS.get(app.status, set())
+            if data.status not in allowed_next_states:
+                raise BadRequestException(f"Invalid status transition from '{app.status}' to '{data.status}'")
 
+        previous = app.status
         app.status = data.status
         app.updated_at = datetime.now(timezone.utc)
+        self.db.add(ApplicationStatusEvent(
+            application_id=app.id,
+            actor_id=current_user_id,
+            from_status=previous,
+            to_status=data.status,
+            note=note,
+            by_staff=override,
+        ))
         await self.db.commit()
         await self.db.refresh(app)
         if prop:
-            await notification_events.application_status_changed(self.db, app, prop, current_user_id)
+            await notification_events.application_status_changed(self.db, app, prop, current_user_id, by_staff=override)
         return app
+
+    async def history(self, application_id: UUID) -> List[dict]:
+        """Status changes, oldest first, with the actor's name (for staff)."""
+        rows = (await self.db.execute(
+            select(ApplicationStatusEvent, User.full_name)
+            .outerjoin(User, User.id == ApplicationStatusEvent.actor_id)
+            .where(ApplicationStatusEvent.application_id == application_id)
+            .order_by(ApplicationStatusEvent.created_at)
+        )).all()
+        return [
+            {
+                "id": ev.id, "actor_id": ev.actor_id, "actor_name": name, "from_status": ev.from_status,
+                "to_status": ev.to_status, "note": ev.note, "by_staff": ev.by_staff, "created_at": ev.created_at,
+            }
+            for ev, name in rows
+        ]

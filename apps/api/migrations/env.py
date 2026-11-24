@@ -24,7 +24,7 @@ from app.modules.tenants.models import TenantMembership, ExistingTenantVacancy  
 from app.modules.pg_management.models import PGBuilding, PGFloor  # noqa: F401
 from app.modules.appointments.models import Appointment  # noqa: F401
 from app.modules.groups.models import Group, GroupMember, GroupWishlistItem  # noqa: F401
-from app.modules.applications.models import Application  # noqa: F401
+from app.modules.applications.models import Application, ApplicationStatusEvent  # noqa: F401
 from app.modules.messaging.models import Conversation, ConversationParticipant, Message  # noqa: F401
 from app.modules.matching.models import MatchInteraction, MutualMatch  # noqa: F401
 from app.modules.notifications.models import Notification, NotificationPreference, PushSubscription  # noqa: F401

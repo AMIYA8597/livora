@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, is_staff
 from app.modules.users.models import User
 from app.modules.applications.schemas import ApplicationResponse, ApplicationCreate, ApplicationStatusUpdate
 from app.modules.applications.service import ApplicationService
@@ -40,7 +40,7 @@ async def get_application(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = is_staff(current_user)
     service = ApplicationService(db)
     return await service.get_by_id_authorized(application_id, current_user.id, is_admin=is_admin)
 
@@ -52,8 +52,9 @@ async def update_application_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    is_admin = is_staff(current_user)
     service = ApplicationService(db)
-    application = await service.update_status(application_id, current_user.id, data)
+    application = await service.update_status(application_id, current_user.id, data, is_admin=is_admin)
     prop = await db.get(Property, application.property_id)
     if prop:
         await notify.enqueue(db, background_tasks, await notify.application_status_changed(db, application, prop, current_user.id))

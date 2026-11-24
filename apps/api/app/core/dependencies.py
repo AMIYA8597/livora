@@ -65,6 +65,17 @@ def require_roles(allowed_roles: List[str]):
         return current_user
     return role_checker
 
+STAFF_ROLES = ("moderator", "admin", "super_admin")
+
+
+def is_staff(user: User) -> bool:
+    """Moderators and admins (from the user's role or any loaded extra roles, like require_roles)."""
+    roles = [user.role]
+    if "roles" in user.__dict__ and user.__dict__["roles"]:
+        roles.extend(r.role for r in user.__dict__["roles"])
+    return any(r in STAFF_ROLES for r in roles)
+
+
 def verify_resource_ownership(
     resource_owner_id: UUID,
     current_user: User,
