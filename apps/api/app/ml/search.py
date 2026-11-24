@@ -21,13 +21,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
 import numpy as np
 import re
 
-from sqlalchemy import Select, Text, cast, func, literal_column, select
+from sqlalchemy import ColumnElement, Select, Text, cast, func, literal_column, select
 from sqlalchemy.dialects.postgresql import TSQUERY
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -160,7 +160,7 @@ async def rank_properties(
 ) -> SearchRanking:
     """`eligible_ids` is a SELECT of Property.id with the caller's filters already applied."""
     embedder = embedder or get_embedder()
-    tsv = literal_column("properties.search_tsv")
+    tsv: ColumnElement[Any] = literal_column("properties.search_tsv")
     positive, excluded = split_exclusions(query)
     eligible_ids = _without(Property.id, eligible_ids, tsv, excluded)
     lexical = await _lexical(db, Property.id, eligible_ids, tsv, query, Property.created_at.desc())

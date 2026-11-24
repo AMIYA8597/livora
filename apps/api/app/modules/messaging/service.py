@@ -193,7 +193,7 @@ class MessagingService:
             )
             .group_by(Message.conversation_id)
         )
-        unread_by_conv = dict((await self.db.execute(unread_q)).all())
+        unread_by_conv: Dict[Any, int] = {conv_id: count for conv_id, count in (await self.db.execute(unread_q)).all()}
 
         formatted = []
         sq = search_query.lower() if search_query else None

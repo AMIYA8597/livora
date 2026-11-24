@@ -352,7 +352,8 @@ async def websocket_endpoint(websocket: WebSocket):
     except (asyncio.TimeoutError, WebSocketDisconnect, ValueError):
         await _close_quietly(websocket, WS_CLOSE_UNAUTHORIZED, "Authentication required")
         return
-    data = frame.get("data") if isinstance(frame.get("data"), dict) else {}
+    raw_data = frame.get("data")
+    data: dict = raw_data if isinstance(raw_data, dict) else {}
     auth = await authenticate_socket_token(data.get("token")) if frame.get("event") == "auth" else None
     if auth is None:
         await _close_quietly(websocket, WS_CLOSE_UNAUTHORIZED, "Authentication failed")
@@ -409,7 +410,8 @@ async def _handle_frame(websocket: WebSocket, user_id: UUID, frame: dict) -> Non
     socket never holds a pooled connection."""
     event_type = frame.get("event")
     correlation_id = frame.get("correlation_id")
-    data = frame.get("data") if isinstance(frame.get("data"), dict) else {}
+    raw_data = frame.get("data")
+    data: dict = raw_data if isinstance(raw_data, dict) else {}
 
     if event_type == "ping":
         await manager.heartbeat(str(user_id), websocket)

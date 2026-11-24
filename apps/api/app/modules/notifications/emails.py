@@ -109,12 +109,12 @@ async def queue_unread_message_emails(db: AsyncSession, payload: Dict[str, Any])
             ConversationParticipant.is_active.is_(True),
         )
     )).scalars().all())
-    read_at = dict((await db.execute(
+    read_at: Dict[Any, Any] = {user: last_read for user, last_read in (await db.execute(
         select(ConversationReadCursor.user_id, ConversationReadCursor.last_read_at).where(
             ConversationReadCursor.conversation_id == conversation_id,
             ConversationReadCursor.user_id.in_(recipient_ids),
         )
-    )).all())
+    )).all()}
     prefs = {p.user_id: p for p in (await db.execute(
         select(ConversationPreference).where(
             ConversationPreference.conversation_id == conversation_id,

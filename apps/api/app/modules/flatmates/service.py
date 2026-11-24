@@ -103,10 +103,10 @@ class FlatmateService:
             by_id = {profile.user_id: (profile, user) for profile, user in rows}
             ordered = [by_id[i] for i in page_ids if i in by_id]
         else:
-            ordered = (await self.db.execute(
+            ordered = [(profile, user) for profile, user in (await self.db.execute(
                 base.order_by(Profile.updated_at.desc().nullslast(), Profile.user_id)
                 .limit(filters.limit).offset(filters.offset)
-            )).all()
+            )).all()]
 
         return [
             FlatmateSeekerCard(

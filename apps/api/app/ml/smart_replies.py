@@ -144,8 +144,10 @@ async def suggest_for_conversation(db: AsyncSession, conversation_id: UUID, user
         profiles: Dict[UUID, Profile] = {p.user_id: p for p in (await db.execute(
             select(Profile).where(Profile.user_id.in_([user_id, *other_ids]))
         )).scalars().all()}
-        mine = (profiles.get(user_id).lifestyle_traits or {}) if profiles.get(user_id) else {}
-        theirs = (profiles.get(other_ids[0]).lifestyle_traits or {}) if other_ids and profiles.get(other_ids[0]) else {}
+        my_profile = profiles.get(user_id)
+        their_profile = profiles.get(other_ids[0]) if other_ids else None
+        mine = (my_profile.lifestyle_traits or {}) if my_profile else {}
+        theirs = (their_profile.lifestyle_traits or {}) if their_profile else {}
         shared = [(k, v) for k, v in mine.items() if isinstance(v, str) and theirs.get(k) == v]
 
     if settings.AI_SMART_REPLIES_ENABLED and llm_configured():

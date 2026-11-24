@@ -366,7 +366,7 @@ class BillingService:
         if not pay_id:
             return
         status = {"captured": "successful", "authorized": "pending", "failed": "failed",
-                  "refunded": "refunded"}.get(payment.get("status"), "pending")
+                  "refunded": "refunded"}.get(str(payment.get("status") or ""), "pending")
         values = dict(
             user_id=sub.user_id, subscription_id=sub.id,
             amount=Decimal(int(payment.get("amount") or 0)) / 100,

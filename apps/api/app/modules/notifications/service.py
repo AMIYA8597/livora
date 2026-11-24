@@ -103,7 +103,7 @@ class NotificationService:
             update(Notification).where(Notification.user_id == user_id, Notification.is_read.is_(False)).values(is_read=True)
         )
         await self.db.commit()
-        return int(res.rowcount or 0)
+        return int(getattr(res, "rowcount", 0) or 0)  # CursorResult for UPDATE
 
     # ------------------------------------------------------------------ creating
 
