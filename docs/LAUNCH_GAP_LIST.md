@@ -417,10 +417,63 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
         - Then switch to live keys.
       - Prices, GST and invoices are business decisions: no GST is shown or charged yet.
       - Webhooks are only reprocessed when Razorpay retries. There is no admin replay tool yet.
-- [ ] **12. Identity verification is mocked.** Integrate a real KYC provider, or clearly gate
-      the feature off. `verifications.document_url` is free text from the client: store the
-      storage object path from the verification upload instead, and have admins view it through
-      a signed URL.
+- [x] **12. Identity verification is mocked.** *(Done: ID checks switched off, email checks
+      made real.)* Decision: no KYC provider for launch. Migration `011_email_verification`.
+      - **ID documents are off:** the fake flow is removed. It posted a placeholder
+        `document_url` and had an approve-only admin endpoint. Pending requests from it were
+        cancelled. Badges it granted were cleared, because nothing had been checked. The app
+        says ID checks aren't available yet. Adding a provider later means a new `method` on
+        `verifications`.
+      - **Work and college email by one-time code**
+        (`POST /verification/email/send`, `/verification/email/confirm`):
+        - Free and disposable mailboxes are refused. College emails need an academic domain
+          (`.ac.in`, `.edu`, `.edu.in` and the like).
+        - Codes work like phone codes: only an HMAC is stored, compared in constant time, and
+          each code allows 5 tries. Codes last 30 minutes (`EMAIL_CODE_TTL_MINUTES`), and a new
+          code replaces the old one.
+        - Send limits are kept in the database: a cooldown, plus hourly caps per user and per
+          address, so nobody can flood someone's inbox.
+        - The address is never stored, only its domain and a keyed hash. A partial unique
+          index allows one address on one account.
+        - A new work email replaces the old one, for someone who changed jobs.
+      - **What the badge means now:** `users.is_verified` means "has a verified work or college
+        email". Others see a badge, not the domain.
+        - Trust score: 30 base, plus 30 for a verified mobile, plus 40 for an email (counted
+          once).
+        - `is_fully_verified` means both the mobile and an email are verified.
+      - **Honest copy:**
+        - The public flatmate profile showed "Verified Identity" on everyone (`isVerified={true}`).
+          It now uses `is_verified`, which `/profiles/{id}` returns.
+        - The account panel's "Email verified" badge (tied to `is_verified`) is gone. Nothing
+          verifies the sign-in email.
+        - The home, safety, help and privacy pages, the footer and the chat phone-number tip now
+          describe what is actually checked.
+        - Listing "Verified" badges now say "reviewed by our team", not "ownership and identity
+          review".
+      - **Seed:** seeded members get a real-looking work-email verification row behind their
+        badge.
+      - **Tests:** `tests/test_email_verification_db.py` has 20 tests:
+        - domain rules
+        - the code flow, including that the address isn't stored
+        - one address per account
+        - replacing a work email
+        - cooldown, attempt, expiry and supersede limits, and the per-address hourly cap
+        - that ID endpoints are gone and old manual approvals don't count
+        Web helpers are covered in `apps/web/tests/verification.test.ts`.
+      - **Checked in the browser** (local, in-memory email, no real mail sent):
+        - Gmail refused
+        - a college code: wrong code refused, right code verified
+        - badges on profile and dashboard
+        - shield shown and hidden on public profiles
+        - mobile layout
+      Not covered:
+      - Real delivery wasn't tested. Codes go through the configured email provider (`resend`
+        or `smtp`), so check one arrives in staging.
+      - The academic-domain rule misses colleges that use plain domains (e.g. `.in` or `.com`).
+        Those students can't get a college badge yet.
+      - The free-provider list is hand-made. Extend it if abuse shows up.
+      - The privacy page wording changed, to say what is stored for email checks. Review it
+        with the rest of the legal copy.
 - [ ] **13. Web push and in-app notification centre.**
 - [ ] **13b. Admins cannot override application status.** `PATCH /applications/{id}/status`
       never passes `is_admin`, unlike appointments, so moderators cannot intervene.

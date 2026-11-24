@@ -15,7 +15,7 @@ export default function HelpPage() {
     },
     {
       q: "Are the property listings real and verified?",
-      a: "Yes. All listings on Flatmate correspond to persisted database units, rooms, and beds created by real owners and verified tenants. Listings with a 'Verified' badge have undergone verification review.",
+      a: "Every listing is created by a signed-in owner and checked by our automated scam screening. Listings with a 'Verified' badge have also been reviewed by our team. Always visit in person before paying anything.",
     },
     {
       q: "How do viewing appointments work?",

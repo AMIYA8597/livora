@@ -51,7 +51,7 @@ export function ProfileHeader({ user, profile, trust, onAvatarChanged, onNotice 
           src={profile?.avatar_url || undefined}
           alt={name}
           size="xl"
-          isVerified={trust?.is_fully_verified ?? user?.is_verified}
+          isVerified={trust ? (trust.verifications?.length ?? 0) > 0 : user?.is_verified}
         />
         <button
           type="button"
@@ -76,7 +76,7 @@ export function ProfileHeader({ user, profile, trust, onAvatarChanged, onNotice 
           <h1 className="text-2xl font-bold text-charcoal break-words">{name}</h1>
           {trust?.is_fully_verified && (
             <Badge variant="forest">
-              <ShieldCheck className="w-3 h-3 mr-1 inline" /> Verified resident
+              <ShieldCheck className="w-3 h-3 mr-1 inline" /> Mobile and email verified
             </Badge>
           )}
           <Badge variant="default" className="uppercase text-[10px] tracking-wider">

@@ -24,6 +24,8 @@ export interface LifestyleTraits {
 export interface ProfileDTO {
   id: string;
   user_id: string;
+  /** Has a verified work or college email. */
+  is_verified?: boolean;
   display_name: string;
   avatar_url?: string | null;
   bio?: string | null;

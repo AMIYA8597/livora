@@ -6,6 +6,7 @@ import { Button, Card, ErrorState, Tabs } from "@flatmate/ui";
 import { Key, Lock, Shield, ShieldCheck, Sparkles, User } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { loginHref } from "@/lib/navigation";
+import { trustSummary } from "@/lib/verification-model";
 import { PageLoading } from "@/components/states/PageLoading";
 import { InlineNotice } from "@/components/states/InlineNotice";
 import { useMyProfileData } from "@/features/profile/useMyProfileData";
@@ -127,7 +128,7 @@ export default function ProfilePage() {
                 <div className="mb-6">
                   <h2 className="text-lg font-bold text-charcoal">Trust & verification</h2>
                   <p className="text-xs text-charcoal-muted mt-1">
-                    Verified badges get more replies. Documents are reviewed privately and never shown publicly.
+                    Verify your mobile number (Account tab) and a work or college email. Verified members get more replies.
                   </p>
                 </div>
                 <div className="bg-forest-pale/60 border border-forest/20 rounded-xl p-4 mb-6 flex items-center justify-between gap-3">
@@ -136,7 +137,7 @@ export default function ProfilePage() {
                     <div>
                       <div className="text-xs font-bold text-forest">Status</div>
                       <div className="text-xs text-forest/80">
-                        {trust?.is_fully_verified ? "Fully verified" : "Not yet verified"}
+                        {trustSummary(trust?.badges, trust?.verifications)}
                       </div>
                     </div>
                   </div>
@@ -145,7 +146,7 @@ export default function ProfilePage() {
                     <div className="text-xl font-bold text-forest">{trust?.total_trust_score ?? "—"}/100</div>
                   </div>
                 </div>
-                <VerificationForm onSubmitted={(s) => (s ? data.trust.setData(s) : data.trust.refetch())} />
+                <VerificationForm trust={trust} onVerified={(s) => data.trust.setData(s)} />
               </Card>
             )}
             {activeTab === "account" && (

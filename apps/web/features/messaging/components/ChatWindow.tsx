@@ -142,7 +142,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
     const hasPhone = /(\+91[\-\s]?)?[6-9]\d{9}/.test(text);
     if (hasPhone && !isRecipientVerified) {
-      setWarning("Notice: Sharing phone numbers prior to mutual identity verification is monitored in accordance with safety guidelines.");
+      setWarning("Tip: this person hasn't verified a work or college email yet. Only share your number if you're comfortable.");
     } else {
       setWarning(null);
     }

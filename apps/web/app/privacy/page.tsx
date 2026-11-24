@@ -26,7 +26,7 @@ export default function PrivacyPage() {
           <p className="text-sm text-charcoal-muted leading-relaxed">
             In compliance with India&apos;s Digital Personal Data Protection (DPDP) Act 2023, Flatmate processes personal data
             solely for providing matching and rental accommodation services. We request explicit consent before collecting
-            lifestyle vectors, phone numbers, and identity verification credentials.
+            lifestyle vectors and phone numbers. When you verify a work or college email we keep only its domain, not the address.
           </p>
         </section>
 

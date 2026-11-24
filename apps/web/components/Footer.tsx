@@ -56,7 +56,7 @@ export const Footer: React.FC = () => {
             <ul className="space-y-2 text-sm">
               <li className="flex items-center space-x-1.5 text-pale-green">
                 <ShieldCheck className="w-4 h-4" />
-                <span>Verified Identities</span>
+                <span>Verified work &amp; college emails</span>
               </li>
               <li>
                 <Link href="/safety" className="hover:text-white transition-colors">

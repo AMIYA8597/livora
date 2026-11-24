@@ -43,7 +43,7 @@ export default function HomePage() {
   const faqs = [
     {
       q: "How does Flatmate verify property listings?",
-      a: "Every listing on Flatmate represents a real database inventory record with physical units, rooms, and beds. Verified listings undergo ownership and identity review before receiving a verified trust badge.",
+      a: "Every listing on Flatmate represents a real database inventory record with physical units, rooms, and beds. Listings with a Verified badge have been reviewed by our team. Members can verify their mobile number and a work or college email, and the badge on their profile shows it.",
     },
     {
       q: "How does the 10-dimension compatibility score work?",
@@ -146,7 +146,7 @@ export default function HomePage() {
               </div>
               <h3 className="font-bold text-charcoal text-base mb-1">Create Profile</h3>
               <p className="text-xs text-charcoal-muted leading-relaxed">
-                Set up your verified identity, budget range, and preferred city localities.
+                Add your budget and preferred localities, and verify your mobile and work or college email.
               </p>
             </div>
           </div>
@@ -327,11 +327,11 @@ export default function HomePage() {
               Genuine security built into every step.
             </h3>
             <p className="text-warm-100 text-sm leading-relaxed">
-              We implement government ID verification badges, strict DPDP Act exact location fuzzing, and
-              real-time advance payment scam defense in chats.
+              Verified mobile numbers and work or college emails, fuzzed locations until you choose to share, and
+              real-time warnings about advance-payment scams in chats.
             </p>
             <p className="text-xs text-pale-green/80 italic">
-              * Note: Verification validates identity and listing ownership; it does not substitute personal judgment. Always inspect accommodation in person before transferring funds.
+              * Note: A verified badge confirms a member&apos;s mobile number or work or college email, not their identity or ownership of a property. Always inspect accommodation in person before transferring funds.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3">

@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import type { UserDTO } from "@flatmate/contracts";
-import { Badge, Button, Card } from "@flatmate/ui";
+import { Button, Card } from "@flatmate/ui";
 import { Copy, Fingerprint, Mail, Shield } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { InlineNotice } from "@/components/states/InlineNotice";
@@ -72,9 +72,6 @@ export function AccountSecurityPanel({ user, onUserChanged, onNotice }: AccountS
                 <span className="text-[10px] text-charcoal-muted">Primary account login</span>
               </div>
             </div>
-            <Badge variant={user?.is_verified ? "forest" : "warning"}>
-              {user?.is_verified ? "Email verified" : "Verification pending"}
-            </Badge>
           </div>
 
           <PhoneVerification user={user} onVerified={onUserChanged} onNotice={onNotice} />

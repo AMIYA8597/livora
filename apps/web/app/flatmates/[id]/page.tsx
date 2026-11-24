@@ -259,14 +259,16 @@ export default function SeekerProfileDetailPage() {
             src={profile.avatar_url || undefined}
             alt={profile.display_name}
             size="xl"
-            isVerified={true}
+            isVerified={!!profile.is_verified}
           />
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">{profile.display_name}</h1>
-              <span title="Verified Identity">
-                <ShieldCheck className="w-6 h-6 text-emerald-500" />
-              </span>
+              {profile.is_verified && (
+                <span title="Verified work or college email">
+                  <ShieldCheck className="w-6 h-6 text-emerald-500" aria-label="Verified work or college email" />
+                </span>
+              )}
             </div>
             <p className="text-sm text-slate-500 flex items-center space-x-1.5 mt-1">
               <Briefcase className="w-4 h-4 text-slate-400" />

@@ -10,6 +10,7 @@ import { useApiQuery } from "@/hooks/useApiQuery";
 import { useSavedProperties } from "@/hooks/useSavedProperties";
 import { apiClient } from "@/lib/api-client";
 import { loginHref } from "@/lib/navigation";
+import { trustSummary } from "@/lib/verification-model";
 import { PageLoading } from "@/components/states/PageLoading";
 import { InlineNotice } from "@/components/states/InlineNotice";
 import { useMyProfileData } from "@/features/profile/useMyProfileData";
@@ -116,7 +117,7 @@ export default function DashboardPage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-8">
       <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
-          <Avatar alt={user?.full_name || "User"} size="lg" isVerified={trust?.is_fully_verified} />
+          <Avatar alt={user?.full_name || "User"} size="lg" isVerified={user?.is_verified} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-bold text-charcoal break-words">{user?.full_name}</h1>
@@ -131,18 +132,18 @@ export default function DashboardPage() {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold">Trust score: {trust?.total_trust_score ?? "—"}/100</span>
-              {!trust?.is_fully_verified && (
+              {!trust?.is_fully_verified && !(trust?.verifications?.length) && (
                 <button
                   type="button"
                   onClick={() => setIsVerifyModalOpen(true)}
                   className="min-h-[44px] text-[11px] font-semibold text-forest underline hover:text-forest-light"
                 >
-                  Verify ID
+                  Get verified
                 </button>
               )}
             </div>
             <span className="text-forest/80 text-[11px]">
-              {trust?.badges && trust.badges.length > 0 ? trust.badges.join(" • ") : "ID not verified yet"}
+              {trustSummary(trust?.badges, trust?.verifications)}
             </span>
           </div>
         </div>
@@ -191,16 +192,11 @@ export default function DashboardPage() {
       <Modal
         isOpen={isVerifyModalOpen}
         onClose={() => setIsVerifyModalOpen(false)}
-        title="Verify your identity"
-        description="Verified members get higher trust scores and more replies."
+        title="Verify your work or college email"
+        description="A verified badge shows people where you work or study, and gets more replies."
       >
         <div className="mt-2">
-          <VerificationForm
-            onSubmitted={(s) => {
-              if (s) me.trust.setData(s);
-              else me.trust.refetch();
-            }}
-          />
+          <VerificationForm trust={me.trust.data} onVerified={(s) => me.trust.setData(s)} />
         </div>
       </Modal>
     </div>

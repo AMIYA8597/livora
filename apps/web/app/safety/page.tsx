@@ -76,10 +76,10 @@ export default function SafetyPage() {
           <div className="w-10 h-10 rounded-xl bg-forest/10 text-forest flex items-center justify-center">
             <CheckCircle2 className="w-5 h-5" />
           </div>
-          <h3 className="text-base font-bold text-charcoal">Government ID Verification</h3>
+          <h3 className="text-base font-bold text-charcoal">Verified mobile and email</h3>
           <p className="text-xs text-charcoal-muted leading-relaxed">
-            Verified badges signify users who have completed identity verification. While verification aids trust,
-            always exercise good judgment when meeting prospective roommates.
+            A verified badge means the member confirmed their mobile number or a work or college email with a
+            one-time code. It is not an ID check, so always use good judgment when meeting prospective roommates.
           </p>
         </Card>
       </div>
