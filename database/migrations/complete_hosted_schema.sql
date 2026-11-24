@@ -294,9 +294,9 @@ CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE INDEX ix_properties_featured_until ON properties (featured_until);
 
-CREATE INDEX ix_properties_owner_id ON properties (owner_id);
-
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
+
+CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
 CREATE INDEX ix_properties_city ON properties (city);
 
@@ -372,7 +372,13 @@ CREATE TABLE verifications (
     user_id UUID NOT NULL, 
     verification_type VARCHAR(50) NOT NULL, 
     status VARCHAR(32) NOT NULL, 
+    method VARCHAR(16) DEFAULT 'manual' NOT NULL, 
     document_url TEXT, 
+    email_domain VARCHAR(255), 
+    subject_hash VARCHAR(64), 
+    code_hash VARCHAR(64), 
+    attempts INTEGER DEFAULT '0' NOT NULL, 
+    expires_at TIMESTAMP WITH TIME ZONE, 
     trust_score_bonus INTEGER NOT NULL, 
     verified_at TIMESTAMP WITH TIME ZONE, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
@@ -380,7 +386,13 @@ CREATE TABLE verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_verifications_subject_created ON verifications (subject_hash, created_at);
+
 CREATE INDEX ix_verifications_user_id ON verifications (user_id);
+
+CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
+
+CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
 
 CREATE TABLE phone_verifications (
     id UUID NOT NULL, 
@@ -395,9 +407,9 @@ CREATE TABLE phone_verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_phone_verifications_phone_created ON phone_verifications (phone_e164, created_at);
-
 CREATE INDEX idx_phone_verifications_user_created ON phone_verifications (user_id, created_at);
+
+CREATE INDEX idx_phone_verifications_phone_created ON phone_verifications (phone_e164, created_at);
 
 CREATE TABLE moderation_reports (
     id UUID NOT NULL, 
@@ -425,9 +437,9 @@ CREATE TABLE user_blocks (
     FOREIGN KEY(blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_user_blocks_user_id ON user_blocks (user_id);
-
 CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
+
+CREATE INDEX ix_user_blocks_user_id ON user_blocks (user_id);
 
 CREATE TABLE subscriptions (
     id UUID NOT NULL, 
@@ -1385,6 +1397,39 @@ INSERT INTO subscription_plans
         ON CONFLICT (code) DO NOTHING;
 
 UPDATE alembic_version SET version_num='010_billing' WHERE alembic_version.version_num = '009_ml_platform';
+
+-- Running upgrade 010_billing -> 011_email_verification
+
+ALTER TABLE verifications ADD COLUMN IF NOT EXISTS method VARCHAR(16) NOT NULL DEFAULT 'manual';
+
+ALTER TABLE verifications ADD COLUMN IF NOT EXISTS email_domain VARCHAR(255);
+
+ALTER TABLE verifications ADD COLUMN IF NOT EXISTS subject_hash VARCHAR(64);
+
+ALTER TABLE verifications ADD COLUMN IF NOT EXISTS code_hash VARCHAR(64);
+
+ALTER TABLE verifications ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE verifications ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS ix_verifications_user_created ON verifications (user_id, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_verifications_subject_created ON verifications (subject_hash, created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
+
+UPDATE verifications SET status = 'cancelled' WHERE status = 'pending' AND method = 'manual';
+
+UPDATE users u SET is_verified = EXISTS (
+               SELECT 1 FROM verifications v
+               WHERE v.user_id = u.id AND v.status = 'approved' AND v.method <> 'manual'
+                 AND v.verification_type IN ('work_email', 'student_email'))
+           WHERE u.is_verified IS DISTINCT FROM EXISTS (
+               SELECT 1 FROM verifications v
+               WHERE v.user_id = u.id AND v.status = 'approved' AND v.method <> 'manual'
+                 AND v.verification_type IN ('work_email', 'student_email'));
+
+UPDATE alembic_version SET version_num='011_email_verification' WHERE alembic_version.version_num = '010_billing';
 
 DO $$
 DECLARE

@@ -90,6 +90,7 @@ def build_profile_response(
     response_dict = {
         "id": profile.id,
         "user_id": profile.user_id,
+        "is_verified": bool(user.is_verified),
         "display_name": profile.display_name,
         "avatar_url": profile.avatar_url,
         "bio": profile.bio,

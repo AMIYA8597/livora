@@ -61,7 +61,7 @@ class AdminService:
             select(func.count(MutualMatch.id)).where(MutualMatch.status == "matched")
         )).scalar() or 0
         pending_verifications = (await self.db.execute(
-            select(func.count(Verification.id)).where(Verification.status == "pending")
+            select(func.count(Verification.id)).where(Verification.status == "pending", Verification.method == "manual")
         )).scalar() or 0
         open_reports = (await self.db.execute(
             select(func.count(ModerationReport.id)).where(ModerationReport.status == "open")

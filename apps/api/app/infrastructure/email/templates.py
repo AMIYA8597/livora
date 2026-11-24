@@ -107,6 +107,19 @@ def _new_message(c: Mapping[str, str]) -> RenderedEmail:
     return RenderedEmail(subject, _layout(subject, body), text)
 
 
+def _verification_code(c: Mapping[str, str]) -> RenderedEmail:
+    subject = "Your Flatmate verification code"
+    body = (f"<p>Hi {c['name']},</p><p>Use this code to verify your {c['kind']} on Flatmate:</p>"
+            f"<p style=\"font-size:28px;font-weight:700;letter-spacing:6px;margin:20px 0\">{c['code']}</p>"
+            f"<p>It expires in {c['expires_minutes']} minutes. Never share it with anyone, including "
+            "people claiming to be from Flatmate.</p>"
+            "<p>If you didn't ask for this, you can ignore this email. Nothing will change.</p>")
+    text = (f"Hi {c['raw_name']},\n\nYour code to verify your {c['raw_kind']} on Flatmate: {c['raw_code']}\n"
+            f"It expires in {c['raw_expires_minutes']} minutes. Never share it with anyone.\n\n"
+            "If you didn't ask for this, ignore this email.")
+    return RenderedEmail(subject, _layout(subject, body), text)
+
+
 TEMPLATES: Dict[str, Callable[[Mapping[str, str]], RenderedEmail]] = {
     "password_reset": _password_reset,
     "password_changed": _password_changed,
@@ -114,6 +127,7 @@ TEMPLATES: Dict[str, Callable[[Mapping[str, str]], RenderedEmail]] = {
     "application_status": _application_status,
     "appointment_requested": _appointment_requested,
     "new_message": _new_message,
+    "verification_code": _verification_code,
 }
 
 

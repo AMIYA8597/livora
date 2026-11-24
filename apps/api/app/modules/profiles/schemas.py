@@ -50,6 +50,8 @@ class ProfileUpdate(BaseModel):
 class ProfileResponse(ProfileBase):
     id: uuid.UUID
     user_id: uuid.UUID
+    # Has a verified work or college email (users.is_verified).
+    is_verified: bool = False
     phone_number: Optional[str] = None
     lifestyle_traits: Dict[str, Any]
     created_at: datetime

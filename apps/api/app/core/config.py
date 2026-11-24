@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     OTP_MAX_ATTEMPTS: int = 5
     OTP_RESEND_COOLDOWN_SECONDS: int = 60
     OTP_MAX_SENDS_PER_HOUR: int = 5
+    EMAIL_CODE_TTL_MINUTES: int = 30  # work/college email verification codes
 
     # Supabase Integration (Free-first / Managed Backend)
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")

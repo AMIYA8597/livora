@@ -8,8 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 from app.modules.moderation.schemas import ReportCreate
 from app.modules.moderation.service import ModerationService
 from app.modules.moderation.models import UserBlock
-from app.modules.verification.service import VerificationService
-from app.modules.verification.models import Verification
 from app.modules.administration.service import AdminService
 from app.modules.users.models import User
 from app.core.exceptions import BadRequestException, ConflictException
@@ -80,41 +78,6 @@ async def test_user_blocking_and_duplicate_prevention():
     block = await service.block_user(user_id, target_id)
     assert block.user_id == user_id
     assert block.blocked_user_id == target_id
-    assert mock_db.commit.called
-
-@pytest.mark.asyncio
-async def test_verification_approval_updates_user():
-    """Admin approving verification marks user as verified."""
-    user_id = uuid4()
-    verif_id = uuid4()
-
-    mock_db = AsyncMock()
-    service = VerificationService(mock_db)
-
-    verif = Verification(
-        id=verif_id,
-        user_id=user_id,
-        verification_type="government_id",
-        status="pending",
-    )
-    user = User(
-        id=user_id,
-        email="verified@example.com",
-        full_name="Verified User",
-        is_verified=False,
-    )
-
-    mock_verif_res = MagicMock()
-    mock_verif_res.scalar_one_or_none.return_value = verif
-
-    mock_user_res = MagicMock()
-    mock_user_res.scalar_one.return_value = user
-
-    mock_db.execute.side_effect = [mock_verif_res, mock_user_res]
-
-    approved = await service.approve_verification(verif_id)
-    assert approved.status == "approved"
-    assert user.is_verified is True
     assert mock_db.commit.called
 
 @pytest.mark.asyncio

@@ -21,7 +21,7 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlparse
@@ -40,6 +40,8 @@ from app.modules.profiles.schemas import LifestyleTraitsSchema  # noqa: E402
 from app.modules.profiles.service import compute_lifestyle_vector  # noqa: E402
 from app.modules.properties.models import Property, PropertyAmenity  # noqa: E402
 from app.modules.users.models import User, UserPrivacySetting, UserRole  # noqa: E402
+from app.modules.verification.models import Verification  # noqa: E402
+from app.modules.verification.service import subject_hash  # noqa: E402
 
 SEED_PASSWORD = "FlatmateDev!2026"  # local development accounts only
 NAMESPACE = uuid.UUID("6f1c2d4e-0b7a-4c1e-9a55-f1a7c0de5eed")
@@ -155,6 +157,11 @@ async def seed(allow_remote: bool = False) -> dict:
             await s.merge(User(id=uid, email=f"{key}@seed.example.com", hashed_password=password_hash,
                                full_name=name, role=role, is_active=True, is_verified=True))
             await s.merge(UserRole(id=sid(f"role:{key}:{role}"), user_id=uid, role=role, is_verified=True))
+            # Badge backed by a work-email verification row, like a real one (users.is_verified means that).
+            await s.merge(Verification(id=sid(f"verification:{key}"), user_id=uid, verification_type="work_email",
+                                       status="approved", method="seed", email_domain="seed.example.com",
+                                       subject_hash=subject_hash(f"{key}@seed.example.com"), trust_score_bonus=40,
+                                       verified_at=datetime.now(timezone.utc)))
             await s.merge(UserPrivacySetting(id=sid(f"privacy:{key}"), user_id=uid, profile_visibility="public"))
             return uid
 

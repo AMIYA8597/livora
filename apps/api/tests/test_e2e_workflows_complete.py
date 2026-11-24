@@ -35,8 +35,6 @@ from app.modules.pg_management.models import PGBuilding
 from app.modules.pg_management.service import PGService
 from app.modules.messaging.schemas import CreateConversationRequest
 from app.modules.messaging.service import MessagingService
-from app.modules.verification.schemas import SubmitVerificationRequest
-from app.modules.verification.service import VerificationService
 from app.modules.moderation.schemas import ReportCreate, ReportReviewRequest
 from app.modules.moderation.models import ModerationReport, UserBlock
 from app.modules.moderation.service import ModerationService
@@ -208,16 +206,6 @@ async def test_workflow_b_property_owner_journey():
 
     owner_id = uuid4()
     applicant_id = uuid4()
-
-    # 1, 2, 3: Verification submission
-    verif_service = VerificationService(mock_db)
-    verif_req = SubmitVerificationRequest(
-        verification_type="government_id",
-        document_url="https://secure.flatmate.internal/docs/aadhaar_verified.pdf",
-    )
-    verif = await verif_service.submit(owner_id, verif_req)
-    assert verif.verification_type == "government_id"
-    assert verif.status == "pending"
 
     # 4 to 9: Create Property with Units, Rooms, Beds, Amenities, Images
     prop_service = PropertyService(mock_db)

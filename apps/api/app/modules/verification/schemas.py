@@ -1,25 +1,51 @@
 import uuid
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from typing import List, Literal, Optional
 
-class SubmitVerificationRequest(BaseModel):
-    verification_type: str # government_id, student_email, work_email, background_check
-    document_url: Optional[str] = None
+from pydantic import BaseModel, Field
 
-class VerificationResponse(BaseModel):
-    id: uuid.UUID
-    user_id: uuid.UUID
+EmailVerificationType = Literal["work_email", "student_email"]
+
+
+class SendEmailCodeRequest(BaseModel):
+    verification_type: EmailVerificationType
+    email: str = Field(..., min_length=3, max_length=254)
+
+
+class ConfirmEmailCodeRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class VerifiedItem(BaseModel):
     verification_type: str
-    status: str
-    document_url: Optional[str] = None
-    trust_score_bonus: int
+    email_domain: Optional[str] = None
     verified_at: Optional[datetime] = None
-    created_at: datetime
-    model_config = ConfigDict(from_attributes=True)
+
+
+class PendingEmailCode(BaseModel):
+    verification_type: str
+    email_domain: str
+    expires_at: datetime
+
 
 class UserTrustScoreResponse(BaseModel):
     user_id: uuid.UUID
     total_trust_score: int
     badges: List[str]
+    # Mobile number and a work or college email both verified.
     is_fully_verified: bool
+    phone_verified: bool = False
+    verifications: List[VerifiedItem] = []
+    pending: Optional[PendingEmailCode] = None
+    # ID-document checks are off until a KYC provider is integrated.
+    id_verification_available: bool = False
+
+
+class SendEmailCodeResponse(BaseModel):
+    success: bool = True
+    message: str
+    email_domain: str
+    already_verified: bool = False
+    expires_in: Optional[int] = None
+    resend_after: Optional[int] = None
+    dev_code: Optional[str] = None

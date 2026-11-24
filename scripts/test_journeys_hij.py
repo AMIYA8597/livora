@@ -113,11 +113,10 @@ async def test_journeys_hij():
         print(f"I.3 Seeker accessing admin stats: HTTP {r_seeker_admin.status_code} (Expected 403: PASS)")
         assert r_seeker_admin.status_code == 403
 
-        # 4. Seeker attempting to approve a verification document (Admin role required)
-        fake_ver_id = str(uuid.uuid4())
-        r_seeker_approve = await client.patch(f"/api/v1/verification/admin/approve/{fake_ver_id}", headers={"Authorization": f"Bearer {refreshed_access_token}"})
-        print(f"I.4 Seeker approving verification: HTTP {r_seeker_approve.status_code} (Expected 403: PASS)")
-        assert r_seeker_approve.status_code == 403
+        # 4. Seeker attempting to list platform users (Admin role required)
+        r_seeker_users = await client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {refreshed_access_token}"})
+        print(f"I.4 Seeker listing admin users: HTTP {r_seeker_users.status_code} (Expected 403: PASS)")
+        assert r_seeker_users.status_code == 403
 
         # 5. Seeker attempting to create replacement roommate vacancy without active lease
         r_seeker_vacancy = await client.post("/api/v1/tenants/vacancies", json={

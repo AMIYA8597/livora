@@ -9,7 +9,7 @@ Executes the complete marketplace lifecycle across multi-role actors:
 6. Rental Application Lifecycle & Status State Machine
 7. Viewing Appointment Scheduling with Overlap Conflict Prevention
 8. Secure Messaging with In-Flight Safety / Scam Moderation
-9. Identity Verification Approval & Administrative Platform Audit
+9. Administrative Platform Audit
 """
 
 from datetime import datetime, timezone, timedelta, date
@@ -37,8 +37,6 @@ from app.ml.embeddings import LocalHashingEmbedder, cosine
 from app.ml.moderation import prescreen
 from app.modules.moderation.service import ModerationService
 from app.modules.moderation.schemas import ReportCreate
-from app.modules.verification.service import VerificationService
-from app.modules.verification.models import Verification
 from app.modules.administration.service import AdminService
 
 
@@ -70,6 +68,7 @@ async def test_full_marketplace_end_to_end_journey():
         role="working_professional",
         is_verified=False,
     )
+    assert tenant_a_user.id == tenant_a_id
     tenant_b_user = User(
         id=tenant_b_id,
         email="priya.fin@example.com",
@@ -391,24 +390,6 @@ async def test_full_marketplace_end_to_end_journey():
         ),
     )
     assert report.status == "open"
-
-    # Admin verifies Actor A's identity via VerificationService
-    verification_service = VerificationService(mock_db)
-    verif = Verification(
-        id=uuid4(),
-        user_id=tenant_a_id,
-        verification_type="government_id",
-        status="pending",
-    )
-    mock_verif_res = MagicMock()
-    mock_verif_res.scalar_one_or_none.return_value = verif
-    mock_user_res = MagicMock()
-    mock_user_res.scalar_one.return_value = tenant_a_user
-    mock_db.execute.side_effect = [mock_verif_res, mock_user_res]
-
-    approved_verif = await verification_service.approve_verification(verif.id)
-    assert approved_verif.status == "approved"
-    assert tenant_a_user.is_verified is True
 
     # Audit platform statistics via AdminService
     admin_service = AdminService(mock_db)
