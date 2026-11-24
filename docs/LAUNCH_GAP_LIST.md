@@ -804,8 +804,8 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
         - signing back in restoring the account
         - e2e 12/12
       Not covered:
-      - Erasure runs only where the worker and beat run (item 18a). Until they're deployed, call
-        `purge_due_accounts` from a scheduled job.
+      - Erasure runs only where the worker and beat run. Item 18a deploys them to staging once
+        the `STAGING_REDIS_URL` secret exists.
       - An open chat socket isn't closed at once when someone deletes; it drops at its next
         reconnect.
       - Reports filed *about* the deleted person stay, attached to the anonymous row. Decide how
@@ -883,10 +883,65 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
         search previews and the page's first HTML.
       - **Unchanged pages:** `/flatmates`, `/pg` and `/groups` still load their data in the
         browser. They show sign-in or personal results, so there's little to index.
-- [ ] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a
+- [x] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a
       worker, emails still go out immediately (the in-request kick), but retries happen only when a
       later request triggers a dispatch, and maintenance never runs. Deploy one worker and exactly
       one beat (e.g. a Cloud Run service with always-on CPU, or Cloud Scheduler calling a Cloud
       Run job), plus a managed Redis.
+      Done:
+      - **Worker entrypoint** `python -m app.workers.run` (`apps/api/app/workers/run.py`):
+        - Runs the Celery worker with beat inside it.
+        - Serves `/health` on `$PORT`. It returns 503 until Celery has reached Redis and is
+          taking tasks, 200 while it runs, and 503 once Celery stops; the process then exits so
+          the host restarts it.
+        - Passes SIGTERM to Celery for a warm shutdown. Tasks are acked late, so one cut off
+          is delivered again.
+        - Settings: `WORKER_EMBED_BEAT`, `WORKER_CONCURRENCY`, `WORKER_POOL`.
+      - **Managed Redis over TLS:** `rediss://` URLs now work for the Celery broker and backend.
+        Certificates are verified unless the URL says otherwise; before, Celery refused such
+        URLs.
+      - **Staging workflow:**
+        - Redis is one Secret Manager secret, `STAGING_REDIS_URL`. The API gets it too, for
+          shared rate limits, its cache and chat across instances.
+        - When the secret exists, the workflow deploys `flatmate-worker-staging` from the same
+          image with the same settings:
+          - one instance (min = max = 1), so exactly one beat
+          - CPU always on
+          - internal ingress, no public access
+          - a startup probe, so a worker that can't reach Redis fails the deploy instead of
+            going live idle
+          - a liveness probe
+        - Until the secret exists, the workflow warns and skips the worker instead of failing.
+        - Optional `STAGING_VPC_NETWORK` / `STAGING_VPC_SUBNET` variables are for a Redis on a
+          private network (Memorystore).
+      - **Other deploy files:**
+        - `docker-compose.prod.yml` gains a worker and a single beat.
+        - Its default Redis URLs now carry `REDIS_PASSWORD`. The bundled Redis requires it,
+          so before this the API couldn't connect.
+        - `infrastructure/deployment/k8s-deployment.yaml` gains a one-replica worker with the
+          `Recreate` strategy, so there's never a second beat.
+      - **Runbook:** `DEPLOYMENT.md` step 5 covers creating the Redis and the secret, and
+        checking the worker.
+      - **Tests:** `apps/api/tests/test_worker_runtime.py` (5).
+        - It covers the command line, health states and TLS options.
+        - It also starts the real entrypoint and waits for it to report ready. On Linux (CI) it
+          runs with beat embedded and checks for a clean shutdown on SIGTERM.
+      Not covered:
+      - **Not deployed:** nothing has been run against GCP from here.
+        - Before the first run, create the Redis and the `STAGING_REDIS_URL` secret, and give the
+          Cloud Run runtime service account access to it.
+        - The worker's `--startup-probe` / `--liveness-probe` flags need a recent gcloud (the
+          runner's preinstalled one is).
+      - **Untested locally:**
+        - Beat embedded in the worker, and Celery against a real Redis. This machine has no
+          Redis and Docker wasn't running; the test used Celery's in-memory broker.
+        - The workflow has no actionlint run (blocked earlier); it was only checked as valid
+          YAML.
+      - **Cost:** one always-on Cloud Run instance (1 vCPU, 1 GiB) plus the Redis.
+      - **Statement timeout:** the app database role's 15-second statement timeout applies to
+        the worker too. Large maintenance or retraining queries may need a longer one later.
+      - **Deploy overlap:** a rolling deploy can briefly run two beats. Every scheduled job is
+        safe to overlap (rows are claimed with `SKIP LOCKED`), so the worst case is an extra
+        sweep.
 - [ ] **18. Production deploy pipeline.** The staging workflow exists, but production promotion,
       backups and a tested restore do not.

@@ -88,7 +88,36 @@ In Supabase Dashboard (`Storage -> New Bucket`):
 2. `staging-verification-docs` (Private visibility, presigned URL access only)
 3. `flatmate-media-staging` (General application media)
 
-### Step 5: Verify Live End-to-End User Journeys
+### Step 5: Managed Redis and the Background Worker
+The API works without Redis, but then rate limits are per instance, chat doesn't reach people
+connected to another instance, and the worker can't run. The worker handles three jobs:
+- retrying failed emails (every 15 seconds)
+- hourly maintenance, including erasing accounts whose 30-day deletion grace has passed
+- the weekly ranker retrain
+
+1. **Create a Redis.** Upstash or Redis Cloud reach Cloud Run over the internet with TLS and
+   need nothing else. Memorystore needs Direct VPC egress: set the GitHub `staging` environment
+   variables `STAGING_VPC_NETWORK` and `STAGING_VPC_SUBNET`.
+2. **Store its URL** (`rediss://...` for TLS) as the Secret Manager secret `STAGING_REDIS_URL`
+   in the GCP project, and give the Cloud Run runtime service account the Secret Accessor role
+   on it:
+   ```bash
+   printf '%s' "$REDIS_URL" | gcloud secrets create STAGING_REDIS_URL --data-file=-
+   ```
+3. **Run the Staging Deployment workflow again.** It passes the URL to the API and deploys
+   `flatmate-worker-staging`:
+   - the same image, running `python -m app.workers.run`
+   - one instance, with CPU always on
+   - beat runs inside the worker, so there is exactly one scheduler
+
+   The deploy succeeds only once the worker has reached Redis and is taking tasks. Until the
+   secret exists, the workflow warns and skips the worker.
+4. **Check it:**
+   - `gcloud run services logs read flatmate-worker-staging --region asia-south1` shows
+     `celery@... ready` and `outbox.dispatch` running every 15 seconds.
+   - The API's `/health/ready` reports `"redis": {"status": "ok"}`.
+
+### Step 6: Verify Live End-to-End User Journeys
 Execute the automated live integration suite:
 ```bash
 python scripts/e2e_live_staging_workflows.py
