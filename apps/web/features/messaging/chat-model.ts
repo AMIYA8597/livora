@@ -143,3 +143,24 @@ export function typingLabel(names: string[]): string | null {
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
   return "Several people are typing…";
 }
+
+/** The safety warning moderation attached to a message, if any. */
+export function safetyWarning(msg: Pick<MessageDTO, "metadata">): string | null {
+  const w = msg.metadata?.safety_warning;
+  return typeof w === "string" && w.trim() ? w : null;
+}
+
+/** Set or clear a message's safety warning (from a live moderation or edit event). */
+export function withSafetyWarning(msg: MessageDTO, warning: string | null | undefined): MessageDTO {
+  const metadata = { ...(msg.metadata ?? {}) };
+  if (warning) metadata.safety_warning = warning;
+  else delete metadata.safety_warning;
+  return { ...msg, metadata };
+}
+
+export interface ReplySuggestions {
+  suggestions: string[];
+  /** "ai" when Claude wrote them, "template" for the built-in fallbacks. */
+  source: "ai" | "template";
+  mode: "icebreaker" | "reply" | "follow_up";
+}

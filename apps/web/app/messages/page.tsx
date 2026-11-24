@@ -21,6 +21,7 @@ import {
   deliveryStatus,
   otherParticipants,
   presenceLabel,
+  safetyWarning,
   senderName,
 } from "@/features/messaging/chat-model";
 
@@ -65,6 +66,8 @@ function MessagesView() {
           ? { id: m.reply_to.id, senderName: senderName(details, m.reply_to.sender_id, myId), content: m.reply_to.content }
           : null,
         attachments: m.attachments,
+        // Warnings protect the recipient; the sender isn't shown one about their own message.
+        safetyWarning: m.sender_id !== myId && !m.is_deleted ? safetyWarning(m) : null,
       })),
     [chat.active.messages, chat.active.cursors, details, myId],
   );
@@ -136,6 +139,7 @@ function MessagesView() {
                 onDeleteMessage={chat.remove}
                 onUploadAttachment={chat.upload}
                 onTyping={chat.setMyTyping}
+                onRequestSuggestions={chat.suggest}
                 onOpenDetails={() => setDetailsOpen((o) => !o)}
                 onBack={() => setMobilePane("list")}
               />

@@ -16,7 +16,9 @@ export type SocketStatus = "idle" | "connecting" | "open" | "offline";
 
 export interface SocketCallbacks {
   onMessageCreated?: (msg: MessageDTO) => void;
-  onMessageUpdated?: (data: { id: string; conversation_id: string; content: string; is_edited: boolean; edited_at: string }) => void;
+  onMessageUpdated?: (data: { id: string; conversation_id: string; content: string; is_edited: boolean; edited_at: string; safety_warning?: string | null }) => void;
+  /** Moderation finished for a message: show, change or remove its safety warning. */
+  onMessageModerated?: (data: { id: string; conversation_id: string; safety_warning?: string | null }) => void;
   onMessageDeleted?: (data: { id: string; conversation_id: string; is_deleted: boolean; deleted_at: string }) => void;
   onMessageRead?: (data: { conversation_id: string; user_id: string; last_read_message_id?: string | null; read_at: string }) => void;
   onTypingStarted?: (data: { conversation_id: string; user_id: string }) => void;
@@ -85,6 +87,7 @@ export function useSocket(callbacks?: SocketCallbacks) {
         case "message.created": cb.onMessageCreated?.(data); break;
         case "message.updated": cb.onMessageUpdated?.(data); break;
         case "message.deleted": cb.onMessageDeleted?.(data); break;
+        case "message.moderated": cb.onMessageModerated?.(data); break;
         case "message.read": cb.onMessageRead?.(data); break;
         case "typing.started": cb.onTypingStarted?.(data); break;
         case "typing.stopped": cb.onTypingStopped?.(data); break;

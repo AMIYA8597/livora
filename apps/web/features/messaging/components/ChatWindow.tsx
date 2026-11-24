@@ -4,10 +4,10 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   Send, ShieldAlert, Check, CheckCheck, Paperclip, X,
   CornerUpLeft, MoreVertical, Edit2, Trash2, FileText, Download,
-  Users, Info, ShieldCheck, Clock, ArrowLeft
+  Users, Info, ShieldCheck, Clock, ArrowLeft, Sparkles
 } from "lucide-react";
 import { AttachmentDTO } from "@flatmate/contracts";
-import { typingLabel } from "../chat-model";
+import { typingLabel, type ReplySuggestions } from "../chat-model";
 
 export interface MessageItem {
   id: string;
@@ -25,6 +25,8 @@ export interface MessageItem {
     content: string;
   } | null;
   attachments?: AttachmentDTO[];
+  /** Shown under messages from others that moderation flagged (scam patterns, abuse). */
+  safetyWarning?: string | null;
 }
 
 export interface ChatWindowProps {
@@ -46,6 +48,8 @@ export interface ChatWindowProps {
   /** Re-send a message that failed to send. */
   onRetry?: (messageId: string) => void;
   onOpenDetails?: () => void;
+  /** Reply ideas for this conversation; a chosen one fills the composer and is never sent automatically. */
+  onRequestSuggestions?: () => Promise<ReplySuggestions>;
   /** Mobile only: return to the conversation list. */
   onBack?: () => void;
 }
@@ -67,6 +71,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onTyping,
   onRetry,
   onOpenDetails,
+  onRequestSuggestions,
   onBack,
 }) => {
   const [inputText, setInputText] = useState("");
@@ -77,11 +82,37 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [editingMessage, setEditingMessage] = useState<MessageItem | null>(null);
   const [stagedAttachments, setStagedAttachments] = useState<AttachmentDTO[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [activeMenuMsgId, setActiveMenuMsgId] = useState<string | null>(null);
+  // Suggestions belong to one conversation at one moment: a new message makes them stale.
+  const [suggested, setSuggested] = useState<{ key: string; res: ReplySuggestions } | null>(null);
+  const suggestionKey = `${conversationId}:${messages.length}`;
+  const suggestions = suggested?.key === suggestionKey ? suggested.res : null;
+  const setSuggestions = (res: ReplySuggestions | null) =>
+    setSuggested(res ? { key: suggestionKey, res } : null);
+  const [isSuggesting, setIsSuggesting] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSuggest = async () => {
+    if (!onRequestSuggestions || isSuggesting) return;
+    setIsSuggesting(true);
+    try {
+      const res = await onRequestSuggestions();
+      setSuggestions(res.suggestions.length ? res : null);
+      if (!res.suggestions.length) setWarning("No suggestions right now. Try again in a moment.");
+    } catch (err) {
+      setWarning(err instanceof Error ? err.message : "Couldn't load suggestions.");
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
+
+  const applySuggestion = (text: string) => {
+    setInputText(text);
+    setSuggestions(null);
+    document.getElementById(`composer-${conversationId}`)?.focus();
+  };
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -102,21 +133,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  // Pre-flight safety heuristic check & submit
+  // Scam and abuse screening happens on the server, which warns the recipient. Here we only
+  // remind the sender before they share a phone number with someone unverified.
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = inputText.trim();
     if (!text && stagedAttachments.length === 0) return;
 
-    // Rental advance scam warning check
-    const isAdvanceScam = /advance\s+(money|token|rent|payment)\s+before\s+visit/i.test(text);
     const hasPhone = /(\+91[\-\s]?)?[6-9]\d{9}/.test(text);
-
-    if (isAdvanceScam) {
-      setWarning("Security Warning: Requesting or offering advance payments before physical property visits is prohibited for your protection.");
-      return;
-    }
-
     if (hasPhone && !isRecipientVerified) {
       setWarning("Notice: Sharing phone numbers prior to mutual identity verification is monitored in accordance with safety guidelines.");
     } else {
@@ -299,6 +323,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
               </div>
 
+              {msg.safetyWarning && (
+                <div
+                  role="note"
+                  className="max-w-[75%] mt-1 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-900"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 mt-px shrink-0 text-amber-600" aria-hidden="true" />
+                  <span>
+                    <span className="sr-only">Safety warning: </span>
+                    {msg.safetyWarning}
+                  </span>
+                </div>
+              )}
+
               {/* Message Footer: Timestamp, Edit label, Receipts */}
               <div className="flex items-center space-x-1.5 mt-1 px-1 text-[10px] text-slate-400">
                 <span>{msg.createdAt}</span>
@@ -451,6 +488,38 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       )}
 
+      {/* Reply suggestions: fill the composer, never send on their own */}
+      {suggestions && (
+        <div className="border-t border-slate-200 bg-slate-50 px-3 py-2 space-y-1.5" aria-live="polite">
+          <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <span className="inline-flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-indigo-500" aria-hidden="true" />
+              {suggestions.source === "ai" ? "Suggested by AI. Edit before sending." : "Suggestions. Edit before sending."}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSuggestions(null)}
+              aria-label="Hide suggestions"
+              className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 md:p-1 text-slate-400 hover:text-slate-700"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => applySuggestion(s)}
+                className="text-left text-xs bg-white border border-indigo-200 text-indigo-900 hover:bg-indigo-50 rounded-2xl px-3 py-2 min-h-[44px] md:min-h-0"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Composer Input Bar */}
       <form onSubmit={handleSend} className="p-2 sm:p-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-slate-200 bg-white flex items-center gap-2">
         {onUploadAttachment && (
@@ -475,7 +544,21 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </>
         )}
 
+        {onRequestSuggestions && !editingMessage && (
+          <button
+            type="button"
+            onClick={handleSuggest}
+            disabled={isSuggesting}
+            className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] shrink-0 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+            title={messages.length ? "Suggest a reply" : "Suggest an icebreaker"}
+            aria-label={messages.length ? "Suggest a reply" : "Suggest an icebreaker"}
+          >
+            <Sparkles className={`w-4 h-4 ${isSuggesting ? "animate-pulse" : ""}`} />
+          </button>
+        )}
+
         <input
+          id={`composer-${conversationId}`}
           type="text"
           value={inputText}
           onChange={handleInputChange}

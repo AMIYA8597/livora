@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 interface AppliedFilters {
+  q: string;
   city: string;
   locality: string;
   minRent: string;
@@ -33,6 +34,7 @@ function PropertiesListContent() {
   const searchParams = useSearchParams();
 
   // Filter States initialized from URL
+  const [q, setQ] = useState(searchParams.get("q") || "");
   const [city, setCity] = useState(searchParams.get("city") || "");
   const [locality, setLocality] = useState(searchParams.get("locality") || "");
   const [minRent, setMinRent] = useState(searchParams.get("min_rent") || "");
@@ -49,6 +51,7 @@ function PropertiesListContent() {
   // The inputs above are drafts; `applied` is what the search actually uses. Filters apply on
   // submit, except the city chips and chip removal, which apply at once.
   const [applied, setApplied] = useState<AppliedFilters>(() => ({
+    q: searchParams.get("q") || "",
     city: searchParams.get("city") || "",
     locality: searchParams.get("locality") || "",
     minRent: searchParams.get("min_rent") || "",
@@ -58,14 +61,18 @@ function PropertiesListContent() {
     furnishing: searchParams.get("furnishing") || "",
   }));
   const apply = (overrides: Partial<AppliedFilters> = {}) => {
-    setApplied({ city, locality, minRent, maxRent, category, configuration, furnishing, ...overrides });
+    setApplied({ q, city, locality, minRent, maxRent, category, configuration, furnishing, ...overrides });
     setPage(1);
   };
 
   const propertiesQuery = useApiQuery<PropertyDTO[]>("/properties", {
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
+    // Free text is matched by meaning as well as words (hybrid search) and ordered by relevance.
+    q: applied.q.trim() || undefined,
     city: applied.city.trim() || undefined,
+    locality: applied.locality.trim() || undefined,
+    furnishing_status: applied.furnishing || undefined,
     min_rent: applied.minRent ? Number(applied.minRent) : undefined,
     max_rent: applied.maxRent ? Number(applied.maxRent) : undefined,
     property_category: applied.category || undefined,
@@ -90,6 +97,7 @@ function PropertiesListContent() {
   useEffect(() => {
     const url = new URL(window.location.href);
     const entries: Record<string, string | number> = {
+      q: applied.q,
       city: applied.city,
       locality: applied.locality,
       min_rent: applied.minRent,
@@ -119,7 +127,13 @@ function PropertiesListContent() {
     apply({ city: nextCity });
   };
 
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    apply();
+  };
+
   const handleReset = () => {
+    setQ("");
     setCity("");
     setLocality("");
     setMinRent("");
@@ -128,12 +142,13 @@ function PropertiesListContent() {
     setConfiguration("");
     setFurnishing("");
     setSortBy("newest");
-    setApplied({ city: "", locality: "", minRent: "", maxRent: "", category: "", configuration: "", furnishing: "" });
+    setApplied({ q: "", city: "", locality: "", minRent: "", maxRent: "", category: "", configuration: "", furnishing: "" });
     setPage(1);
   };
 
   // Chips show what is applied; removing one clears both the draft and the applied value.
   const activeFilters = [
+    applied.q && { label: `Search: “${applied.q}”`, onRemove: () => { setQ(""); apply({ q: "" }); } },
     applied.city && { label: `City: ${applied.city}`, onRemove: () => { setCity(""); apply({ city: "" }); } },
     applied.minRent && { label: `Min: ${formatCurrency(applied.minRent)}`, onRemove: () => { setMinRent(""); apply({ minRent: "" }); } },
     applied.maxRent && { label: `Max: ${formatCurrency(applied.maxRent)}`, onRemove: () => { setMaxRent(""); apply({ maxRent: "" }); } },
@@ -165,7 +180,7 @@ function PropertiesListContent() {
               onChange={(e) => setSortBy(e.target.value)}
               className="bg-transparent focus:outline-none cursor-pointer"
             >
-              <option value="newest">Newest First</option>
+              <option value="newest">{applied.q ? "Best match" : "Newest First"}</option>
               <option value="price_asc">Rent: Low to High</option>
               <option value="price_desc">Rent: High to Low</option>
             </select>
@@ -182,6 +197,24 @@ function PropertiesListContent() {
           </Button>
         </div>
       </div>
+
+      {/* Free-text search: describe the place in your own words */}
+      <form onSubmit={handleSearchSubmit} role="search" className="flex gap-2">
+        <label htmlFor="property-search" className="sr-only">Describe what you&apos;re looking for</label>
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-charcoal-muted absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <input
+            id="property-search"
+            type="search"
+            value={q}
+            maxLength={300}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Describe it: quiet furnished room near Indiranagar metro, pets OK"
+            className="w-full min-h-[44px] pl-9 pr-3 rounded-xl border border-warm-200 bg-white text-base sm:text-sm text-charcoal placeholder:text-charcoal-muted focus:outline-none focus:ring-2 focus:ring-forest/40"
+          />
+        </div>
+        <Button type="submit" variant="primary" className="min-h-[44px] shrink-0">Search</Button>
+      </form>
 
       {/* Desktop Filter Form */}
       <form
@@ -432,7 +465,7 @@ function PropertiesListContent() {
             <Skeleton key={n} variant="card" />
           ))}
         </div>
-      ) : properties.length === 0 ? (
+      ) : error ? null : properties.length === 0 ? (
         <EmptyState
           icon={MapPin}
           title="No properties match your search"

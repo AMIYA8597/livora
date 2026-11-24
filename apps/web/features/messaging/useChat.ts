@@ -11,8 +11,10 @@ import {
   mergeFetched,
   otherParticipants,
   upsertMessage,
+  withSafetyWarning,
   type Presence,
   type ReadCursor,
+  type ReplySuggestions,
 } from "./chat-model";
 
 const TYPING_TTL_MS = 6_000;
@@ -187,7 +189,15 @@ export function useChat(
     onMessageUpdated: (data) => {
       patchActive(data.conversation_id, (s) => ({
         ...s,
-        messages: s.messages.map((m) => (m.id === data.id ? { ...m, content: data.content, is_edited: true, edited_at: data.edited_at } : m)),
+        messages: s.messages.map((m) => (m.id === data.id
+          ? withSafetyWarning({ ...m, content: data.content, is_edited: true, edited_at: data.edited_at }, data.safety_warning)
+          : m)),
+      }));
+    },
+    onMessageModerated: (data) => {
+      patchActive(data.conversation_id, (s) => ({
+        ...s,
+        messages: s.messages.map((m) => (m.id === data.id ? withSafetyWarning(m, data.safety_warning) : m)),
       }));
     },
     onMessageDeleted: (data) => {
@@ -320,6 +330,12 @@ export function useChat(
     });
   }, [activeConvId]);
 
+  /** Reply ideas for the open conversation. Never sent automatically. */
+  const suggest = useCallback((): Promise<ReplySuggestions> => {
+    if (!activeConvId) return Promise.reject(new Error("Open a conversation first"));
+    return apiClient<ReplySuggestions>(`/messaging/conversations/${activeConvId}/suggestions`, { method: "POST" });
+  }, [activeConvId]);
+
   const setMyTyping = useCallback((isTyping: boolean) => {
     if (!activeConvId) return;
     if (isTyping) socket.startTyping(activeConvId);
@@ -338,6 +354,7 @@ export function useChat(
     edit,
     remove,
     upload,
+    suggest,
     setMyTyping,
     reload: () => setSyncNonce((n) => n + 1),
   };

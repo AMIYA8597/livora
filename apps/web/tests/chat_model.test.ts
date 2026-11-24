@@ -8,10 +8,12 @@ import {
   deliveryStatus,
   mergeFetched,
   presenceLabel,
+  safetyWarning,
   senderName,
   time,
   typingLabel,
   upsertMessage,
+  withSafetyWarning,
 } from "../features/messaging/chat-model.ts";
 
 const ME = "me";
@@ -102,4 +104,18 @@ test("chat: presence and typing labels", () => {
   assert.equal(typingLabel([]), null);
   assert.equal(typingLabel(["Bilal"]), "Bilal is typing…");
   assert.equal(typingLabel(["A", "B", "C"]), "Several people are typing…");
+});
+
+test("safety warnings from moderation are set, replaced and lifted without touching other metadata", () => {
+  const m = msg({ id: "m1", metadata: { client: "web" } });
+  assert.equal(safetyWarning(m), null);
+  const warned = withSafetyWarning(m, "Never pay before a visit.");
+  assert.equal(safetyWarning(warned), "Never pay before a visit.");
+  assert.equal(warned.metadata?.client, "web");
+  assert.equal(m.metadata?.safety_warning, undefined); // not mutated
+  const lifted = withSafetyWarning(warned, null);
+  assert.equal(safetyWarning(lifted), null);
+  assert.equal(lifted.metadata?.client, "web");
+  assert.equal(safetyWarning(msg({ metadata: { safety_warning: "  " } })), null);
+  assert.equal(safetyWarning(msg({ metadata: { safety_warning: 42 } })), null);
 });

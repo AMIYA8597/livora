@@ -26,6 +26,9 @@ export default function FlatmatesDirectoryPage() {
   const [maxBudget, setMaxBudget] = useState("");
   const [sleepSchedule, setSleepSchedule] = useState("");
   const [diet, setDiet] = useState("");
+  // Free-text "about me" search: typed text is applied on submit, not on every keystroke.
+  const [queryText, setQueryText] = useState("");
+  const [q, setQ] = useState("");
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // Filters refetch automatically; empty filters are omitted.
@@ -34,6 +37,7 @@ export default function FlatmatesDirectoryPage() {
     max_budget: maxBudget || undefined,
     sleep_schedule: sleepSchedule || undefined,
     diet: diet || undefined,
+    q: q || undefined,
   });
   const seekers = seekersQuery.data ?? [];
   const setSeekers = seekersQuery.setData;
@@ -89,7 +93,14 @@ export default function FlatmatesDirectoryPage() {
     }
   };
 
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setQ(queryText.trim());
+  };
+
   const handleReset = () => {
+    setQueryText("");
+    setQ("");
     setCity("");
     setMaxBudget("");
     setSleepSchedule("");
@@ -146,6 +157,33 @@ export default function FlatmatesDirectoryPage() {
         </div>
       )}
 
+      <form role="search" onSubmit={handleSearchSubmit} className="flex gap-2">
+        <label htmlFor="flatmate-search" className="sr-only">
+          Search flatmates by what they wrote about themselves
+        </label>
+        <input
+          id="flatmate-search"
+          type="search"
+          maxLength={300}
+          value={queryText}
+          onChange={(e) => setQueryText(e.target.value)}
+          placeholder="Try “quiet, works from home, loves cooking”"
+          className="flex-1 min-h-[44px] text-sm border border-slate-300 rounded-xl px-4 bg-white text-charcoal focus:ring-2 focus:ring-brand-500"
+        />
+        <Button type="submit" variant="primary" className="gap-2 min-h-[44px]">
+          <Search className="w-4 h-4" />
+          <span>Search</span>
+        </Button>
+      </form>
+      {q && (
+        <p className="text-xs text-charcoal-muted -mt-5">
+          Showing the closest matches for “{q}”.{" "}
+          <button type="button" onClick={() => { setQ(""); setQueryText(""); }} className="underline hover:text-forest">
+            Clear search
+          </button>
+        </p>
+      )}
+
       {/* Filter Toolbar */}
       <div className="bg-white p-5 rounded-2xl border border-warm-200 shadow-xs space-y-4">
         {/* Popular Cities */}
@@ -186,10 +224,11 @@ export default function FlatmatesDirectoryPage() {
             className="w-full text-xs font-semibold border border-slate-300 rounded-xl px-3.5 py-2.5 bg-white text-charcoal focus:ring-2 focus:ring-brand-500 cursor-pointer"
           >
             <option value="">Any Diet Preference</option>
-            <option value="veg">Vegetarian</option>
-            <option value="non_veg">Non-Vegetarian</option>
-            <option value="jain">Jain</option>
-            <option value="eggetarian">Eggetarian</option>
+            <option value="vegetarian">Vegetarian</option>
+            <option value="vegan">Vegan</option>
+            <option value="omnivore">Eats everything</option>
+            <option value="pescatarian">Pescatarian</option>
+            <option value="halal">Halal</option>
           </select>
 
           <div className="flex gap-2">
@@ -253,7 +292,7 @@ export default function FlatmatesDirectoryPage() {
             <Skeleton key={n} variant="card" height={260} />
           ))}
         </div>
-      ) : seekers.length === 0 ? (
+      ) : error ? null : seekers.length === 0 ? (
         <EmptyState
           icon={Users}
           title="No flatmates found matching your criteria"
