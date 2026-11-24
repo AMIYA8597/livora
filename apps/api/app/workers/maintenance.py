@@ -60,5 +60,9 @@ async def run_maintenance(session_factory: async_sessionmaker[AsyncSession]) -> 
             res = await session.execute(text(sql), params)
             counts[name] = int(getattr(res, "rowcount", 0) or 0)
         await session.commit()
+    # Accounts whose 30-day deletion grace has passed (see app/modules/users/privacy.py).
+    from app.modules.users.privacy import purge_due_accounts
+
+    counts["erase_deleted_accounts"] = await purge_due_accounts(session_factory)
     logger.info("Maintenance completed: %s", counts)
     return counts

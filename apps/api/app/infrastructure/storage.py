@@ -19,6 +19,16 @@ class StorageProvider(ABC):
         """Get time-limited presigned URL."""
         pass
 
+    def delete_prefix(self, bucket: str, prefix: str) -> int:
+        """Delete every file under `prefix` ("<owner>/"). Returns how many were removed."""
+        raise NotImplementedError
+
+
+def _safe_prefix(prefix: str) -> str:
+    if not prefix.endswith("/") or ".." in prefix or prefix.startswith("/") or "\\" in prefix or prefix.count("/") != 1:
+        raise ValueError("Prefix must be a single top-level folder like '<id>/'")
+    return prefix
+
 class LocalStorageProvider(StorageProvider):
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = Path(base_dir or os.path.join(os.getcwd(), "uploads"))
@@ -44,6 +54,17 @@ class LocalStorageProvider(StorageProvider):
         if not str(file_path).startswith(str(bucket_dir)):
             raise ValueError("Path traversal attempt detected")
         return f"/uploads/{bucket}/{path}?expires={expires_in}"
+
+    def delete_prefix(self, bucket: str, prefix: str) -> int:
+        import shutil
+
+        folder = (self.base_dir / bucket / _safe_prefix(prefix)).resolve()
+        bucket_dir = (self.base_dir / bucket).resolve()
+        if not str(folder).startswith(str(bucket_dir)) or not folder.is_dir():
+            return 0
+        count = sum(1 for f in folder.rglob("*") if f.is_file())
+        shutil.rmtree(folder)
+        return count
 
 class StorageConfigurationError(RuntimeError):
     """Raised when the configured storage backend cannot be used."""
@@ -104,6 +125,19 @@ class SupabaseStorageProvider(StorageProvider):
         if not url:
             raise StorageConfigurationError(f"Supabase returned no signed URL for {bucket}/{path}")
         return str(url)
+
+    def delete_prefix(self, bucket: str, prefix: str) -> int:
+        folder = _safe_prefix(prefix).rstrip("/")
+        store = self.client.storage.from_(bucket)
+        removed = 0
+        for _ in range(1000):  # list returns pages of up to 100; uploads sit directly in the folder
+            entries = store.list(folder, {"limit": 100}) or []
+            paths = [f"{folder}/{e['name']}" for e in entries if isinstance(e, dict) and e.get("id")]
+            if not paths:
+                return removed
+            store.remove(paths)
+            removed += len(paths)
+        return removed
 
 _storage_instance: Optional[StorageProvider] = None
 

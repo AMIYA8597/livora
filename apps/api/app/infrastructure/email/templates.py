@@ -120,6 +120,23 @@ def _verification_code(c: Mapping[str, str]) -> RenderedEmail:
     return RenderedEmail(subject, _layout(subject, body), text)
 
 
+def _account_deletion_scheduled(c: Mapping[str, str]) -> RenderedEmail:
+    subject = "Your Flatmate account will be deleted"
+    body = (f"<p>Hi {c['name']},</p><p>We received a request to delete your Flatmate account. "
+            "It's hidden now, and it will be permanently deleted on "
+            f"<strong>{c['purge_date']}</strong>.</p>"
+            "<p>Changed your mind? Sign in before then and your account, profile and listings "
+            "come back as they were.</p>"
+            f"{_button(c['sign_in_url'], 'Sign in to keep my account')}"
+            "<p style=\"font-size:13px;color:#52606d\">If you didn't ask for this, sign in now and change "
+            "your password.</p>")
+    text = (f"Hi {c['raw_name']},\n\nWe received a request to delete your Flatmate account. It's hidden now, "
+            f"and it will be permanently deleted on {c['raw_purge_date']}.\n\n"
+            f"Changed your mind? Sign in before then to keep it: {c['raw_sign_in_url']}\n\n"
+            "If you didn't ask for this, sign in now and change your password.")
+    return RenderedEmail(subject, _layout(subject, body), text)
+
+
 TEMPLATES: Dict[str, Callable[[Mapping[str, str]], RenderedEmail]] = {
     "password_reset": _password_reset,
     "password_changed": _password_changed,
@@ -128,6 +145,7 @@ TEMPLATES: Dict[str, Callable[[Mapping[str, str]], RenderedEmail]] = {
     "appointment_requested": _appointment_requested,
     "new_message": _new_message,
     "verification_code": _verification_code,
+    "account_deletion_scheduled": _account_deletion_scheduled,
 }
 
 

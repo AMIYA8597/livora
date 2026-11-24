@@ -21,6 +21,8 @@ class TokenResponse(BaseModel):
     expires_in: int
     user: UserResponse
     roles: List[str]
+    # True when this sign-in cancelled a pending account deletion.
+    account_restored: bool = False
 
 class CurrentUserResponse(UserResponse):
     """/auth/me: the user plus every role they hold, so clients never trust stored roles."""

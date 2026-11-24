@@ -25,6 +25,7 @@ CREATE TABLE users (
     phone_verified_at TIMESTAMP WITH TIME ZONE, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    deleted_at TIMESTAMP WITH TIME ZONE, 
     PRIMARY KEY (id)
 );
 
@@ -68,11 +69,11 @@ CREATE TABLE outbox_events (
     PRIMARY KEY (id)
 );
 
+CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
+
 CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
 
 CREATE INDEX ix_outbox_events_status ON outbox_events (status);
-
-CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
 
 CREATE TABLE subscription_plans (
     id UUID NOT NULL, 
@@ -157,6 +158,18 @@ CREATE TABLE user_privacy_settings (
     UNIQUE (user_id), 
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
+
+CREATE TABLE account_deletion_requests (
+    user_id UUID NOT NULL, 
+    requested_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    purge_after TIMESTAMP WITH TIME ZONE NOT NULL, 
+    cancellable BOOLEAN NOT NULL, 
+    paused_property_ids JSONB NOT NULL, 
+    PRIMARY KEY (user_id), 
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_account_deletion_requests_purge_after ON account_deletion_requests (purge_after);
 
 CREATE TABLE profiles (
     id UUID NOT NULL, 
@@ -290,15 +303,15 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_properties_owner_id ON properties (owner_id);
-
-CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
-
-CREATE INDEX ix_properties_featured_until ON properties (featured_until);
-
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
 
 CREATE INDEX ix_properties_city ON properties (city);
+
+CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
+
+CREATE INDEX ix_properties_owner_id ON properties (owner_id);
+
+CREATE INDEX ix_properties_featured_until ON properties (featured_until);
 
 CREATE TABLE groups (
     id UUID NOT NULL, 
@@ -346,9 +359,9 @@ CREATE TABLE mutual_matches (
     FOREIGN KEY(user_two_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_mutual_matches_user_two_id ON mutual_matches (user_two_id);
-
 CREATE INDEX ix_mutual_matches_user_one_id ON mutual_matches (user_one_id);
+
+CREATE INDEX ix_mutual_matches_user_two_id ON mutual_matches (user_two_id);
 
 CREATE TABLE notifications (
     id UUID NOT NULL, 
@@ -419,13 +432,13 @@ CREATE TABLE verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
-
 CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
 
 CREATE INDEX ix_verifications_subject_created ON verifications (subject_hash, created_at);
 
 CREATE INDEX ix_verifications_user_id ON verifications (user_id);
+
+CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
 
 CREATE TABLE phone_verifications (
     id UUID NOT NULL, 
@@ -636,9 +649,9 @@ CREATE TABLE localities (
 
 CREATE INDEX ix_localities_postal_code ON localities (postal_code);
 
-CREATE INDEX ix_localities_city_id ON localities (city_id);
-
 CREATE INDEX ix_localities_name ON localities (name);
+
+CREATE INDEX ix_localities_city_id ON localities (city_id);
 
 CREATE TABLE beds (
     id UUID NOT NULL, 
@@ -731,9 +744,9 @@ CREATE TABLE applications (
     FOREIGN KEY(room_id) REFERENCES rooms (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_applications_status ON applications (status);
-
 CREATE INDEX ix_applications_property_id ON applications (property_id);
+
+CREATE INDEX ix_applications_status ON applications (status);
 
 CREATE INDEX ix_applications_applicant_id ON applications (applicant_id);
 
@@ -819,11 +832,11 @@ CREATE TABLE conversation_participants (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
+CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
 
 CREATE INDEX ix_conversation_participants_conversation_id ON conversation_participants (conversation_id);
 
-CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
+CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
 
 CREATE TABLE messages (
     id UUID NOT NULL, 
@@ -846,15 +859,15 @@ CREATE TABLE messages (
     FOREIGN KEY(reply_to_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
-
-CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
-
 CREATE INDEX ix_messages_sender_id ON messages (sender_id);
 
 CREATE INDEX ix_messages_sent_at ON messages (sent_at);
 
 CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
+
+CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
+
+CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -871,11 +884,11 @@ CREATE TABLE conversation_preferences (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
+CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
 
 CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
 
-CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
+CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
 CREATE TABLE attachments (
     id UUID NOT NULL, 
@@ -893,9 +906,9 @@ CREATE TABLE attachments (
     FOREIGN KEY(uploader_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_attachments_message_id ON attachments (message_id);
-
 CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
+
+CREATE INDEX ix_attachments_message_id ON attachments (message_id);
 
 CREATE INDEX ix_attachments_uploader_id ON attachments (uploader_id);
 
@@ -1540,6 +1553,23 @@ CREATE INDEX IF NOT EXISTS ix_application_status_events_app_created
                ON application_status_events (application_id, created_at);
 
 UPDATE alembic_version SET version_num='013_application_status_history' WHERE alembic_version.version_num = '012_notifications_push';
+
+-- Running upgrade 013_application_status_history -> 014_account_deletion
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS account_deletion_requests (
+               user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+               requested_at TIMESTAMPTZ NOT NULL,
+               purge_after TIMESTAMPTZ NOT NULL,
+               cancellable BOOLEAN NOT NULL DEFAULT true,
+               paused_property_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+           );
+
+CREATE INDEX IF NOT EXISTS ix_account_deletion_requests_purge_after
+               ON account_deletion_requests (purge_after);
+
+UPDATE alembic_version SET version_num='014_account_deletion' WHERE alembic_version.version_num = '013_application_status_history';
 
 DO $$
 DECLARE

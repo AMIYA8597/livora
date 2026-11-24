@@ -23,6 +23,9 @@ class User(Base):
     phone_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Set when the account has been erased: the row stays as an anonymous tombstone so messages
+    # others received and de-identified payment records keep a valid reference.
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Multi-Role & Profile Relationships
     roles: Mapped[List["UserRole"]] = relationship("UserRole", back_populates="user", cascade="all, delete-orphan", lazy="selectin")
@@ -55,3 +58,16 @@ class UserPrivacySetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="privacy_settings")
+
+
+class AccountDeletionRequest(Base):
+    """A pending deletion. The account is hidden and signed out until `purge_after`, when the
+    maintenance job erases it; signing in before then cancels (unless staff locked the account)."""
+    __tablename__ = "account_deletion_requests"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    purge_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    cancellable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Listings that were published when the request was made, so cancelling can restore them.
+    paused_property_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)

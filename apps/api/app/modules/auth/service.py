@@ -82,8 +82,14 @@ class AuthService:
         if not user or not verify_password(data.password, user.hashed_password):
             logger.warning("Failed login attempt")  # no email: logs must not hold personal data
             raise UnauthorizedException("Invalid email or password")
+        restored = False
         if not user.is_active:
-            raise UnauthorizedException("User account is disabled")
+            # Signing in during the grace period cancels a pending account deletion.
+            from app.modules.users.privacy import cancel_deletion
+
+            restored = await cancel_deletion(self.db, user)
+            if not restored:
+                raise UnauthorizedException("User account is disabled")
 
         user_roles = [user.role] + [r.role for r in user.roles]
         unique_roles = list(set(user_roles))
@@ -99,6 +105,7 @@ class AuthService:
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             user=UserResponse.model_validate(user),
             roles=unique_roles,
+            account_restored=restored,
         )
 
     async def refresh_token(self, refresh_token: str) -> TokenResponse:

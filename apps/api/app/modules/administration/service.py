@@ -67,6 +67,10 @@ class AdminService:
             raise NotFoundException("User not found")
 
         user.is_active = is_active
+        # A pending self-deletion: deactivating locks it, reactivating cancels it.
+        from app.modules.users.privacy import on_staff_status_change
+
+        await on_staff_status_change(self.db, user, is_active)
         await self.db.commit()
         await self.db.refresh(user)
         return user
