@@ -34,6 +34,28 @@ class PlatformStatsResponse(BaseModel):
 
 
 
+class AdminBillingEventItem(BaseModel):
+    """A stored payment-provider webhook delivery. The payload itself (customer contact details)
+    stays out; `subscription_ref` is the provider's subscription id it is about."""
+    id: uuid.UUID
+    provider: str
+    event_id: str
+    event_type: str
+    status: str
+    error: Optional[str] = None
+    subscription_ref: Optional[str] = None
+    received_at: datetime
+    processed_at: Optional[datetime] = None
+
+    @classmethod
+    def of(cls, ev) -> "AdminBillingEventItem":
+        entity = (((ev.payload or {}).get("payload") or {}).get("subscription") or {}).get("entity") or {}
+        ref = entity.get("id")
+        return cls(id=ev.id, provider=ev.provider, event_id=ev.event_id, event_type=ev.event_type,
+                   status=ev.status, error=ev.error, subscription_ref=ref if isinstance(ref, str) else None,
+                   received_at=ev.received_at, processed_at=ev.processed_at)
+
+
 class AdminApplicationListItem(BaseModel):
     id: uuid.UUID
     status: str

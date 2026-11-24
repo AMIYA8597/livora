@@ -295,21 +295,32 @@ class BillingService:
             .on_conflict_do_nothing(index_elements=["event_id"])
         )
         await self.db.commit()
+        return await self._process_stored(event_id[:100])
+
+    async def _process_stored(self, event_key: str) -> str:
+        """Apply one stored delivery: "processed", "ignored", or "duplicate" if it was already
+        finished. The event row stays locked for the whole attempt, so a Razorpay retry and a
+        staff replay arriving together run one after the other and the second sees the first's
+        result. On failure the error is recorded on the row and the exception re-raised."""
         stored = (await self.db.execute(
-            select(BillingEvent).where(BillingEvent.event_id == event_id[:100])
+            select(BillingEvent).where(BillingEvent.event_id == event_key).with_for_update()
         )).scalar_one()
         if stored.status in ("processed", "ignored"):
+            await self.db.rollback()  # releases the lock
             return "duplicate"
 
+        event = stored.payload or {}
+        event_type = str(event.get("event") or "")
         try:
-            outcome = await self._on_subscription_event(event_type, event)                 if event_type.startswith("subscription.") else "ignored"
+            outcome = await self._on_subscription_event(event_type, event) \
+                if event_type.startswith("subscription.") else "ignored"
             stored.status, stored.error = outcome, None
             stored.processed_at = datetime.now(timezone.utc)
             await self.db.commit()
         except Exception as exc:  # recorded, then surfaced: Razorpay retries non-2xx deliveries
             await self.db.rollback()
             await self.db.execute(
-                update(BillingEvent).where(BillingEvent.event_id == event_id[:100])
+                update(BillingEvent).where(BillingEvent.event_id == event_key)
                 .values(status="failed", error=f"{type(exc).__name__}: {exc}"[:500],
                         processed_at=datetime.now(timezone.utc))
             )
@@ -317,6 +328,38 @@ class BillingService:
             logger.exception("Billing webhook %s failed", event_type)
             raise
         return outcome
+
+    async def list_events(self, status: Optional[str] = None, limit: int = 50) -> List[BillingEvent]:
+        """Stored webhook deliveries, newest first. By default the ones that need a look:
+        failed, or received but never finished (the process died mid-way)."""
+        query = select(BillingEvent).order_by(BillingEvent.received_at.desc()).limit(limit)
+        if status:
+            query = query.where(BillingEvent.status == status)
+        else:
+            query = query.where(BillingEvent.status.in_(("failed", "received")))
+        return list((await self.db.execute(query)).scalars().all())
+
+    async def replay_event(self, event_row_id: UUID, staff_id: UUID) -> BillingEvent:
+        """Process a stored delivery again, from its saved (already verified) payload: for
+        when a fix has shipped and waiting for Razorpay's retries isn't enough. Finished events
+        are refused. A failure is recorded on the event and returned, not raised."""
+        stored = await self.db.get(BillingEvent, event_row_id)
+        if stored is None:
+            raise NotFoundException("Billing event not found.")
+        if stored.status in ("processed", "ignored"):
+            raise ConflictException("This event was already applied.", error_code="ALREADY_PROCESSED")
+        key = stored.event_id
+        logger.info("Staff %s replaying billing event %s (%s)", staff_id, key, stored.event_type)
+        try:
+            outcome = await self._process_stored(key)
+        except Exception:
+            outcome = "failed"  # already recorded and logged by _process_stored
+        if outcome == "duplicate":
+            raise ConflictException("This event was already applied.", error_code="ALREADY_PROCESSED")
+        return (await self.db.execute(
+            select(BillingEvent).where(BillingEvent.id == event_row_id)
+            .execution_options(populate_existing=True)
+        )).scalar_one()
 
     async def _on_subscription_event(self, event_type: str, event: Dict[str, Any]) -> str:
         payload = event.get("payload") or {}

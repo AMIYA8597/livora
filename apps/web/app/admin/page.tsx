@@ -9,6 +9,7 @@ import { apiClient } from "@/lib/api-client";
 import { Card, Button, Badge, Modal, Input, EmptyState, ErrorState, LoadingIndicator } from "@flatmate/ui";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { ApplicationsPanel } from "@/features/admin/ApplicationsPanel";
+import { BillingEventsPanel } from "@/features/admin/BillingEventsPanel";
 import { consoleTabs, type ConsoleTab } from "@/lib/staff-access";
 import { reportNeedsAction } from "@/lib/moderation-reports";
 import {
@@ -29,6 +30,7 @@ import {
   MapPin,
   Lock,
   FileText,
+  CreditCard,
 } from "lucide-react";
 
 interface AdminStats {
@@ -256,6 +258,14 @@ export default function AdminModerationPage() {
         >
           <Users className="w-4 h-4" /> User Management ({users.length})
         </button>}
+        {has("payments") && <button
+          onClick={() => setActiveTab("payments")}
+          className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "payments" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
+          }`}
+        >
+          <CreditCard className="w-4 h-4" /> Payment Events
+        </button>}
       </div>
 
       {/* Tab 1: Stats */}
@@ -413,6 +423,16 @@ export default function AdminModerationPage() {
           onDone={(message) => {
             setActionNotice(message);
             if (has("stats")) statsQuery.refetch();
+            setTimeout(() => setActionNotice(null), 4000);
+          }}
+        />
+      )}
+
+      {/* Payment webhooks that failed or never finished, with a replay */}
+      {activeTab === "payments" && (
+        <BillingEventsPanel
+          onDone={(message) => {
+            setActionNotice(message);
             setTimeout(() => setActionNotice(null), 4000);
           }}
         />

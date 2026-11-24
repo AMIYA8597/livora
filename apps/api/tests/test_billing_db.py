@@ -337,6 +337,83 @@ async def test_webhooks_are_verified_idempotent_ordered_and_extend_the_period(as
     assert me["entitlements"]["who_liked_me"] is False
 
 
+
+@pytest.mark.asyncio
+async def test_admin_replays_a_failed_webhook_once(async_client, people, billing_on, monkeypatch):
+    """A delivery that failed (say, a bug since fixed) is kept with its error; an admin can see
+    it and apply it again from the stored payload, exactly once."""
+    sid = await _subscribe(async_client, billing_on, people.seeker, "seeker_pro")
+    later = int(time.time()) + 90 * 86400
+    charged = _event("subscription.charged", sid, current_end=later, payment={
+        "id": f"pay_Replay{uuid4().hex[:10]}", "amount": 19900, "currency": "INR", "status": "captured",
+        "created_at": int(time.time())})
+    event_key = f"evt_replay_{uuid4().hex[:10]}"
+
+    real = billing_service.BillingService._on_subscription_event
+
+    async def broken(self, event_type, event):
+        raise RuntimeError("plan lookup bug")
+
+    monkeypatch.setattr(billing_service.BillingService, "_on_subscription_event", broken)
+    try:
+        res = await _webhook(async_client, charged, event_id=event_key)
+        assert res.status_code >= 500
+    except RuntimeError:
+        pass  # the test transport may re-raise instead of answering 500
+    monkeypatch.setattr(billing_service.BillingService, "_on_subscription_event", real)
+
+    admin = uuid4()
+    async with AsyncSessionLocal() as s:
+        s.add(User(id=admin, email=f"bill-admin-{uuid4().hex[:6]}@example.com", hashed_password="x",
+                   full_name="Ada Admin", role="admin"))
+        await s.commit()
+    try:
+        # Only admins see and replay payment events.
+        for role in ("seeker", "moderator"):
+            assert (await async_client.get(f"{API}/admin/billing-events", headers=_auth(people.seeker, role))).status_code == 403
+
+        listed = (await async_client.get(f"{API}/admin/billing-events", headers=_auth(admin, "admin"))).json()
+        mine = [e for e in listed if e["event_id"] == event_key]
+        assert len(mine) == 1 and mine[0]["status"] == "failed" and "plan lookup bug" in mine[0]["error"]
+        assert mine[0]["subscription_ref"] == sid and "payload" not in mine[0]
+        row_id = mine[0]["id"]
+
+        res = await async_client.post(f"{API}/admin/billing-events/{row_id}/replay", headers=_auth(people.seeker))
+        assert res.status_code == 403
+        res = await async_client.post(f"{API}/admin/billing-events/{row_id}/replay", headers=_auth(admin, "admin"))
+        assert res.status_code == 200, res.text
+        assert res.json()["status"] == "processed" and res.json()["error"] is None
+        async with AsyncSessionLocal() as s:
+            sub = (await s.execute(select(Subscription).where(Subscription.provider_subscription_id == sid))).scalar_one()
+            assert int(sub.expires_at.timestamp()) == later
+
+        # Applied once: a second replay and Razorpay's own retry are both turned away.
+        res = await async_client.post(f"{API}/admin/billing-events/{row_id}/replay", headers=_auth(admin, "admin"))
+        assert res.status_code == 409
+        assert (await _webhook(async_client, charged, event_id=event_key)).json()["status"] == "duplicate"
+        assert (await async_client.post(f"{API}/admin/billing-events/{uuid4()}/replay",
+                                        headers=_auth(admin, "admin"))).status_code == 404
+        listed = (await async_client.get(f"{API}/admin/billing-events", headers=_auth(admin, "admin"))).json()
+        assert all(e["event_id"] != event_key for e in listed)
+
+        # A replay that fails again comes back as "failed" with the error, not as a 500.
+        failing = _event("subscription.charged", sid, current_end=later + 86400)
+        key2 = f"evt_replay_{uuid4().hex[:10]}"
+        monkeypatch.setattr(billing_service.BillingService, "_on_subscription_event", broken)
+        try:
+            await _webhook(async_client, failing, event_id=key2)
+        except RuntimeError:
+            pass
+        async with AsyncSessionLocal() as s:
+            row2 = (await s.execute(select(BillingEvent).where(BillingEvent.event_id == key2))).scalar_one()
+        res = await async_client.post(f"{API}/admin/billing-events/{row2.id}/replay", headers=_auth(admin, "admin"))
+        assert res.status_code == 200 and res.json()["status"] == "failed"
+        assert "plan lookup bug" in res.json()["error"]
+    finally:
+        async with AsyncSessionLocal() as s:
+            await s.execute(delete(User).where(User.id == admin))
+            await s.commit()
+
 def test_webhook_signature_check_is_exact():
     body = b'{"event":"subscription.charged"}'
     good = hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()

@@ -88,7 +88,16 @@ Gathered from the open items below and every item's "Not covered" notes.
       (`lib/moderation-reports.ts`). `tests/test_application_override_db.py` checks a
       moderator's 200s and 403s, and the web tests cover both helpers. Checked in the browser
       as a moderator (two tabs, open reports actionable) and as an owner (access denied).
-- [ ] **L9. No way to replay a failed Razorpay webhook** except waiting for Razorpay's retry.
+- [x] **L9. No way to replay a failed Razorpay webhook** except waiting for Razorpay's retry.
+      *Done:* admins get `GET /admin/billing-events` (failed or unfinished deliveries by
+      default; the payload with customer details stays out) and
+      `POST /admin/billing-events/{id}/replay`, which applies the stored, already verified
+      payload again. The webhook and the replay share one step that locks the event row,
+      so a Razorpay retry arriving during a replay waits and then answers "duplicate".
+      Applied events can't be replayed (409), and a replay that fails again comes back as
+      "failed" with the error rather than a 500. The admin console's new Payment Events tab
+      lists them with an "Apply again" button; moderators don't see it. Tested in
+      `tests/test_billing_db.py` and checked in the browser as an admin.
 - [ ] **L10. The PDF upload check reads raw bytes**, so active content inside compressed object
       streams isn't seen.
 - [ ] **L11. Main-thread blocking time is 200–500ms on phones.** Load Sentry and the Supabase
@@ -549,7 +558,8 @@ Gathered from the open items below and every item's "Not covered" notes.
         - Run one subscribe, renew and cancel in test mode.
         - Then switch to live keys.
       - Prices, GST and invoices are business decisions: no GST is shown or charged yet.
-      - Webhooks are only reprocessed when Razorpay retries. There is no admin replay tool yet.
+      - A webhook that failed can be applied again from the admin console's Payment Events tab
+        (L9), as well as by Razorpay's own retries.
 - [x] **12. Identity verification is mocked.** *(Done: ID checks switched off, email checks
       made real.)* Decision: no KYC provider for launch. Migration `011_email_verification`.
       - **ID documents are off:** the fake flow is removed. It posted a placeholder

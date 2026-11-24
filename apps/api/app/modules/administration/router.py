@@ -2,7 +2,7 @@
 Administration Router
 Protected endpoints for user management, role assignments, account status, and system metrics.
 """
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,7 @@ from app.core.dependencies import require_roles
 from app.modules.users.models import User
 from app.modules.administration.schemas import (
     AdminApplicationListItem,
+    AdminBillingEventItem,
     AdminUserListItem,
     AdminUserStatusUpdate,
     AdminRoleGrant,
@@ -21,6 +22,7 @@ from app.modules.applications.schemas import ApplicationStatus, ApplicationStatu
 from app.modules.applications.service import ApplicationService
 from app.core.dependencies import STAFF_ROLES
 from app.core.exceptions import NotFoundException
+from app.modules.billing.service import BillingService
 
 router = APIRouter(prefix="/admin", tags=["Administration & Operations"])
 
@@ -61,6 +63,30 @@ async def get_system_stats(
 ):
     service = AdminService(db)
     return await service.get_platform_stats()
+
+
+# Payment webhooks (admins only). Every verified delivery is stored before it is applied, so
+# one that failed (say, a bug since fixed) can be applied again without waiting for Razorpay.
+@router.get("/billing-events", response_model=List[AdminBillingEventItem])
+async def list_billing_events(
+    status_filter: Optional[Literal["received", "processed", "ignored", "failed"]] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    _: User = Depends(require_roles(["admin", "super_admin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Without a status: the deliveries that need a look (failed, or never finished)."""
+    return [AdminBillingEventItem.of(ev) for ev in await BillingService(db).list_events(status_filter, limit)]
+
+
+@router.post("/billing-events/{event_id}/replay", response_model=AdminBillingEventItem)
+async def replay_billing_event(
+    event_id: UUID,
+    staff: User = Depends(require_roles(["admin", "super_admin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply a failed or unfinished delivery again from its stored payload. Returns the event
+    with its new status; a failure comes back as status "failed" with the error."""
+    return AdminBillingEventItem.of(await BillingService(db).replay_event(event_id, staff.id))
 
 
 # Staff (moderators too) can find any application and see its history. Changing the status goes
