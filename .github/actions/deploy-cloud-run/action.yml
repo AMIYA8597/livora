@@ -1,0 +1,214 @@
+name: Deploy API and worker to Cloud Run
+description: >-
+  Deploys one image as the API and as the background worker (Celery worker with beat inside,
+  python -m app.workers.run), with the same runtime configuration (scripts/deploy_runtime.py).
+  Checks that the API answers /health/ready with the new release before deploying the worker.
+  Needs Python and gcloud already authenticated.
+inputs:
+  environment:
+    description: ENVIRONMENT value (staging, production)
+    required: true
+  secret-prefix:
+    description: Secret Manager name prefix (STAGING, PRODUCTION)
+    required: true
+  project-id:
+    description: GCP project
+    required: true
+  project-name:
+    description: PROJECT_NAME shown by the API
+    required: true
+  image:
+    description: Container image to deploy
+    required: true
+  release:
+    description: Commit SHA (APP_RELEASE; the readiness check expects it)
+    required: true
+  api-service:
+    description: Cloud Run service for the API
+    required: true
+  worker-service:
+    description: Cloud Run service for the worker
+    required: true
+  region:
+    description: Cloud Run region
+    required: false
+    default: asia-south1
+  runtime-env:
+    description: Extra plain settings, KEY=VALUE per line (the RUNTIME_ENV environment variable)
+    required: false
+    default: ""
+  require-redis:
+    description: Fail when <PREFIX>_REDIS_URL is missing (production) instead of skipping the worker
+    required: false
+    default: "false"
+  vpc-network:
+    description: Direct VPC egress network, for a Redis on a private network (Memorystore)
+    required: false
+    default: ""
+  vpc-subnet:
+    description: Direct VPC egress subnet
+    required: false
+    default: ""
+outputs:
+  url:
+    description: API service URL
+    value: ${{ steps.api.outputs.url }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve runtime configuration
+      id: config
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        PREFIX: ${{ inputs.secret-prefix }}
+        PROJECT: ${{ inputs.project-id }}
+        PROJECT_NAME: ${{ inputs.project-name }}
+        RELEASE: ${{ inputs.release }}
+        RUNTIME_ENV: ${{ inputs.runtime-env }}
+        REQUIRE_REDIS: ${{ inputs.require-redis }}
+        VPC_NETWORK: ${{ inputs.vpc-network }}
+        VPC_SUBNET: ${{ inputs.vpc-subnet }}
+      run: |
+        dir="$RUNNER_TEMP/runtime"
+        mkdir -p "$dir"
+        # Secret names only; values never leave Secret Manager.
+        gcloud secrets list --project "$PROJECT" --format='value(name.basename())' > "$dir/available"
+        printf '%s\n' "$RUNTIME_ENV" > "$dir/runtime.env"
+        python scripts/deploy_runtime.py --environment "$ENVIRONMENT" --prefix "$PREFIX" \
+          --release "$RELEASE" --project "$PROJECT" --project-name "$PROJECT_NAME" \
+          --available-secrets-file "$dir/available" --extra-env-file "$dir/runtime.env" --out-dir "$dir"
+        cat "$dir/outputs" >> "$GITHUB_OUTPUT"
+        redis=$(sed -n 's/^redis=//p' "$dir/outputs")
+        missing_optional=$(sed -n 's/^missing_optional=//p' "$dir/outputs")
+        if [ -n "$missing_optional" ]; then
+          echo "::notice title=Optional secrets not set::$missing_optional"
+        fi
+        if [ "$redis" != "true" ]; then
+          if [ "$REQUIRE_REDIS" = "true" ]; then
+            echo "::error::Create the Secret Manager secret ${PREFIX}_REDIS_URL: $ENVIRONMENT needs the worker (email retries, maintenance, account erasure)."
+            exit 1
+          fi
+          echo "::warning title=Worker not deployed::Create the Secret Manager secret ${PREFIX}_REDIS_URL (a managed Redis URL) to deploy the worker and beat. Until then failed emails are retried only when a later request dispatches, rate limits are per instance, and maintenance (including account erasure) doesn't run."
+        fi
+        flags=""
+        if [ -n "$VPC_NETWORK" ] && [ -n "$VPC_SUBNET" ]; then
+          flags="--network=$VPC_NETWORK --subnet=$VPC_SUBNET --vpc-egress=private-ranges-only"
+        fi
+        echo "network_flags=$flags" >> "$GITHUB_OUTPUT"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+    - name: Record the revisions being replaced
+      id: previous
+      shell: bash
+      env:
+        REGION: ${{ inputs.region }}
+        API: ${{ inputs.api-service }}
+        WORKER: ${{ inputs.worker-service }}
+      run: |
+        rev() { gcloud run services describe "$1" --region "$REGION" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true; }
+        echo "api=$(rev "$API")" >> "$GITHUB_OUTPUT"
+        echo "worker=$(rev "$WORKER")" >> "$GITHUB_OUTPUT"
+
+    - name: Deploy the API
+      id: api
+      shell: bash
+      env:
+        REGION: ${{ inputs.region }}
+        API: ${{ inputs.api-service }}
+        IMAGE: ${{ inputs.image }}
+        SECRETS: ${{ steps.config.outputs.secrets }}
+        NETWORK_FLAGS: ${{ steps.config.outputs.network_flags }}
+        DIR: ${{ steps.config.outputs.dir }}
+      run: |
+        # shellcheck disable=SC2086 # NETWORK_FLAGS holds several flags
+        gcloud run deploy "$API" \
+          --image "$IMAGE" \
+          --region "$REGION" \
+          --platform managed \
+          --allow-unauthenticated \
+          --env-vars-file "$DIR/api-env.yaml" \
+          --set-secrets "$SECRETS" \
+          $NETWORK_FLAGS
+        url=$(gcloud run services describe "$API" --region "$REGION" --format 'value(status.url)')
+        echo "url=$url" >> "$GITHUB_OUTPUT"
+
+    - name: Check the API is ready on this release
+      shell: bash
+      env:
+        URL: ${{ steps.api.outputs.url }}
+        RELEASE: ${{ inputs.release }}
+      run: |
+        for attempt in $(seq 1 10); do
+          code=$(curl -s -o "$RUNNER_TEMP/ready.json" -w '%{http_code}' --max-time 15 "$URL/health/ready" || echo 000)
+          if [ "$code" = "200" ] && python -c "import json,sys; sys.exit(json.load(open(sys.argv[1])).get('release') != sys.argv[2])" "$RUNNER_TEMP/ready.json" "$RELEASE"; then
+            cat "$RUNNER_TEMP/ready.json"; echo
+            exit 0
+          fi
+          echo "Attempt $attempt: HTTP $code"
+          sleep 10
+        done
+        cat "$RUNNER_TEMP/ready.json" 2>/dev/null || true
+        echo "::error::The API at $URL isn't ready on release $RELEASE"
+        exit 1
+
+    # One instance: exactly one beat. CPU stays allocated with no requests coming in. The startup
+    # probe passes only once Celery has reached Redis and is taking tasks.
+    - name: Deploy the worker and beat
+      if: steps.config.outputs.redis == 'true'
+      shell: bash
+      env:
+        REGION: ${{ inputs.region }}
+        WORKER: ${{ inputs.worker-service }}
+        IMAGE: ${{ inputs.image }}
+        SECRETS: ${{ steps.config.outputs.secrets }}
+        NETWORK_FLAGS: ${{ steps.config.outputs.network_flags }}
+        DIR: ${{ steps.config.outputs.dir }}
+      run: |
+        # shellcheck disable=SC2086 # NETWORK_FLAGS holds several flags
+        gcloud run deploy "$WORKER" \
+          --image "$IMAGE" \
+          --region "$REGION" \
+          --platform managed \
+          --command python \
+          --args=-m,app.workers.run \
+          --no-allow-unauthenticated \
+          --ingress internal \
+          --min-instances 1 \
+          --max-instances 1 \
+          --no-cpu-throttling \
+          --cpu 1 \
+          --memory 1Gi \
+          --startup-probe "httpGet.path=/health,periodSeconds=5,timeoutSeconds=3,failureThreshold=24" \
+          --liveness-probe "httpGet.path=/health,periodSeconds=30,timeoutSeconds=5,failureThreshold=3" \
+          --env-vars-file "$DIR/worker-env.yaml" \
+          --set-secrets "$SECRETS" \
+          $NETWORK_FLAGS
+
+    - name: Summary and rollback commands
+      if: always()
+      shell: bash
+      env:
+        ENVIRONMENT: ${{ inputs.environment }}
+        REGION: ${{ inputs.region }}
+        API: ${{ inputs.api-service }}
+        WORKER: ${{ inputs.worker-service }}
+        RELEASE: ${{ inputs.release }}
+        PREV_API: ${{ steps.previous.outputs.api }}
+        PREV_WORKER: ${{ steps.previous.outputs.worker }}
+      run: |
+        {
+          echo "### $ENVIRONMENT: release \`$RELEASE\`"
+          if [ -n "$PREV_API" ]; then
+            echo "Roll back the API (instant; the database schema stays as migrated):"
+            echo '```'
+            echo "gcloud run services update-traffic $API --region $REGION --to-revisions=$PREV_API=100"
+            echo '```'
+          fi
+          if [ -n "$PREV_WORKER" ]; then
+            echo "Roll back the worker:"
+            echo '```'
+            echo "gcloud run services update-traffic $WORKER --region $REGION --to-revisions=$PREV_WORKER=100"
+            echo '```'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

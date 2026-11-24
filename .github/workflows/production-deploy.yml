@@ -1,0 +1,172 @@
+name: Production Deployment
+
+# Promotes a commit that already passed the staging deployment: production runs the exact image
+# staging built and checked. Order: verified backup -> migrations -> API -> worker -> web.
+#
+# Run it from the Actions tab with the commit SHA. Add required reviewers to the GitHub
+# "production" environment so every promotion waits for an approval; the gate job runs first,
+# so nobody is asked to approve a commit that can't ship. Setup: DEPLOYMENT.md, "Production".
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Commit SHA to promote (on main, and deployed to staging with a passing readiness check)"
+        required: true
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  gate:
+    name: Check the release passed staging
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INPUT: ${{ inputs.release }}
+        run: |
+          if ! printf '%s' "$INPUT" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            echo "::error::release must be a commit SHA"; exit 1
+          fi
+          sha=$(gh api "repos/$REPO/commits/$INPUT" --jq .sha)
+          # main must contain the commit: the compare from it to main is "ahead" or "identical".
+          status=$(gh api "repos/$REPO/compare/$sha...main" --jq .status)
+          if [ "$status" != "ahead" ] && [ "$status" != "identical" ]; then
+            echo "::error::$sha is not on main"; exit 1
+          fi
+          passed=""
+          for run in $(gh api "repos/$REPO/actions/workflows/staging-deploy.yml/runs?head_sha=$sha&per_page=20" --jq '.workflow_runs[].id'); do
+            conclusion=$(gh api "repos/$REPO/actions/runs/$run/jobs" \
+              --jq '.jobs[] | select(.name == "Staging Smoke Test (backend readiness)") | .conclusion')
+            if [ "$conclusion" = "success" ]; then passed=$run; break; fi
+          done
+          if [ -z "$passed" ]; then
+            echo "::error::$sha has no staging deployment with a passing readiness check. Deploy it to staging first."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Promoting \`$sha\`, deployed and checked by staging run $passed." >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    name: Back up, migrate and deploy to production
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+    env:
+      SHA: ${{ needs.gate.outputs.sha }}
+    steps:
+      - name: Check production configuration
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          missing=()
+          for name in GCP_SA_KEY GCP_PROJECT_ID PRODUCTION_DATABASE_URL BACKUP_BUCKET VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            [ -z "${!name}" ] && missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing in the 'production' environment: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Checkout the release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Find the image staging built
+        id: image
+        env:
+          REPOSITORY: ${{ vars.RELEASE_IMAGE_REPOSITORY }}
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          repo="${REPOSITORY:-asia-south1-docker.pkg.dev/$PROJECT/cloud-run-source-deploy}"
+          image="$repo/flatmate-api:$SHA"
+          if ! gcloud artifacts docker images describe "$image" >/dev/null 2>&1; then
+            echo "::error::$image not found. Production promotes the image staging built (set RELEASE_IMAGE_REPOSITORY if staging is another project)."
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      # Migrations only go forward; this backup is the way back from a bad one.
+      - name: Back up the database (verified) before migrating
+        uses: ./.github/actions/backup-database
+        with:
+          database-url: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          bucket: ${{ vars.BACKUP_BUCKET }}
+          folder: production/pre-deploy
+          label: pre-deploy-${{ needs.gate.outputs.sha }}
+          pg-version: ${{ vars.PG_VERSION || '17' }}
+
+      - name: Apply database migrations
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          ENVIRONMENT: production
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          python -m pip install --upgrade pip
+          pip install -e apps/api
+          cd apps/api
+          python -m alembic upgrade head
+          python -m alembic current
+
+      # Secrets come from Secret Manager as PRODUCTION_<NAME>; the worker is required here.
+      - name: Deploy API and worker
+        uses: ./.github/actions/deploy-cloud-run
+        with:
+          environment: production
+          secret-prefix: PRODUCTION
+          project-id: ${{ secrets.GCP_PROJECT_ID }}
+          project-name: Flatmate
+          image: ${{ steps.image.outputs.image }}
+          release: ${{ needs.gate.outputs.sha }}
+          api-service: flatmate-api
+          worker-service: flatmate-worker
+          runtime-env: ${{ vars.RUNTIME_ENV }}
+          require-redis: "true"
+          vpc-network: ${{ vars.PRODUCTION_VPC_NETWORK }}
+          vpc-subnet: ${{ vars.PRODUCTION_VPC_SUBNET }}
+
+      # The web app's production settings (NEXT_PUBLIC_API_URL, NEXT_PUBLIC_APP_URL and
+      # ENVIRONMENT=production, which turns on search indexing) live in the Vercel project.
+      - name: Deploy the web app
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npm install --global vercel@latest
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          {
+            echo "Web app deployed: $url"
+            echo "Roll back the web app: \`vercel rollback\` (or promote the previous deployment in Vercel)."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -65,10 +65,12 @@ jobs:
 
       - name: Verify Network Connectivity & Execute Migration
         env:
-          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          # Each environment holds its own owner URL: STAGING_DATABASE_URL or PRODUCTION_DATABASE_URL.
+          DATABASE_URL: ${{ github.event.inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+          SECRET_NAME: ${{ github.event.inputs.target_environment == 'production' && 'PRODUCTION_DATABASE_URL' || 'STAGING_DATABASE_URL' }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::error::STAGING_DATABASE_URL secret is not configured in repository environment settings."
+            echo "::error::$SECRET_NAME is not configured in the ${{ github.event.inputs.target_environment }} environment."
             exit 1
           fi
 

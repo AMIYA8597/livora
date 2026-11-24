@@ -1,0 +1,25 @@
+name: Set up PostgreSQL client
+description: >-
+  Installs pg_dump, pg_restore and psql of one major version from the PostgreSQL apt repository
+  and exports PG_BIN. pg_dump must be at least the database server's major version.
+inputs:
+  version:
+    description: PostgreSQL major version
+    required: false
+    default: "17"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PG_VERSION: ${{ inputs.version }}
+      run: |
+        bin="/usr/lib/postgresql/$PG_VERSION/bin"
+        if [ ! -x "$bin/pg_dump" ]; then
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends postgresql-common >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends "postgresql-client-$PG_VERSION" >/dev/null
+        fi
+        echo "PG_BIN=$bin" >> "$GITHUB_ENV"
+        "$bin/pg_dump" --version

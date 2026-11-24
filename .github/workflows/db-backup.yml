@@ -1,0 +1,89 @@
+name: Database Backup
+
+# Daily at 03:00 IST: dump the database, restore the dump into a throwaway database and check it
+# against its manifest (Alembic revision, every table's row count, row-level security), then
+# upload it to Cloud Storage. A backup that doesn't restore fails the run (GitHub emails the
+# failure) and is never uploaded.
+#
+# Backups are kept 30 days: the bucket's lifecycle rule deletes them (DEPLOYMENT.md,
+# "Backups"). That is also how long data from erased accounts can survive in a backup.
+#
+# Scheduled runs use the "production-backups" environment (no required reviewers, so the
+# nightly run never waits): secrets BACKUP_DATABASE_URL (the owner URL) and GCP_BACKUP_SA_KEY
+# (a service account that may only create objects in the bucket), variable BACKUP_BUCKET.
+# Until BACKUP_BUCKET is set the run only notes that backups aren't configured.
+
+on:
+  schedule:
+    - cron: "30 21 * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which database"
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+concurrency:
+  group: db-backup-${{ inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: Verified backup (${{ inputs.environment || 'production' }})
+    runs-on: ubuntu-latest
+    environment: ${{ (inputs.environment || 'production') == 'staging' && 'staging' || 'production-backups' }}
+    timeout-minutes: 60
+    steps:
+      - name: Check configuration
+        id: config
+        env:
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          GCP_BACKUP_SA_KEY: ${{ secrets.GCP_BACKUP_SA_KEY }}
+        run: |
+          if [ -z "$BACKUP_BUCKET" ]; then
+            echo "::notice title=Backups not configured::Set the BACKUP_BUCKET variable (and the secrets BACKUP_DATABASE_URL, GCP_BACKUP_SA_KEY) to turn on daily backups."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          missing=()
+          [ -z "$BACKUP_DATABASE_URL" ] && missing+=(BACKUP_DATABASE_URL)
+          [ -z "$GCP_BACKUP_SA_KEY" ] && missing+=(GCP_BACKUP_SA_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Backups are configured (BACKUP_BUCKET) but these secrets are missing: ${missing[*]}"
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.config.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: steps.config.outputs.enabled == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Authenticate to Google Cloud
+        if: steps.config.outputs.enabled == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_BACKUP_SA_KEY }}
+
+      - name: Back up and verify
+        if: steps.config.outputs.enabled == 'true'
+        uses: ./.github/actions/backup-database
+        with:
+          database-url: ${{ secrets.BACKUP_DATABASE_URL }}
+          bucket: ${{ vars.BACKUP_BUCKET }}
+          folder: ${{ inputs.environment || 'production' }}/daily
+          label: ${{ inputs.environment || 'production' }}
+          pg-version: ${{ vars.PG_VERSION || '17' }}

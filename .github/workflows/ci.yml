@@ -102,6 +102,12 @@ jobs:
           done
           psql -h localhost -U flatmate_api_ci -d flatmate_db -tAc "SHOW statement_timeout" | grep -q 15s
 
+      # pg_dump/pg_restore matching the PostGIS 17 service, for the backup-and-restore test.
+      - name: Set up PostgreSQL 17 client
+        uses: ./.github/actions/setup-postgres-client
+        with:
+          version: "17"
+
       - name: Execute Pytest Suite with Coverage
         env:
           ENVIRONMENT: test
