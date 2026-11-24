@@ -14,6 +14,14 @@ from app.core.observability import tag_request
 
 # Maximum allowed request body size in bytes (10 Megabytes)
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
+# File uploads (largest bucket limit is 15 MB) plus multipart framing; each route then enforces
+# its own bucket limit while reading.
+MAX_UPLOAD_BODY_BYTES = 16 * 1024 * 1024
+UPLOAD_PATH_SUFFIXES = ("/storage/upload", "/attachments")
+
+
+def body_limit_for(path: str) -> int:
+    return MAX_UPLOAD_BODY_BYTES if path.rstrip("/").endswith(UPLOAD_PATH_SUFFIXES) else MAX_REQUEST_BODY_BYTES
 
 
 class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
@@ -38,17 +46,16 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
         if content_length_header:
             try:
                 content_length = int(content_length_header)
-                if content_length > MAX_REQUEST_BODY_BYTES:
-                    logger.warning(
-                        f"[Req {request_id}] Payload too large: {content_length} bytes > max {MAX_REQUEST_BODY_BYTES}"
-                    )
+                limit = body_limit_for(request.url.path)
+                if content_length > limit:
+                    logger.warning(f"[Req {request_id}] Payload too large: {content_length} bytes > max {limit}")
                     return JSONResponse(
                         status_code=413,
                         content={
                             "type": "https://errors.flatmate.platform/payload_too_large",
                             "title": "Payload Too Large",
                             "status": 413,
-                            "detail": f"Request body size {content_length} bytes exceeds maximum allowed limit of {MAX_REQUEST_BODY_BYTES} bytes.",
+                            "detail": f"Request body size {content_length} bytes exceeds maximum allowed limit of {limit} bytes.",
                             "instance": request.url.path,
                             "request_id": request_id,
                         },

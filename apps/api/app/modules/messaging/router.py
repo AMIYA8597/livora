@@ -23,7 +23,7 @@ from app.modules.messaging.schemas import (
 )
 from app.modules.messaging.service import MessagingService, message_dict
 from app.modules.messaging.websocket import manager, shares_conversation
-from app.modules.storage.service import StorageService
+from app.modules.storage.service import StorageService, read_upload
 from app.core.rate_limit import RateLimiter
 from app.ml.smart_replies import suggest_for_conversation
 
@@ -41,7 +41,10 @@ async def list_conversations(
     service = MessagingService(db)
     return await service.list_conversations(current_user.id, status_filter=status, search_query=q)
 
-@router.post("/conversations", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/conversations", status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(RateLimiter(max_requests=30, window_seconds=3600, key_prefix="conversation_create"))],
+)
 async def create_conversation(
     req: CreateConversationRequest,
     current_user: User = Depends(get_current_user),
@@ -179,7 +182,11 @@ async def remove_participant(
     await service.remove_participant(conversation_id, current_user.id, user_id)
     return {"status": "removed", "user_id": user_id}
 
-@router.post("/conversations/{conversation_id}/attachments", response_model=AttachmentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/conversations/{conversation_id}/attachments", response_model=AttachmentResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(RateLimiter(max_requests=30, window_seconds=600, key_prefix="chat_attachment"))],
+)
 async def upload_attachment(
     conversation_id: UUID,
     file: UploadFile = File(...),
@@ -197,9 +204,9 @@ async def upload_attachment(
 
     # 2. Validate and upload file via StorageService
     content_type = file.content_type or "application/octet-stream"
-    file_bytes = await file.read()
-
     storage_service = StorageService(db=db)
+    file_bytes = await read_upload(file, storage_service.max_bytes_for("chat_attachments"))
+
     upload_res = await storage_service.upload_file(
         current_user=current_user,
         file_bytes=file_bytes,
@@ -435,15 +442,15 @@ async def _handle_frame(websocket: WebSocket, user_id: UUID, frame: dict) -> Non
 
     if event_type == "message.send":
         try:
-            req = SendMessageRequest(
-                conversation_id=data.get("conversation_id"),
-                content=(data.get("content") or "").strip(),
-                message_type=data.get("message_type", "text"),
-                idempotency_key=data.get("idempotency_key"),
-                reply_to_message_id=data.get("reply_to_message_id"),
-                attachment_ids=data.get("attachment_ids") or [],
-                metadata=data.get("metadata") or {},
-            )
+            req = SendMessageRequest.model_validate({
+                "conversation_id": data.get("conversation_id"),
+                "content": (data.get("content") or "").strip(),
+                "message_type": data.get("message_type", "text"),
+                "idempotency_key": data.get("idempotency_key"),
+                "reply_to_message_id": data.get("reply_to_message_id"),
+                "attachment_ids": data.get("attachment_ids") or [],
+                "metadata": data.get("metadata") or {},
+            })
             async with AsyncSessionLocal() as db:
                 await MessagingService(db).send_message(user_id, req)
         except AppException as exc:

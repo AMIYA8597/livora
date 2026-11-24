@@ -78,6 +78,15 @@ async def cleanup_db_engine():
     yield
     await engine.dispose()
 
+
+@pytest.fixture(autouse=True)
+async def reset_rate_limits():
+    """Every test starts with fresh rate-limit counts (all test calls share one client IP)."""
+    from app.core import rate_limit
+
+    await rate_limit.reset()
+    yield
+
 @pytest.fixture(scope="session")
 def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()

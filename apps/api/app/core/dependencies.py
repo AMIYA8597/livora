@@ -2,7 +2,7 @@
 FastAPI Dependencies: DB session management, current user extraction,
 multi-role RBAC authorization, and resource ownership checks.
 """
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -15,6 +15,7 @@ from app.core.exceptions import UnauthorizedException, ForbiddenException
 from app.modules.users.models import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -42,6 +43,20 @@ async def get_current_user(
         raise ForbiddenException("User account has been deactivated")
 
     return user
+
+async def get_optional_user(
+    token: Optional[str] = Depends(optional_oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """The signed-in user for public endpoints that show more to some viewers, else None.
+    A bad or expired token is treated as anonymous rather than an error."""
+    if not token:
+        return None
+    try:
+        return await get_current_user(token, db)
+    except (UnauthorizedException, ForbiddenException):
+        return None
+
 
 def require_roles(allowed_roles: List[str]):
     """

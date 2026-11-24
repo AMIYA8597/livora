@@ -23,11 +23,14 @@ from app.modules.messaging.websocket import manager
 from app.modules.moderation.models import UserBlock
 from app.modules.notifications.events import first_name
 from app.modules.notifications.service import NotificationService
+from app.core import rate_limit
 from app.core.config import settings
 from app.core.exceptions import ForbiddenException, NotFoundException, BadRequestException
 from app.ml.moderation import prescreen
 from app.ml.moderation_jobs import ai_moderation_on, queue_message_moderation
 from app.workers.outbox import schedule_dispatch
+
+CHAT_SEND_LIMIT = (30, 60)  # messages per user per minute
 
 logger = logging.getLogger("flatmate.messaging")
 
@@ -465,6 +468,12 @@ class MessagingService:
         )
         if not (await self.db.execute(part_check)).scalar_one_or_none():
             raise ForbiddenException("You are not authorized to send messages to this conversation")
+
+        # 1b. One limit for REST and socket sends together, so neither path dodges it.
+        await rate_limit.hit(
+            f"chat_send:user:{sender_id}", *CHAT_SEND_LIMIT,
+            message="You're sending messages too quickly. Wait a moment and try again.",
+        )
 
         # 2. Check conversation status
         conv_q = select(Conversation).where(Conversation.id == req.conversation_id)

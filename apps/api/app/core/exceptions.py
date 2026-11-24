@@ -34,7 +34,8 @@ class AppException(HTTPException):
         return JSONResponse(
             status_code=self.status_code,
             content=content,
-            media_type="application/problem+json"
+            media_type="application/problem+json",
+            headers=self.headers or None,
         )
 
 class NotFoundException(AppException):
@@ -84,13 +85,21 @@ class ConflictException(AppException):
         )
 
 class RateLimitException(AppException):
-    def __init__(self, detail: str = "Rate limit exceeded. Please try again later.", error_code: str = "RATE_LIMITED"):
+    def __init__(
+        self,
+        detail: str = "Rate limit exceeded. Please try again later.",
+        error_code: str = "RATE_LIMITED",
+        retry_after: Optional[int] = None,
+    ):
         super().__init__(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             title="Too Many Requests",
             detail=detail,
             error_code=error_code,
         )
+        self.retry_after = retry_after
+        if retry_after is not None:
+            self.headers = {"Retry-After": str(retry_after)}
 
 class InternalServerException(AppException):
     def __init__(self, detail: str = "Internal server error occurred", error_code: str = "INTERNAL_SERVER_ERROR"):

@@ -12,13 +12,19 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi import UploadFile
+
+from app.core.config import settings
 from app.core.exceptions import (
+    AppException,
     BadRequestException,
     ForbiddenException,
     NotFoundException,
     InternalServerException,
 )
+from app.core.logging import logger
 from app.infrastructure.images import ImageRejected, sanitize_image
+from app.infrastructure.virus_scan import scan_bytes
 from app.infrastructure.storage import get_storage, StorageProvider
 from app.infrastructure.storage_buckets import BucketSpec, get_bucket
 from app.modules.users.models import User
@@ -44,6 +50,62 @@ MAGIC_SIGNATURES = {
     "image/webp": [b"RIFF"],
 }
 
+GENERIC_TYPES = {"", "application/octet-stream", "binary/octet-stream"}
+
+# PDF features that run code or carry other files. Names may be written with #xx escapes
+# (/J#61vaScript), which _pdf_names undoes before matching.
+PDF_ACTIVE_NAMES = (b"/javascript", b"/js", b"/launch", b"/embeddedfile", b"/embeddedfiles",
+                    b"/richmedia", b"/xfa", b"/submitform", b"/importdata")
+_PDF_NAME = re.compile(rb"/[^\s/<>\[\]()%{}]+")
+_PDF_HEX = re.compile(rb"#([0-9A-Fa-f]{2})")
+
+
+def sniff_content_type(content: bytes) -> Optional[str]:
+    """The upload's real type from its leading bytes, for the types the platform accepts."""
+    for mime in ("image/jpeg", "image/png"):
+        if content.startswith(MAGIC_SIGNATURES[mime][0]):
+            return mime
+    if len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return "image/webp"
+    if content.startswith(b"%PDF-"):
+        return "application/pdf"
+    return None
+
+
+def _pdf_names(content: bytes) -> set:
+    names = set()
+    for match in _PDF_NAME.finditer(content):
+        raw = _PDF_HEX.sub(lambda m: bytes([int(m.group(1), 16)]), match.group(0))
+        names.add(raw.lower())
+    return names
+
+
+def pdf_active_content(content: bytes) -> Optional[str]:
+    """Name of the first scripting/embedding feature found in a PDF, or None."""
+    names = _pdf_names(content)
+    for name in PDF_ACTIVE_NAMES:
+        if name in names:
+            return name.decode()[1:]
+    return None
+
+
+async def read_upload(file: UploadFile, max_bytes: int) -> bytes:
+    """Read an upload without holding more than `max_bytes` (+1 chunk) in memory."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(256 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise BadRequestException(
+                f"File size exceeds maximum permitted limit of {max_bytes // (1024 * 1024)}MB"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 class MalwareScanner(ABC):
     @abstractmethod
     def scan(self, data: bytes) -> bool:
@@ -51,12 +113,12 @@ class MalwareScanner(ABC):
         pass
 
 class DefaultMalwareScanner(MalwareScanner):
+    """Quick structural checks on every upload; ClamAV (when configured) runs after these."""
+
+    EXECUTABLE_HEADERS = (b"MZ", b"\x7fELF", b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe", b"#!")
+
     def scan(self, data: bytes) -> bool:
-        # Standard safety validator; extensible for ClamAV / external scanning APIs
-        # Check for executable headers embedded in payload
-        if data.startswith(b"MZ") or data.startswith(b"\x7fELF"):
-            return False
-        return True
+        return not data.startswith(self.EXECUTABLE_HEADERS)
 
 class StorageService:
     def __init__(
@@ -105,6 +167,13 @@ class StorageService:
                     f"File content does not match declared MIME type {content_type} (spoofed signature detected)"
                 )
 
+        if content_type == "application/pdf":
+            feature = pdf_active_content(content)
+            if feature:
+                raise BadRequestException(
+                    f"PDFs with active content ({feature}) aren't accepted. Print it to a new PDF and try again."
+                )
+
         # Malware scanning
         if not self.scanner.scan(content):
             raise BadRequestException("Malware or disallowed executable binary detected in upload payload")
@@ -118,6 +187,35 @@ class StorageService:
             "application/pdf": "pdf",
         }
         return safe_ext_map.get(content_type, "bin" if not raw_ext else re.sub(r"[^a-z0-9]", "", raw_ext))
+
+    @staticmethod
+    def resolve_content_type(content: bytes, declared: Optional[str]) -> str:
+        """
+        Browsers and apps often send a generic type, so the type comes from the bytes when the
+        client didn't name one. A specific declared type is kept, and validate_file rejects it
+        if the bytes disagree.
+        """
+        declared = (declared or "").split(";")[0].strip().lower()
+        if declared in GENERIC_TYPES:
+            return sniff_content_type(content) or "application/octet-stream"
+        if declared == "image/jpg":
+            return "image/jpeg"
+        return declared
+
+    async def virus_scan(self, content: bytes) -> None:
+        result = await scan_bytes(content)
+        if result.verdict == "infected":
+            logger.warning("Upload rejected by virus scan: %s", result.signature or "unknown signature")
+            raise BadRequestException("This file was flagged by the virus scanner and can't be uploaded")
+        if result.verdict in ("unavailable", "disabled") and settings.VIRUS_SCAN_REQUIRED:
+            raise AppException(
+                status_code=503, title="Service Unavailable", error_code="SCAN_UNAVAILABLE",
+                detail="Uploads are paused while the virus scanner is unavailable. Try again shortly.",
+            )
+
+    @staticmethod
+    def max_bytes_for(bucket: str) -> int:
+        return StorageService._spec(bucket).max_bytes
 
     @staticmethod
     def _spec(bucket: str) -> BucketSpec:
@@ -183,8 +281,10 @@ class StorageService:
         await self.authorize_upload(current_user, bucket, resource_id, domain_authorized)
         spec = self._spec(bucket)
 
-        # 2. Validate content & get safe extension
+        # 2. Validate content & get safe extension, then scan it
+        content_type = self.resolve_content_type(file_bytes, content_type)
         safe_ext = self.validate_file(file_bytes, content_type, filename, bucket)
+        await self.virus_scan(file_bytes)
 
         # 3. Re-encode images: strips EXIF/GPS, applies orientation, drops embedded payloads
         if content_type.startswith("image/"):

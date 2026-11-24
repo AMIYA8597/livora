@@ -80,7 +80,7 @@ class AuthService:
         user = (await self.db.execute(query)).scalar_one_or_none()
 
         if not user or not verify_password(data.password, user.hashed_password):
-            logger.warning(f"Failed login attempt for email {data.email}")
+            logger.warning("Failed login attempt")  # no email: logs must not hold personal data
             raise UnauthorizedException("Invalid email or password")
         if not user.is_active:
             raise UnauthorizedException("User account is disabled")

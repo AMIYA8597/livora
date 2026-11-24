@@ -27,6 +27,19 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+    # Rate limiting (counts in Redis, per-process fallback). TRUSTED_PROXY_HOPS is how many
+    # proxies in front of the API append to X-Forwarded-For: 0 = use the socket peer
+    # (direct/local), 1 = one load balancer such as Cloud Run's front end.
+    RATE_LIMIT_ENABLED: bool = True
+    TRUSTED_PROXY_HOPS: int = 0
+
+    # Upload virus scanning through clamd (off when CLAMAV_HOST is empty). With
+    # VIRUS_SCAN_REQUIRED, uploads are refused while the scanner is missing or unreachable.
+    CLAMAV_HOST: str = ""
+    CLAMAV_PORT: int = 3310
+    CLAMAV_TIMEOUT_SECONDS: float = 15.0
+    VIRUS_SCAN_REQUIRED: bool = False
+
     # Storage
     STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "local")
     S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "http://localhost:9000")

@@ -10,11 +10,15 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.modules.users.models import User
 from app.modules.storage.schemas import UploadResponse, SignedUrlResponse
-from app.modules.storage.service import StorageService
+from app.core.rate_limit import RateLimiter
+from app.modules.storage.service import StorageService, read_upload
 
 router = APIRouter(prefix="/storage", tags=["File Storage & Uploads"])
 
-@router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(RateLimiter(max_requests=100, window_seconds=3600, key_prefix="upload"))],
+)
 async def upload_file(
     file: UploadFile = File(...),
     bucket: str = Form("properties"),
@@ -24,9 +28,9 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
 ):
     content_type = file.content_type or "application/octet-stream"
-    content = await file.read()
-
     service = StorageService(db=db)
+    content = await read_upload(file, service.max_bytes_for(bucket))
+
     return await service.upload_file(
         current_user=current_user,
         file_bytes=content,

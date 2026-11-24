@@ -112,7 +112,7 @@ class VerificationService:
                 verification_type=pending_row.verification_type,
                 email_domain=pending_row.email_domain or "",
                 expires_at=pending_row.expires_at,
-            ) if pending_row else None,
+            ) if pending_row and pending_row.expires_at else None,
         )
 
     # ------------------------------------------------------------------ email codes
