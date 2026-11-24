@@ -80,9 +80,124 @@ def _pdf_names(content: bytes) -> set:
     return names
 
 
+# Streams: PDF objects can sit compressed inside object streams (/Type /ObjStm), where a raw
+# byte search can't see them. Streams are decoded (with a budget, against zip bombs; object
+# streams first) and their names checked too. Images and fonts can't hold actions and are
+# skipped. An object stream that can't be decoded, or an encrypted file, can't be checked and
+# is refused.
+_PDF_STREAM = re.compile(rb"stream\r?\n")
+_PDF_FILTER = re.compile(rb"/Filter\s*(\[[^\]]*\]|/[^\s/<>\[\]()]+)")
+_PDF_LENGTH = re.compile(rb"/Length\s+(\d+)\b(?!\s+\d+\s+R)")  # direct lengths only
+_PDF_OBJ_STREAM = re.compile(rb"/Type\s*/ObjStm\b")
+_PDF_SKIP_STREAM = re.compile(
+    rb"/Subtype\s*/(Image|Type1C|CIDFontType0C|OpenType)\b|/Type\s*/(XObject|Metadata|XRef)\b|/Length[123]\b")
+_PDF_OBJ_HEADER = re.compile(rb"\d+\s+\d+\s+obj\b")
+_IMAGE_FILTERS = {b"dctdecode", b"dct", b"jpxdecode", b"ccittfaxdecode", b"ccf", b"jbig2decode"}
+PDF_DECODE_BUDGET = 32 * 1024 * 1024  # decoded bytes per file (real object streams are KBs)
+
+
+class _PdfUncheckable(Exception):
+    pass
+
+
+def _filter_names(stream_dict: bytes) -> list:
+    m = _PDF_FILTER.search(stream_dict)
+    if not m:
+        return []
+    return [n[1:].lower() for n in _PDF_NAME.findall(m.group(1))]
+
+
+def _decode_stream(data: bytes, filters: list, budget: list) -> Optional[bytes]:
+    """The stream's decoded bytes, None for image-only filters. Raises _PdfUncheckable."""
+    import base64
+    import binascii
+    import zlib
+
+    for f in filters:
+        if f in _IMAGE_FILTERS:
+            return None
+        if f in (b"flatedecode", b"fl"):
+            inflater = zlib.decompressobj()
+            try:
+                out = inflater.decompress(data, budget[0] + 1)
+            except zlib.error as exc:
+                raise _PdfUncheckable("a damaged compressed stream") from exc
+            if len(out) > budget[0]:
+                raise _PdfUncheckable("too much compressed content")
+            data = out
+        elif f in (b"asciihexdecode", b"ahx"):
+            hexed = re.sub(rb"\s", b"", data).split(b">")[0]
+            try:
+                data = binascii.unhexlify(hexed + b"0" * (len(hexed) % 2))
+            except (binascii.Error, ValueError) as exc:
+                raise _PdfUncheckable("a damaged stream") from exc
+        elif f in (b"ascii85decode", b"a85"):
+            body = data.strip()
+            body = body[:-2] if body.endswith(b"~>") else body
+            try:
+                data = base64.a85decode(body, ignorechars=b" \t\r\n")
+            except ValueError as exc:
+                raise _PdfUncheckable("a damaged stream") from exc
+        else:  # LZW, RunLength, Crypt, ...: rare; can't vouch for what's inside
+            raise _PdfUncheckable(f"a {f.decode(errors='replace')} stream")
+        budget[0] -= len(data)
+        if budget[0] < 0:
+            raise _PdfUncheckable("too much compressed content")
+    return data
+
+
+def _pdf_streams(content: bytes):
+    """(dictionary, raw data) for each stream in the file."""
+    for m in _PDF_STREAM.finditer(content):
+        start = m.end()
+        head = content[max(0, m.start() - 4096):m.start()]
+        if not head.rstrip().endswith(b">>"):
+            continue  # the word "stream" inside data, not a stream keyword
+        headers = list(_PDF_OBJ_HEADER.finditer(head))
+        stream_dict = head[headers[-1].end():] if headers else head
+        # Readers undo #xx escapes in names (/Obj#53tm is /ObjStm), so match on the undone form.
+        stream_dict = _PDF_HEX.sub(lambda x: bytes([int(x.group(1), 16)]), stream_dict)
+        length = _PDF_LENGTH.search(stream_dict)
+        end = start + int(length.group(1)) if length else -1
+        if not length or content[end:end + 32].lstrip()[:9] != b"endstream":
+            end = content.find(b"endstream", start)
+            if end < 0:
+                end = len(content)
+        yield stream_dict, content[start:end]
+
+
+def _pdf_inner_names(content: bytes) -> set:
+    names: set = set()
+    budget = [PDF_DECODE_BUDGET]
+    streams = [(bool(_PDF_OBJ_STREAM.search(d)), d, data) for d, data in _pdf_streams(content)]
+    streams.sort(key=lambda s: not s[0])  # object streams first, so nothing else uses up the budget
+    for is_obj_stream, stream_dict, data in streams:
+        filters = _filter_names(stream_dict)
+        if not filters:
+            continue  # uncompressed: already part of the raw scan
+        if not is_obj_stream and _PDF_SKIP_STREAM.search(stream_dict):
+            continue
+        try:
+            decoded = _decode_stream(data, filters, budget)
+        except _PdfUncheckable:
+            if is_obj_stream:
+                raise
+            continue  # a page's drawing we can't read holds no actions
+        if decoded:
+            names |= _pdf_names(decoded)
+    return names
+
+
 def pdf_active_content(content: bytes) -> Optional[str]:
-    """Name of the first scripting/embedding feature found in a PDF, or None."""
+    """Why a PDF is refused: the first scripting/embedding feature found (in the file or in its
+    compressed streams), or a reason it can't be checked. None if it's fine."""
     names = _pdf_names(content)
+    if b"/encrypt" in names:
+        return "encryption, so it can't be checked"
+    try:
+        names |= _pdf_inner_names(content)
+    except _PdfUncheckable as exc:
+        return f"{exc}, so it can't be checked"
     for name in PDF_ACTIVE_NAMES:
         if name in names:
             return name.decode()[1:]
@@ -171,7 +286,7 @@ class StorageService:
             feature = pdf_active_content(content)
             if feature:
                 raise BadRequestException(
-                    f"PDFs with active content ({feature}) aren't accepted. Print it to a new PDF and try again."
+                    f"This PDF can't be accepted ({feature}). Print it to a new PDF and try again."
                 )
 
         # Malware scanning

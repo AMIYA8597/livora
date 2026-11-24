@@ -98,8 +98,19 @@ Gathered from the open items below and every item's "Not covered" notes.
       "failed" with the error rather than a 500. The admin console's new Payment Events tab
       lists them with an "Apply again" button; moderators don't see it. Tested in
       `tests/test_billing_db.py` and checked in the browser as an admin.
-- [ ] **L10. The PDF upload check reads raw bytes**, so active content inside compressed object
+- [x] **L10. The PDF upload check reads raw bytes**, so active content inside compressed object
       streams isn't seen.
+      *Done:* `pdf_active_content` (`app/modules/storage/service.py`) now also decodes the
+      file's streams (FlateDecode, ASCIIHex, ASCII85 and chains of them), undoes `#xx` name
+      escapes, and checks the names inside. Object streams go first. Images and fonts are
+      skipped, since they can't hold actions. Decoding stops at 32 MB per file
+      (decompression bombs). Refused as "can't be checked": an object stream in a filter
+      it can't read (LZW and the like) or one that is damaged, and encrypted or
+      password-protected PDFs. The upload error tells people to print to a new PDF. No new
+      dependency. Tests in `tests/test_security_pass.py` cover hidden JavaScript, an escaped
+      Launch, filter chains, an escaped /ObjStm after a big image, a zip bomb, encrypted
+      files, an ordinary compressed PDF, and a pypdf-written file with and without JavaScript
+      (that last one only runs where pypdf is installed).
 - [ ] **L11. Main-thread blocking time is 200–500ms on phones.** Load Sentry and the Supabase
       client after the page is interactive.
 - [ ] **L12. Restoring a backup into hosted Supabase:** skip default-privilege entries for roles

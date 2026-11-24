@@ -3,8 +3,12 @@ Security pass (launch item 16): shared rate limits keyed on verified identities,
 handling, upload type sniffing / PDF active content / virus scanning, and trimmed group data.
 """
 import asyncio
+import base64
+import io
+import os
 import struct
 import uuid
+import zlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -184,7 +188,7 @@ def test_type_comes_from_the_bytes_when_the_client_sends_a_generic_one():
 ])
 def test_pdfs_with_active_content_are_rejected(payload):
     assert pdf_active_content(payload)
-    with pytest.raises(BadRequestException, match="active content"):
+    with pytest.raises(BadRequestException, match="can't be accepted"):
         StorageService(storage_provider=object()).validate_file(payload, "application/pdf", "doc.pdf", "verification")
 
 
@@ -193,6 +197,85 @@ def test_plain_pdfs_pass():
     assert pdf_active_content(plain) is None
     StorageService(storage_provider=object()).validate_file(plain, "application/pdf", "doc.pdf", "verification")
 
+
+
+# ---- compressed streams (L10): what a raw byte search can't see
+
+def _stream_obj(num: int, data: bytes, filters: str = "/FlateDecode", extra: str = "", length=None) -> bytes:
+    length = f"{len(data)}" if length is None else length
+    return (f"{num} 0 obj\n<< {extra} /Length {length} /Filter {filters} >>\nstream\n".encode()
+            + data + b"\nendstream\nendobj\n")
+
+
+def _pdf(*objs: bytes) -> bytes:
+    return (b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+            b"2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n" + b"".join(objs) + b"%%EOF\n")
+
+
+_JS_OBJECTS = b"10 0 20 0 << /S /JavaScript /JS (app.alert(1)) >> << /Type /Action >>"
+
+
+@pytest.mark.parametrize("pdf, expected", [
+    # Action hidden in a compressed object stream.
+    (_pdf(_stream_obj(3, zlib.compress(_JS_OBJECTS), extra="/Type /ObjStm /N 2 /First 10")), "javascript"),
+    # Same, with the name #-escaped inside the stream and the filter name abbreviated.
+    (_pdf(_stream_obj(3, zlib.compress(b"10 0 << /S /L#61unch /F (cmd) >>"), "/Fl",
+                      extra="/Type /ObjStm /N 1 /First 5")), "launch"),
+    # A filter chain: ASCII85 over Flate.
+    (_pdf(_stream_obj(3, base64.a85encode(zlib.compress(b"<< /EmbeddedFiles 4 0 R >>")) + b"~>",
+                      "[/ASCII85Decode /FlateDecode]", extra="/Type /ObjStm /N 1 /First 0")), "embeddedfiles"),
+    # Hex-encoded, with the length given by reference.
+    (_pdf(_stream_obj(3, zlib.compress(b"<< /RichMedia 5 0 R >>").hex().encode() + b">",
+                      "[/AHx /Fl]", length="9 0 R")), "richmedia"),
+    # The object stream's own type #-escaped, after a big compressed image that eats the budget.
+    (_pdf(_stream_obj(3, zlib.compress(b"\0" * (70 * 1024 * 1024)), extra="/Type /XObject /Subtype /Image"),
+          _stream_obj(4, zlib.compress(_JS_OBJECTS), extra="/Type /Obj#53tm /N 2 /First 10")), "javascript"),
+], ids=["objstm-js", "escaped-launch", "a85-chain", "hex-indirect-length", "escaped-objstm-after-image"])
+def test_active_content_inside_compressed_streams_is_found(pdf, expected):
+    assert expected in pdf_active_content(pdf).lower()
+    with pytest.raises(BadRequestException, match="can't be accepted"):
+        StorageService(storage_provider=object()).validate_file(pdf, "application/pdf", "doc.pdf", "verification")
+
+
+@pytest.mark.parametrize("pdf", [
+    # An object stream in a filter we can't read.
+    _pdf(_stream_obj(3, b"\x80\x0b\x60\x50", "/LZWDecode", extra="/Type /ObjStm /N 1 /First 0")),
+    # A damaged object stream.
+    _pdf(_stream_obj(3, b"not deflate data at all", extra="/Type /ObjStm /N 1 /First 0")),
+    # A zip bomb: 80 MB of zeros, compressed to well under 100 KB.
+    _pdf(_stream_obj(3, zlib.compress(b"\0" * (80 * 1024 * 1024), 9), extra="/Type /ObjStm /N 1 /First 0")),
+    # Encrypted: the streams can't be read at all.
+    b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R /Encrypt 5 0 R >>\n%%EOF",
+], ids=["lzw-objstm", "damaged-objstm", "zip-bomb", "encrypted"])
+def test_pdfs_that_cant_be_checked_are_refused(pdf):
+    assert "can't be checked" in pdf_active_content(pdf)
+
+
+def test_ordinary_compressed_pdfs_pass():
+    page = zlib.compress(b"BT /F1 12 Tf 72 712 Td (Rent receipt: stream of payments) Tj ET")
+    objstm = zlib.compress(b"10 0 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    pdf = _pdf(
+        _stream_obj(3, page),
+        _stream_obj(4, objstm, extra="/Type /ObjStm /N 1 /First 5"),
+        _stream_obj(5, os.urandom(2048), "/DCTDecode", extra="/Type /XObject /Subtype /Image"),
+        _stream_obj(6, b"\x01\x02garbage", "/LZWDecode"),  # an unreadable page drawing holds no actions
+    )
+    assert pdf_active_content(pdf) is None
+    StorageService(storage_provider=object()).validate_file(pdf, "application/pdf", "doc.pdf", "verification")
+
+
+def test_a_pdf_written_by_a_real_library_passes_and_its_javascript_is_found():
+    pypdf = pytest.importorskip("pypdf")
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    plain = io.BytesIO()
+    writer.write(plain)
+    assert pdf_active_content(plain.getvalue()) is None
+    writer.add_js("app.alert('hi');")
+    writer.compress_identical_objects()
+    scripted = io.BytesIO()
+    writer.write(scripted)
+    assert pdf_active_content(scripted.getvalue())
 
 @pytest.mark.parametrize("header", [b"#!/bin/sh\n", b"\xcf\xfa\xed\xfe", b"\x7fELF"])
 def test_executables_are_rejected_whatever_they_claim(header):
