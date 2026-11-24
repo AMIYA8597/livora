@@ -691,15 +691,72 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - GitHub's scheduled runs can be late and pause after 60 days without activity. Add a
         Cloud Monitoring uptime check for tighter alerting.
       - Web logs stay in Vercel's log view; they aren't drained anywhere else.
-- [ ] **16. Security pass.** CSP headers on the web app, rate limits on auth/chat/upload, file
-      type sniffing and virus scan on uploads, account deletion/export (DPDP Act compliance).
-      Note: `RateLimiter` (`app/core/rate_limit.py`) is in-memory per process, so limits reset on
-      restart and multiply with instances. It keys signed-in calls on the token's last 16
-      characters (a fresh token resets the limit) and anonymous calls on a client-supplied
-      `X-Forwarded-For` (spoofable). Move it to Redis, key on the verified user id, and trust
-      forwarded headers only from the platform proxy. (OTP send limits already live in the DB.)
-      Also: the public `GET /groups` response includes members' user IDs; trim it to counts for
-      anyone who isn't a member.
+- [x] **16. Security pass: limits, uploads, CSP, group privacy.** Done:
+      - **Rate limits** (`app/core/rate_limit.py`):
+        - Counts are shared in Redis: a sliding window per key, updated atomically by a Lua script.
+          They survive restarts and don't multiply with instances. When Redis is down it falls
+          back to per-process counts.
+        - Signed-in calls key on the verified user id from the access token. A forged or refresh
+          token counts as anonymous.
+        - Anonymous calls key on the client IP. `X-Forwarded-For` is trusted only as far as
+          `TRUSTED_PROXY_HOPS` proxies vouch for it (0 locally, 1 on Cloud Run, set in the staging
+          deploy).
+        - 429s carry `Retry-After`, and keys never hold an email.
+      - **New limits:**
+        - per IP: login, register, refresh, forgot and reset password (generous, because hostels
+          and offices share one address)
+        - per account (hashed email): login (10 per 15 minutes) and reset emails (5 per hour)
+        - chat sends: 30 a minute per user, shared by REST and the socket
+        - new conversations: 30 an hour
+        - uploads: 100 an hour; chat attachments: 30 per 10 minutes
+      - The failed-login log line no longer includes the email.
+      - **Uploads:**
+        - Files are read in chunks and stop at the bucket limit, instead of being read whole
+          first. Upload routes get a 16 MB body cap (it was 10 MB, below the 15 MB document limit).
+        - The type comes from the file's bytes when the client sends a generic one. A specific
+          declared type that the bytes contradict is still rejected.
+        - PDFs with JavaScript, launch actions, embedded files, XFA or forms that submit are
+          rejected. Escaped names like `/J#61vaScript` are caught too.
+        - More executable headers are rejected.
+        - ClamAV scanning (`app/infrastructure/virus_scan.py`, clamd INSTREAM over TCP) runs when
+          `CLAMAV_HOST` is set. With `VIRUS_SCAN_REQUIRED`, uploads get a 503 while the scanner is
+          missing or down.
+      - **Web CSP** (`apps/web/lib/csp.mjs`):
+        - It pins script, connect, image and frame sources to the site itself, the API and
+          socket origins, Razorpay, the image hosts and Sentry ingest (which also receives CSP
+          reports when a DSN is set).
+        - It sets `object-src 'none'`, `base-uri 'self'`, `form-action 'self'` and
+          `frame-ancestors 'none'`, plus HSTS in production builds. `X-XSS-Protection` is now `0`.
+        - `CSP_REPORT_ONLY=true` switches it to report-only.
+      - **Groups:**
+        - The public list and detail show non-members a member count only: no member ids,
+          creator or wishlist votes.
+        - Compatibility (member names and pairwise scores) is now members and staff only; any
+          signed-in user could read it before.
+        - The city filter escapes wildcards, and the list is capped at 200.
+      - Also fixed two mypy errors that CI would have flagged.
+      - **Tests:** `apps/api/tests/test_security_pass.py` (25) and `apps/web/tests/csp.test.ts`
+        (5). The Redis test uses the CI Redis, or fakeredis locally.
+      - **Checked:**
+        - e2e 12/12 against a production build with the CSP enforced, including the live chat
+          socket
+        - no CSP violations on the main pages
+        - group trimming, the creator's full view, the compatibility 403, upload sniffing and the
+          PDF rejection, all against the running API
+      Not covered:
+      - The Razorpay checkout wasn't opened under the CSP. Do a test payment on staging and
+        watch the console.
+      - `TRUSTED_PROXY_HOPS=1` assumes Cloud Run with no load balancer in front. Use 2 with an
+        external HTTPS load balancer. Check a real request's `X-Forwarded-For` on staging.
+      - No ClamAV is deployed yet (e.g. a clamd container on Cloud Run reachable over the VPC);
+        that's deploy work under item 18. Until then, keep `VIRUS_SCAN_REQUIRED=false`.
+      - The PDF check reads names in the raw file. Content hidden inside compressed object
+        streams needs ClamAV (or re-rendering the PDF) to catch.
+      - Scripts still allow `'unsafe-inline'` (Next.js inline bootstrap). Nonces would make every
+        page dynamic.
+- [ ] **16b. Account deletion and data export (DPDP Act).** Let people download their data and
+      delete their account from settings: what's removed, what's anonymised (e.g. messages in
+      other people's chats) and any retention period need a decision before building.
 - [ ] **17. SEO and performance.** Metadata/OG for property pages, image optimisation,
       Lighthouse of at least 90 on mobile.
 - [ ] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a

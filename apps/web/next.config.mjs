@@ -1,4 +1,16 @@
 import { withSentryConfig } from "@sentry/nextjs/config";
+import { buildCsp } from "./lib/csp.mjs";
+
+const isDev = process.env.NODE_ENV !== "production";
+const csp = buildCsp({
+  apiUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1",
+  wsUrl: process.env.NEXT_PUBLIC_WS_URL,
+  sentryDsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  dev: isDev,
+});
+// CSP_REPORT_ONLY=true sends the policy as report-only (violations are reported, nothing is
+// blocked): useful for a first deploy to a new domain.
+const cspHeader = process.env.CSP_REPORT_ONLY === "true" ? "Content-Security-Policy-Report-Only" : "Content-Security-Policy";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -28,6 +40,10 @@ const nextConfig = {
         source: "/(.*)",
         headers: [
           {
+            key: cspHeader,
+            value: csp,
+          },
+          {
             key: "X-Content-Type-Options",
             value: "nosniff",
           },
@@ -36,9 +52,11 @@ const nextConfig = {
             value: "DENY",
           },
           {
+            // The old XSS auditor is gone from browsers and could be abused; CSP replaces it.
             key: "X-XSS-Protection",
-            value: "1; mode=block",
+            value: "0",
           },
+          ...(isDev ? [] : [{ key: "Strict-Transport-Security", value: "max-age=31536000" }]),
           {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
