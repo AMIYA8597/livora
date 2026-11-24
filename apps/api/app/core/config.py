@@ -153,6 +153,16 @@ class Settings(BaseSettings):
     # The learned ranker needs this many labelled like/pass interactions before training.
     RANKER_MIN_TRAINING_ROWS: int = 200
 
+    # Placing new listings on the map from their public locality and PIN code (never the flat
+    # address): "nominatim" (OpenStreetMap, free, max 1 request/second) or "off". Nominatim's
+    # policy asks for a User-Agent naming the app; GEOCODER_EMAIL (optional) is sent so they can
+    # reach the operator instead of blocking. NOMINATIM_URL can point at a self-hosted server.
+    GEOCODER: str = "nominatim"
+    NOMINATIM_URL: str = "https://nominatim.openstreetmap.org"
+    GEOCODER_USER_AGENT: str = "Flatmate/1.0 (rental listings in India)"
+    GEOCODER_EMAIL: Optional[str] = None
+    GEOCODER_TIMEOUT_SECONDS: float = 8.0
+
     # Payments (Razorpay, INR, auto-renewing subscriptions). Billing is on only when all three
     # are set; until then free-tier limits are not enforced and paid features are hidden.
     # Use rzp_test_ keys outside production. The webhook secret is the one entered for the

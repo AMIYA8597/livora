@@ -117,7 +117,7 @@ async def test_export_holds_their_data_and_no_secrets(async_client, world):
     assert data["groups"][0]["name"] == f"Group {world.tag}"
     assert data["applications"] == []  # applications *to* their listing are the applicant's data
     raw = json.dumps(data)
-    for secret in ("hashed_password", "p256dh", "\"auth\"", "endpoint", "code_hash", "location"):
+    for secret in ("hashed_password", "p256dh", "\"auth\"", "endpoint", "code_hash", "\"location\""):
         assert secret not in raw
 
 

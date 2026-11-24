@@ -30,6 +30,9 @@ class Property(Base):
     state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     postal_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     country: Mapped[str] = mapped_column(String(100), default="India", nullable=False)
+    # city (still at the city centre) / locality / postcode (placed by OpenStreetMap) / owner
+    # (the owner's own pin) / NULL (saved before migration 017).
+    location_precision: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 
     # Financials (INR-first with explicit currency)
     currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)

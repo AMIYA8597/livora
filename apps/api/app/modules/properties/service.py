@@ -15,6 +15,7 @@ from app.ml.moderation import prescreen
 from app.ml.moderation_jobs import ai_moderation_on, queue_property_moderation
 from app.ml.search import clean_query, rank_properties
 from app.modules.billing.entitlements import ensure_can_publish
+from app.modules.locations.geocoding import precision_for_new_listing, queue_listing_geocode
 from app.modules.locations.service import LocationService, city_condition, distance_km
 
 VALID_LISTING_STATUSES = {"draft", "pending_verification", "published", "paused", "archived"}
@@ -229,6 +230,8 @@ class PropertyService:
                 error_code="UNSUPPORTED_CITY",
             )
         await ensure_can_publish(self.db, owner_id)  # new listings are published at once
+        centre = (city.latitude, city.longitude) if city.latitude is not None and city.longitude is not None else None
+        precision = precision_for_new_listing(data.latitude, data.longitude, centre)
 
         wkt_point = f"POINT({data.longitude} {data.latitude})"
         prop = Property(
@@ -262,10 +265,13 @@ class PropertyService:
             listing_status="published",
             is_active=True,
         )
+        prop.location_precision = precision
         self.db.add(prop)
         await self.db.flush()
         queue_embedding_refresh(self.db, "property", prop.id)
         queue_listing_review(self.db, prop)
+        if precision == "city":
+            queue_listing_geocode(self.db, prop.id)  # place it from its locality and PIN code
 
         # Add amenities
         for amenity in data.amenities:

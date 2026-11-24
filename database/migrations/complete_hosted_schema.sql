@@ -1817,6 +1817,14 @@ UPDATE properties p SET city = ci.name, state = COALESCE(NULLIF(p.state, ''), s.
 
 UPDATE alembic_version SET version_num='016_india_locations' WHERE alembic_version.version_num = '015_canonical_lifestyle_traits';
 
+-- Running upgrade 016_india_locations -> 017_listing_location_precision
+
+ALTER TABLE properties ADD COLUMN IF NOT EXISTS location_precision VARCHAR(16);
+
+ALTER TABLE properties ADD CONSTRAINT ck_properties_location_precision CHECK (location_precision IN ('city', 'locality', 'postcode', 'owner'));
+
+UPDATE alembic_version SET version_num='017_listing_location_precision' WHERE alembic_version.version_num = '016_india_locations';
+
 DO $$
 DECLARE
     r record;

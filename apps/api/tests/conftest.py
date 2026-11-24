@@ -68,6 +68,7 @@ os.environ["DATABASE_URL"] = (
 os.environ["ENVIRONMENT"] = "test"
 os.environ["STORAGE_TYPE"] = "local"  # never upload to hosted buckets from tests
 os.environ["EMAIL_PROVIDER"] = "memory"  # never send real mail from tests
+os.environ["GEOCODER"] = "off"  # never call OpenStreetMap from tests (geocoding tests inject a fake)
 
 import pytest
 import asyncio

@@ -181,7 +181,7 @@ committed on your OK.
       schema file includes 016 (still to apply: E2). Not in the list yet: big non-capital rental
       markets such as Gurugram, Noida, Ahmedabad and Kochi. Listings there are refused until
       they are added.
-- [ ] **P2. Current location and real addresses.** "Near me" from the browser's location (asked,
+- [x] **P2. Current location and real addresses.** "Near me" from the browser's location (asked,
       never stored), nearest supported city, radius search (PostGIS is ready), and geocoding a
       listing's address instead of using the city centre. *Needs your choice of map provider.*
       *Done so far (no provider needed):* `GET /properties` takes `near_lat`/`near_lng`/`radius_km`
@@ -194,8 +194,21 @@ committed on your OK.
       holds only `near=1`. The API logs paths only and Sentry drops query strings. There is a
       distance picker (2-50 km), and cards show "2.5 km away". When nothing is near, the page
       offers a wider distance, then the nearest city. Blocked, unavailable and timed-out
-      locations each say what to do. *Still open:* turning an owner's address into a map
-      position. Listings still sit at their city centre until a provider is chosen.
+      locations each say what to do.
+      *Address placement (OpenStreetMap Nominatim, chosen 2026-11-24):* a new listing saved at
+      its city's centre (the wizard's placeholder) gets a `listing.geocode` outbox job. The job
+      looks up the PUBLIC locality line, state and PIN code, falling back to the PIN code alone.
+      The flat or building address is never sent. A match more than 50 km from the chosen city
+      is ignored, and nothing found leaves the city centre. Migration 017 adds
+      `properties.location_precision`: city / locality / postcode / owner (the owner's own pin,
+      never looked up). The job is idempotent, and a busy Nominatim (429/5xx) is retried with
+      the outbox backoff. Usage policy: max 1 request/second (Redis-shared, per-process without
+      Redis), results cached 30 days (misses 1 day), an identifying User-Agent, India only.
+      Settings: `GEOCODER` (`nominatim`/`off`), `NOMINATIM_URL` (can point at a self-hosted
+      server), `GEOCODER_USER_AGENT`, and `GEOCODER_EMAIL` (optional contact for the
+      Nominatim operators). Tested with a faked network, plus one real run that placed a Leh
+      listing in Changspa. The wizard tells owners how the placement works. The hosted schema
+      file includes 017.
 - [ ] **P3. Room-finding ranking.** Rank listings per person: relevance, distance, budget fit,
       move-in date, verified owner, photo/description quality, freshness, owner response rate,
       and what the person saved, viewed or applied to; spam and duplicate listings pushed down.

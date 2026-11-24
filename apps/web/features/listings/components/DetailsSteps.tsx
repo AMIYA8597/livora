@@ -70,6 +70,7 @@ export function LocationStep({ draft, update }: StepProps) {
         value={draft.locality}
         onChange={(e) => update({ locality: e.target.value })}
         placeholder="e.g. HSR Layout Sector 4"
+        helperText="With the PIN code, this places your listing on the map (OpenStreetMap). The exact address is never used for that."
       />
       <Input
         label="Exact address (only shared after a confirmed visit)"

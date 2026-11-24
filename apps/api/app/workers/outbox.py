@@ -103,6 +103,14 @@ async def _handle_push(payload: Dict[str, Any], session_factory: SessionFactory)
     return await handle_push(payload, session_factory)
 
 
+async def _handle_listing_geocode(payload: Dict[str, Any], session_factory: SessionFactory) -> Dict[str, Any]:
+    from uuid import UUID
+
+    from app.modules.locations.geocoding import geocode_listing
+
+    return await geocode_listing(session_factory, UUID(payload["property_id"]))
+
+
 HANDLERS: Dict[str, Handler] = {
     EMAIL_EVENT: _handle_email,
     MESSAGE_CREATED_EVENT: _handle_message_created,
@@ -110,6 +118,7 @@ HANDLERS: Dict[str, Handler] = {
     "message.moderate": _handle_message_moderate,
     "property.moderate": _handle_property_moderate,
     "push.send": _handle_push,
+    "listing.geocode": _handle_listing_geocode,
 }
 
 
