@@ -2,13 +2,21 @@
 Celery tasks. Each run uses its own event loop and a NullPool engine: asyncpg
 connections are bound to the loop that created them, so pooled connections must
 never outlive a single `asyncio.run`.
+
+The database login carries the API's limits (scripts/create_app_db_user.sql: 15s per statement,
+30s idle in a transaction). Maintenance and ranker training can legitimately take longer, so
+they raise both to WORKER_STATEMENT_TIMEOUT_SECONDS with `SET LOCAL` at the start of every
+transaction. SET LOCAL, unlike a session setting or a startup parameter, is safe behind
+Supabase's transaction pooler: it ends with the transaction and never leaks to another client.
+The outbox sweep keeps the API's limits; its handlers are short.
 """
 from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
-from typing import Any, Awaitable, Callable, Dict, TypeVar
+from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -23,10 +31,31 @@ T = TypeVar("T")
 POOL_KEYS = {"pool_size", "max_overflow"}
 
 
-def run_with_session_factory(job: Callable[[async_sessionmaker[AsyncSession]], Awaitable[T]]) -> T:
+def timeout_statements(seconds: int) -> list[str]:
+    seconds = int(seconds)
+    if seconds <= 0:
+        raise ValueError("statement timeout must be positive")
+    return [
+        f"SET LOCAL statement_timeout = '{seconds}s'",
+        f"SET LOCAL idle_in_transaction_session_timeout = '{seconds}s'",
+    ]
+
+
+def run_with_session_factory(
+    job: Callable[[async_sessionmaker[AsyncSession]], Awaitable[T]],
+    statement_timeout_seconds: Optional[int] = None,
+) -> T:
     async def runner() -> T:
         options = {k: v for k, v in engine_options(settings.DATABASE_URL).items() if k not in POOL_KEYS}
         engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool, **options)
+        if statement_timeout_seconds:
+            statements = timeout_statements(statement_timeout_seconds)
+
+            @event.listens_for(engine.sync_engine, "begin")
+            def _longer_limits(conn) -> None:
+                for statement in statements:
+                    conn.exec_driver_sql(statement)
+
         try:
             return await job(async_sessionmaker(bind=engine, expire_on_commit=False))
         finally:
@@ -42,7 +71,7 @@ def dispatch_outbox() -> Dict[str, Any]:
 
 @celery_app.task(name="maintenance.run", ignore_result=True)
 def maintenance() -> Dict[str, int]:
-    return run_with_session_factory(run_maintenance)
+    return run_with_session_factory(run_maintenance, settings.WORKER_STATEMENT_TIMEOUT_SECONDS)
 
 
 @celery_app.task(name="ml.train_ranker", ignore_result=True)
@@ -56,4 +85,4 @@ def train_ranker() -> Dict[str, Any]:
         return {"rows": report.rows, "activated": report.activated, "version": report.version,
                 "reason": report.reason}
 
-    return run_with_session_factory(job)
+    return run_with_session_factory(job, settings.WORKER_STATEMENT_TIMEOUT_SECONDS)

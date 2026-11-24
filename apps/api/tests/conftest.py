@@ -47,6 +47,9 @@ def _provision_app_login(owner_url: str) -> str:
                 )
             if not await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", user):
                 await conn.execute(f"CREATE ROLE {user} LOGIN PASSWORD '{password}' IN ROLE flatmate_app")
+            # The same limits scripts/create_app_db_user.sql puts on the production login.
+            await conn.execute(f"ALTER ROLE {user} SET statement_timeout = '15s'")
+            await conn.execute(f"ALTER ROLE {user} SET idle_in_transaction_session_timeout = '30s'")
         finally:
             await conn.close()
 

@@ -49,8 +49,15 @@ Gathered from the open items below and every item's "Not covered" notes.
       service's `Retry-After`, else 30s doubling, capped at 10 minutes. It stops after 4 attempts,
       after 30 minutes, or once the notification is read. Giving up counts one failure against the
       browser. Tests: four in `tests/test_notifications_push_db.py`.
-- [ ] **L5. Worker jobs inherit the API role's 15-second statement timeout.** Maintenance and
+- [x] **L5. Worker jobs inherit the API role's 15-second statement timeout.** Maintenance and
       ranker training need longer.
+      *Done:* maintenance and ranker training run every transaction with `SET LOCAL
+      statement_timeout` and `idle_in_transaction_session_timeout` set to
+      `WORKER_STATEMENT_TIMEOUT_SECONDS` (default 600, at most 3600). `SET LOCAL` ends with the
+      transaction, so it is safe on Supabase's transaction pooler. The outbox sweep keeps the
+      API's 15s/30s. The test login now carries the same limits as production, so the whole suite
+      runs under them. Tests: `tests/test_worker_timeouts_db.py` (5), including a real
+      timeout cancelling a statement.
 - [ ] **L6. `POST /search/properties` still uses plain text matching.** Use the full-text search
       the web app already uses.
 - [ ] **L7. Owners and applicants can't see an application's status history**; only staff can.

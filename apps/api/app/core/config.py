@@ -1,7 +1,7 @@
 import json
 import os
 from typing import Any, List, Optional
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -185,6 +185,8 @@ class Settings(BaseSettings):
     # Celery
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
+    # Per-statement limit for maintenance and ranker training (the API login allows 15s).
+    WORKER_STATEMENT_TIMEOUT_SECONDS: int = Field(default=600, ge=1, le=3600)
 
     model_config = SettingsConfigDict(
         env_file=".env",
