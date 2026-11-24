@@ -281,9 +281,18 @@ committed on your OK.
       as the machine's local time, so on a machine set to India time those timestamps were
       stored 5h30 early. Likes made between midnight and 05:30 IST counted as the previous
       day's, skipping the free daily cap. Containers in UTC hid this.
-- [ ] **P5. Architecture write-up.** One document with each layer's job (web, API routers,
+- [x] **P5. Architecture write-up.** One document with each layer's job (web, API routers,
       services, models, workers, ML, storage), how a request flows, and the rules each layer keeps,
       so new code (and the mobile apps) follow it.
+      *Done:* `docs/ARCHITECTURE.md` has:
+      - a system diagram, a repository map and the roles;
+      - each layer's job and rules (web, routers, services, models, database security,
+        migrations, core, infrastructure, workers, ML, realtime);
+      - a write ("Ask the owner") and a read (browse) traced end to end;
+      - a checklist for new code and notes for the mobile apps.
+
+      It also lists what is out of date in the older design docs: ADR 008 still says Next.js 14,
+      and `API_DESIGN.md` describes a success envelope the API doesn't use.
 - [ ] **P6. Ready for the mobile apps.** A stable versioned API contract for the apps, push
       notifications through Firebase (Android) and APNs (iOS) next to web push, deep links, and
       an installable website (PWA) in the meantime. The apps themselves come after the website
