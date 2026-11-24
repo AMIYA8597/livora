@@ -27,6 +27,7 @@ export interface OwnerProperty {
   monthly_rent: number;
   security_deposit: number;
   listing_status: string;
+  is_featured?: boolean;
   is_verified: boolean;
   is_active: boolean;
   rooms: OwnerRoom[];

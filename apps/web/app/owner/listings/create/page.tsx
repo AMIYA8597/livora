@@ -10,6 +10,8 @@ import { loginHref } from "@/lib/navigation";
 import { localDateInputValue } from "@/lib/utils";
 import { PageLoading } from "@/components/states/PageLoading";
 import { InlineNotice } from "@/components/states/InlineNotice";
+import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
+import { upgradeFrom, type UpgradeHint } from "@/lib/billing-model";
 import { WIZARD_STEPS, buildListingPayload, firstInvalidStep, initialDraft, validateStep, type ListingDraft } from "@/features/listings/draft";
 import type { StepProps } from "@/features/listings/components/fields";
 import { BasicsStep, LayoutStep, LocationStep } from "@/features/listings/components/DetailsSteps";
@@ -34,6 +36,7 @@ export default function ListingWizardPage() {
   const [draft, setDraft] = useState<ListingDraft>(initialDraft);
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [upgrade, setUpgrade] = useState<UpgradeHint | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [publishedId, setPublishedId] = useState<string | null>(null);
 
@@ -66,6 +69,7 @@ export default function ListingWizardPage() {
     }
     setIsSubmitting(true);
     setError(null);
+    setUpgrade(null);
     try {
       const res = await apiClient<{ id: string }>("/properties", {
         method: "POST",
@@ -73,7 +77,9 @@ export default function ListingWizardPage() {
       });
       setPublishedId(res.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't publish the listing");
+      const hint = upgradeFrom(err);
+      if (hint) setUpgrade({ ...hint, message: `${hint.message} Your listing stays here: publish again once you're ready.` });
+      else setError(err instanceof Error ? err.message : "Couldn't publish the listing");
     } finally {
       setIsSubmitting(false);
     }
@@ -140,6 +146,7 @@ export default function ListingWizardPage() {
       </div>
 
       {error && <InlineNotice tone="error">{error}</InlineNotice>}
+      {upgrade && <UpgradePrompt hint={upgrade} newTab onDismiss={() => setUpgrade(null)} />}
 
       <Card className="p-4 sm:p-6 border-slate-200/80 shadow-xs">
         <StepComponent draft={draft} update={update} />

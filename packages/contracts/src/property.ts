@@ -72,6 +72,8 @@ export interface PropertyDTO {
   pets_allowed: boolean;
   smoking_allowed: boolean;
   is_verified?: boolean;
+  /** Owner Pro: shown first in search while featured. */
+  is_featured?: boolean;
   listing_status?: ListingStatus;
   images: string[];
   amenities: string[];

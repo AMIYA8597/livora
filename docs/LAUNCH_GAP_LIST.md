@@ -351,8 +351,72 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - The web lifestyle form saves to `lifestyle_profiles`, but matching, the diet and sleep
         filters and the ranker read `profiles.lifestyle_traits`, which only the older quiz
         endpoint and the seed fill. That pre-dates this item and needs its own fix.
-- [ ] **11. Payments and subscriptions.** Only the models exist. Needs a Razorpay (INR)
-      integration: plans API, checkout, signed webhook verification, entitlement checks.
+- [x] **11. Payments and subscriptions.** *(Done.)* Razorpay Subscriptions in INR, auto-renewing
+      monthly, in `apps/api/app/modules/billing/` (migration `010_billing`). Billing switches on
+      only when `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` are all
+      set. Until then everything is free and unlimited, and the web app says plans are coming soon.
+      - **Plans** (seeded by the migration, prices are placeholders to confirm before launch):
+        - **Seeker Pro**, ₹199/month: see who liked you, and unlimited likes (free: 25 a day,
+          `FREE_DAILY_LIKES`, reset at midnight IST).
+        - **Owner Pro**, ₹499/month: unlimited published listings (free: 2,
+          `FREE_ACTIVE_LISTINGS`) and up to 3 featured listings.
+        - The matching Razorpay plan is created on first checkout and recreated if the price
+          changes (Razorpay plans are immutable).
+      - **API:**
+        - `GET /billing/plans` (public)
+        - `GET /billing/me`: entitlements, usage and subscriptions
+        - `POST /billing/subscriptions`: starts checkout and reuses an unpaid one
+        - `POST /billing/subscriptions/verify`: checks the Checkout signature, then confirms
+          with Razorpay before unlocking anything
+        - `POST /billing/subscriptions/{id}/cancel`: stops renewal at the end of the paid
+          period
+        - `POST /billing/webhooks/razorpay`
+      - **Webhooks:**
+        - HMAC-SHA256 over the raw body, compared in constant time.
+        - Every event is stored in `billing_events` and committed before it is processed, so
+          duplicates are skipped and failed events can be retried by Razorpay.
+        - Out-of-order events are ignored using the event time.
+        - Renewals extend featured listings.
+        - Users get an in-app notification when a plan starts, a payment fails, a plan is
+          halted, or it is cancelled.
+      - **Entitlements:** limits are enforced on the server and the web app only reflects them.
+        Over a limit, the API returns `402` problem+json with `error_code` (`UPGRADE_REQUIRED`
+        or `FEATURED_LIMIT`), `feature` and `plan`. The web app turns that into an inline
+        "See plans" prompt, never a dead end; a listing wizard keeps its draft. A cancelled
+        plan keeps working until the paid period ends. Admins bypass the listing cap. Unpaid
+        or local subscriptions are expired by the maintenance worker; Razorpay-backed ones
+        follow Razorpay's events.
+      - **Web:**
+        - `/pricing` (linked in the footer): plan cards, "Your plan" with the renewal date,
+          and a two-step cancel.
+        - "Who liked you" on Matches: a locked count for free users, and for Pro a list with
+          Like back (an instant match) and Pass.
+        - Feature/Unfeature on the owner portal, and a Featured badge on listing cards.
+          Featured listings sort first.
+      - **Tests:** `tests/test_billing_db.py` covers:
+        - billing off
+        - the like cap and the listing cap
+        - checkout, plan reuse and signature checks
+        - webhook signature, duplicates, stale events, ignored events and halts
+        - cancel and expiry
+        - featured listings
+        - who liked you
+        Razorpay itself is faked with an HTTP mock transport. Web helpers are covered in
+        `apps/web/tests/billing.test.ts`.
+      - **Checked in the browser** (local, dummy keys, Razorpay never called):
+        - billing off and billing on
+        - the 402 prompt on Feature
+        - locked and unlocked who-liked-you
+        - Like back creating a match
+        - pricing on mobile
+      Not covered:
+      - No live Razorpay test: there are no test-mode keys here. Before launch:
+        - Create test keys and a webhook pointing to `<API_URL>/api/v1/billing/webhooks/razorpay`,
+          with the subscription.* events.
+        - Run one subscribe, renew and cancel in test mode.
+        - Then switch to live keys.
+      - Prices, GST and invoices are business decisions: no GST is shown or charged yet.
+      - Webhooks are only reprocessed when Razorpay retries. There is no admin replay tool yet.
 - [ ] **12. Identity verification is mocked.** Integrate a real KYC provider, or clearly gate
       the feature off. `verifications.document_url` is free text from the client: store the
       storage object path from the verification upload instead, and have admins view it through

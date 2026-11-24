@@ -5,6 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import { ProfileDTO, ScoreBreakdown, GroupDTO } from "@flatmate/contracts";
 import { apiClient } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/utils";
+import { upgradeFrom, type UpgradeHint } from "@/lib/billing-model";
+import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
+import { InlineNotice } from "@/components/states/InlineNotice";
 import { useAuth } from "@/hooks/useAuth";
 import { CompatibilityRadar } from "@/components/CompatibilityRadar";
 import { Avatar, Button, Card, Modal, Input } from "@flatmate/ui";
@@ -24,6 +27,8 @@ export default function SeekerProfileDetailPage() {
   const [score, setScore] = useState<ScoreBreakdown | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [interactionSuccess, setInteractionSuccess] = useState<string | null>(null);
+  const [interactionError, setInteractionError] = useState<string | null>(null);
+  const [upgrade, setUpgrade] = useState<UpgradeHint | null>(null);
 
   // Group invite modal state
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
@@ -88,6 +93,7 @@ export default function SeekerProfileDetailPage() {
       router.push("/login");
       return;
     }
+    setInteractionError(null);
     try {
       const res = await apiClient<{ action: string; is_mutual_match: boolean }>("/matching/interactions", {
         method: "POST",
@@ -102,8 +108,10 @@ export default function SeekerProfileDetailPage() {
         setInteractionSuccess(action === "like" ? "Profile liked!" : "Profile saved to shortlist.");
       }
       setTimeout(() => setInteractionSuccess(null), 3000);
-    } catch (err: any) {
-      alert(err.message || "Failed to record interaction");
+    } catch (err) {
+      const hint = upgradeFrom(err);
+      if (hint) setUpgrade(hint);
+      else setInteractionError(err instanceof Error ? err.message : "Couldn't record that. Please try again.");
     }
   };
 
@@ -235,6 +243,8 @@ export default function SeekerProfileDetailPage() {
         )}
       </div>
 
+      {upgrade && <UpgradePrompt hint={upgrade} onDismiss={() => setUpgrade(null)} />}
+      {interactionError && <InlineNotice tone="error">{interactionError}</InlineNotice>}
       {interactionSuccess && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl text-xs font-semibold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />

@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { Badge, Button, Card } from "@flatmate/ui";
-import { Eye, MapPin, PauseCircle, PlayCircle } from "lucide-react";
+import { Eye, MapPin, PauseCircle, PlayCircle, Star } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import type { OwnerProperty } from "../types";
 
@@ -10,9 +10,11 @@ interface OwnerPropertiesListProps {
   busyId: string | null;
   onToggleStatus: (property: OwnerProperty) => void;
   onVacateBed: (bedId: string) => void;
+  /** Present when paid plans exist: feature or unfeature a published listing (Owner Pro). */
+  onToggleFeatured?: (property: OwnerProperty) => void;
 }
 
-export function OwnerPropertiesList({ properties, busyId, onToggleStatus, onVacateBed }: OwnerPropertiesListProps) {
+export function OwnerPropertiesList({ properties, busyId, onToggleStatus, onVacateBed, onToggleFeatured }: OwnerPropertiesListProps) {
   return (
     <div className="space-y-4">
       {properties.map((prop) => {
@@ -27,6 +29,7 @@ export function OwnerPropertiesList({ properties, busyId, onToggleStatus, onVaca
                     {prop.listing_status || (live ? "published" : "paused")}
                   </Badge>
                   {prop.is_verified && <Badge variant="forest">Verified</Badge>}
+                  {prop.is_featured && <Badge variant="warning">Featured</Badge>}
                 </div>
                 <p className="text-xs text-charcoal-muted mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <MapPin className="w-3.5 h-3.5 shrink-0" />
@@ -58,6 +61,18 @@ export function OwnerPropertiesList({ properties, busyId, onToggleStatus, onVaca
                     </>
                   )}
                 </Button>
+                {onToggleFeatured && live && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    isLoading={busyId === `feature-${prop.id}`}
+                    onClick={() => onToggleFeatured(prop)}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${prop.is_featured ? "fill-amber-400 text-amber-500" : "text-amber-500"}`} />
+                    <span>{prop.is_featured ? "Unfeature" : "Feature"}</span>
+                  </Button>
+                )}
                 <Link
                   href={`/properties/${prop.id}`}
                   className="inline-flex items-center gap-1 min-h-[36px] px-3 rounded-xl text-sm font-medium text-charcoal hover:bg-slate-100"

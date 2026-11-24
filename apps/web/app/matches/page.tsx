@@ -10,6 +10,10 @@ import { apiClient } from "@/lib/api-client";
 import { Card, Avatar, Button, MatchScoreBadge, Badge, Skeleton, EmptyState } from "@flatmate/ui";
 import { MutualMatchItemResponse } from "@flatmate/contracts";
 import { formatCurrency } from "@/lib/utils";
+import { upgradeFrom, type UpgradeHint } from "@/lib/billing-model";
+import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
+import { InlineNotice } from "@/components/states/InlineNotice";
+import { LikesReceivedPanel } from "@/features/matching/components/LikesReceivedPanel";
 import {
   Sparkles,
   MessageSquare,
@@ -34,8 +38,11 @@ export default function MatchesPage() {
   const mutualMatches = mutualQuery.data ?? [];
   const loadingMutual = mutualQuery.isLoading;
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [upgrade, setUpgrade] = useState<UpgradeHint | null>(null);
 
   const handleInteraction = async (targetUserId: string, action: "like" | "save" | "pass") => {
+    setActionError(null);
     try {
       const res = await apiClient<{ action: string; is_mutual_match: boolean }>("/matching/interactions", {
         method: "POST",
@@ -57,8 +64,10 @@ export default function MatchesPage() {
         );
       }
       setTimeout(() => setActionNotice(null), 3000);
-    } catch (err: any) {
-      alert(err.message || "Failed to record interaction");
+    } catch (err) {
+      const hint = upgradeFrom(err);
+      if (hint) setUpgrade(hint);
+      else setActionError(err instanceof Error ? err.message : "Couldn't record that. Please try again.");
     }
   };
 
@@ -113,6 +122,11 @@ export default function MatchesPage() {
           <span>{actionNotice}</span>
         </div>
       )}
+
+      {upgrade && <UpgradePrompt hint={upgrade} onDismiss={() => setUpgrade(null)} />}
+      {actionError && <InlineNotice tone="error">{actionError}</InlineNotice>}
+
+      <LikesReceivedPanel onMatched={() => setActiveTab("mutual")} />
 
       {/* Tabs */}
       <div className="flex space-x-4 border-b border-warm-200">

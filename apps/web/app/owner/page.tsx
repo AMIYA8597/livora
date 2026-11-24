@@ -11,6 +11,8 @@ import { apiClient } from "@/lib/api-client";
 import { loginHref } from "@/lib/navigation";
 import { PageLoading } from "@/components/states/PageLoading";
 import { InlineNotice } from "@/components/states/InlineNotice";
+import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
+import { upgradeFrom, type PlansResponse, type UpgradeHint } from "@/lib/billing-model";
 import { OwnerStats, buildOwnerStats } from "@/features/owner/components/OwnerStats";
 import { OwnerPropertiesList } from "@/features/owner/components/OwnerPropertiesList";
 import { OwnerApplicationsList } from "@/features/owner/components/OwnerApplicationsList";
@@ -45,6 +47,9 @@ export default function OwnerPortalPage() {
   const [activeTab, setActiveTab] = useState<OwnerTab>("properties");
   const [notice, setNotice] = useState<Notice>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [upgrade, setUpgrade] = useState<UpgradeHint | null>(null);
+  const plansQuery = useApiQuery<PlansResponse>("/billing/plans");
+  const billingOn = plansQuery.data?.enabled ?? false;
 
   const statsQuery = useApiQuery<OwnerStatsData>(canView ? "/owners/dashboard" : null);
   const propertiesQuery = useApiQuery<OwnerProperty[]>(canView ? "/owners/properties" : null);
@@ -60,11 +65,14 @@ export default function OwnerPortalPage() {
   const act = async (id: string, run: () => Promise<void>, success: string) => {
     setBusyId(id);
     setNotice(null);
+    setUpgrade(null);
     try {
       await run();
       setNotice({ tone: "success", text: success });
     } catch (err) {
-      setNotice({ tone: "error", text: err instanceof Error ? err.message : "Something went wrong" });
+      const hint = upgradeFrom(err);
+      if (hint) setUpgrade(hint);
+      else setNotice({ tone: "error", text: err instanceof Error ? err.message : "Something went wrong" });
     } finally {
       setBusyId(null);
     }
@@ -85,6 +93,20 @@ export default function OwnerPortalPage() {
       next === "published" ? "Listing is live in search." : "Listing paused. It no longer shows in search.",
     );
   };
+
+  const toggleFeatured = (prop: OwnerProperty) =>
+    act(
+      `feature-${prop.id}`,
+      async () => {
+        const updated = await apiClient<{ is_featured: boolean }>(`/properties/${prop.id}/feature`, {
+          method: prop.is_featured ? "DELETE" : "POST",
+        });
+        propertiesQuery.setData((prev = []) =>
+          prev.map((p) => (p.id === prop.id ? { ...p, is_featured: updated.is_featured } : p)),
+        );
+      },
+      prop.is_featured ? "Listing is no longer featured." : "Listing is featured: it now shows first in search.",
+    );
 
   const vacateBed = (bedId: string) =>
     act(
@@ -180,6 +202,7 @@ export default function OwnerPortalPage() {
         <ErrorState title="Some of your data didn't load" message={loadError.message} onRetry={reloadAll} />
       )}
       {notice && <InlineNotice tone={notice.tone}>{notice.text}</InlineNotice>}
+      {upgrade && <UpgradePrompt hint={upgrade} onDismiss={() => setUpgrade(null)} />}
 
       <OwnerStats
         stats={buildOwnerStats({
@@ -205,7 +228,13 @@ export default function OwnerPortalPage() {
               onAction={() => router.push("/owner/listings/create")}
             />
           ) : (
-            <OwnerPropertiesList properties={properties} busyId={busyId} onToggleStatus={toggleListing} onVacateBed={vacateBed} />
+            <OwnerPropertiesList
+              properties={properties}
+              busyId={busyId}
+              onToggleStatus={toggleListing}
+              onVacateBed={vacateBed}
+              onToggleFeatured={billingOn ? toggleFeatured : undefined}
+            />
           )
         ) : activeTab === "applications" ? (
           applications.length === 0 ? (

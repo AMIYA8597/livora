@@ -6,7 +6,7 @@ import Link from "next/link";
 import { PropertyDTO } from "@flatmate/contracts";
 import { Card, Badge } from "@flatmate/ui";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { MapPin, Bed, Bath, Sparkles, Heart, ShieldCheck, Check, ImageOff } from "lucide-react";
+import { MapPin, Bed, Bath, Sparkles, Heart, ShieldCheck, Check, ImageOff, Star } from "lucide-react";
 
 export interface PropertyCardProps {
   property: PropertyDTO;
@@ -74,6 +74,12 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
 
           {/* Badges on Top Right */}
           <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5">
+            {property.is_featured && (
+              <span className="inline-flex items-center space-x-1 bg-amber-500/95 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-md">
+                <Star className="w-3.5 h-3.5 fill-white" aria-hidden="true" />
+                <span>Featured</span>
+              </span>
+            )}
             {property.is_verified && (
               <span className="inline-flex items-center space-x-1 bg-forest/90 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-md backdrop-blur-sm">
                 <ShieldCheck className="w-3.5 h-3.5 text-pale-green" />

@@ -9,6 +9,8 @@ import { FlatmateCard } from "@/components/FlatmateCard";
 import { Input, Button, Badge, Skeleton, EmptyState, ErrorState } from "@flatmate/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { TOP_INDIAN_CITIES } from "@/lib/utils";
+import { upgradeFrom, type UpgradeHint } from "@/lib/billing-model";
+import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
 import {
   Search,
   Users,
@@ -30,6 +32,7 @@ export default function FlatmatesDirectoryPage() {
   const [queryText, setQueryText] = useState("");
   const [q, setQ] = useState("");
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [upgrade, setUpgrade] = useState<UpgradeHint | null>(null);
 
   // Filters refetch automatically; empty filters are omitted.
   const seekersQuery = useApiQuery<any[]>(isAuthenticated ? "/flatmates/search" : null, {
@@ -68,6 +71,11 @@ export default function FlatmatesDirectoryPage() {
       }
       setTimeout(() => setActionNotice(null), 3500);
     } catch (err: any) {
+      const hint = upgradeFrom(err);
+      if (hint) {
+        setUpgrade(hint);
+        return;
+      }
       setActionNotice(err.message || "Could not record interaction");
       setTimeout(() => setActionNotice(null), 3000);
     }
@@ -183,6 +191,8 @@ export default function FlatmatesDirectoryPage() {
           </button>
         </p>
       )}
+
+      {upgrade && <UpgradePrompt hint={upgrade} onDismiss={() => setUpgrade(null)} />}
 
       {/* Filter Toolbar */}
       <div className="bg-white p-5 rounded-2xl border border-warm-200 shadow-xs space-y-4">
