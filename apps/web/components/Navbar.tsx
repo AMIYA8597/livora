@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NotificationBell } from "@/components/NotificationBell";
 import { useAuth } from "@/hooks/useAuth";
-import { apiClient } from "@/lib/api-client";
 import { Avatar, Button, Badge } from "@flatmate/ui";
 import {
   Compass,
@@ -13,8 +13,6 @@ import {
   Users2,
   MessageSquare,
   LayoutDashboard,
-  Bell,
-  Check,
   ChevronDown,
   Building,
   KeyRound,
@@ -27,33 +25,17 @@ import {
   Search,
 } from "lucide-react";
 
-interface NotificationItem {
-  id: string;
-  title: string;
-  message: string;
-  type: string;
-  is_read: boolean;
-  created_at: string;
-}
-
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
   const { user, roles, isAuthenticated, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
 
-  const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
   // Close dropdowns on outside click
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
-        setNotificationsOpen(false);
-      }
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setProfileDropdownOpen(false);
       }
@@ -61,45 +43,6 @@ export const Navbar: React.FC = () => {
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
-
-  // Fetch notifications for authenticated users
-  useEffect(() => {
-    if (!isAuthenticated) return;
-
-    let isMounted = true;
-    const fetchNotifications = async () => {
-      try {
-        const res = await apiClient<{ items: NotificationItem[]; total: number } | NotificationItem[]>("/notifications/");
-        const items = Array.isArray(res) ? res : res.items || [];
-        if (isMounted) {
-          setNotifications(items);
-          setUnreadCount(items.filter((n) => !n.is_read).length);
-        }
-      } catch {
-        // Fallback silently if offline or unread endpoint empty
-      }
-    };
-
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 45000); // 45s poll
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [isAuthenticated]);
-
-  const markNotificationAsRead = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await apiClient(`/notifications/${id}/read`, { method: "PATCH" });
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-    } catch {
-      // Ignored
-    }
-  };
 
   const navLinks = [
     { href: "/properties", label: "Discover", icon: Compass },
@@ -174,76 +117,7 @@ export const Navbar: React.FC = () => {
 
             {isAuthenticated && user ? (
               <div className="flex items-center space-x-2">
-                {/* Notifications Bell with Popover */}
-                <div className="relative" ref={notifRef}>
-                  <button
-                    onClick={() => setNotificationsOpen(!notificationsOpen)}
-                    aria-label="Notifications"
-                    aria-expanded={notificationsOpen}
-                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] text-charcoal-light hover:text-forest hover:bg-slate-100 rounded-xl transition-colors relative"
-                  >
-                    <Bell className="w-5 h-5" />
-                    {unreadCount > 0 && (
-                      <span className="absolute top-1 right-1 min-w-[18px] h-[18px] bg-rose-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
-                        {unreadCount > 9 ? "9+" : unreadCount}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Notification Dropdown */}
-                  {notificationsOpen && (
-                    <div className="fixed inset-x-2 top-16 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-2 sm:w-80 bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                        <span className="text-xs font-bold uppercase tracking-wider text-charcoal">
-                          Notifications
-                        </span>
-                        {unreadCount > 0 && (
-                          <span className="text-[11px] bg-forest text-white px-2 py-0.5 rounded-full font-semibold">
-                            {unreadCount} new
-                          </span>
-                        )}
-                      </div>
-                      <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
-                        {notifications.length === 0 ? (
-                          <div className="p-6 text-center text-xs text-charcoal-muted">
-                            No notifications right now.
-                          </div>
-                        ) : (
-                          notifications.slice(0, 6).map((notif) => (
-                            <div
-                              key={notif.id}
-                              className={`p-3.5 hover:bg-slate-50/80 transition-colors flex items-start justify-between space-x-2 ${
-                                !notif.is_read ? "bg-pale-green/15" : ""
-                              }`}
-                            >
-                              <div className="flex-1 text-xs">
-                                <p className="font-semibold text-charcoal">{notif.title}</p>
-                                <p className="text-slate-500 mt-0.5 line-clamp-2">{notif.message}</p>
-                              </div>
-                              {!notif.is_read && (
-                                <button
-                                  onClick={(e) => markNotificationAsRead(notif.id, e)}
-                                  title="Mark as read"
-                                  aria-label="Mark as read"
-                                  className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] -m-2 text-secondary-green hover:bg-pale-green/30 rounded-lg shrink-0"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          ))
-                        )}
-                      </div>
-                      <Link
-                        href="/dashboard"
-                        onClick={() => setNotificationsOpen(false)}
-                        className="block py-2.5 text-center text-xs font-semibold text-secondary-green hover:bg-slate-50 border-t border-slate-100"
-                      >
-                        View all in My Space →
-                      </Link>
-                    </div>
-                  )}
-                </div>
+                <NotificationBell />
 
                 {/* Profile Menu Dropdown */}
                 <div className="relative hidden sm:block" ref={profileRef}>

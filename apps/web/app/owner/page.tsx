@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Card, EmptyState, ErrorState, Tabs } from "@flatmate/ui";
 import { Building, Calendar, FileText, Plus } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -40,11 +40,15 @@ function ListSkeleton() {
   );
 }
 
-export default function OwnerPortalPage() {
+function OwnerPortalPageContent() {
   const { isAuthenticated, isLoading: authLoading, isOwner } = useAuth();
   const router = useRouter();
   const canView = isAuthenticated && isOwner;
-  const [activeTab, setActiveTab] = useState<OwnerTab>("properties");
+  // Notification links open a specific tab (e.g. ?tab=applications).
+  const requestedTab = useSearchParams().get("tab");
+  const [activeTab, setActiveTab] = useState<OwnerTab>(
+    (["properties", "applications", "appointments"] as const).includes(requestedTab as OwnerTab) ? (requestedTab as OwnerTab) : "properties",
+  );
   const [notice, setNotice] = useState<Notice>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [upgrade, setUpgrade] = useState<UpgradeHint | null>(null);
@@ -252,5 +256,14 @@ export default function OwnerPortalPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function OwnerPortalPage() {
+  // useSearchParams needs a Suspense boundary so the rest of the route can prerender.
+  return (
+    <Suspense fallback={<PageLoading />}>
+      <OwnerPortalPageContent />
+    </Suspense>
   );
 }

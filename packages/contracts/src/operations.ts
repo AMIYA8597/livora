@@ -128,13 +128,26 @@ export interface PGBuildingCreateInput {
   }>;
 }
 
+export type NotificationCategory = 'messages' | 'matches' | 'rentals' | 'account';
+
 export interface NotificationDTO {
   id: string;
   user_id: string;
   title: string;
   body: string;
   notification_type: string;
+  category?: NotificationCategory | string;
+  /** Same-site path to open; built by the server. */
+  link?: string | null;
   reference_id?: string | null;
   is_read: boolean;
   created_at: string;
+}
+
+/** Which categories may send a push to this account's browsers. */
+export type PushPreferencesDTO = Record<NotificationCategory, boolean>;
+
+export interface PushConfigDTO {
+  enabled: boolean;
+  public_key?: string | null;
 }

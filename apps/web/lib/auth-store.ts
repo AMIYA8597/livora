@@ -14,6 +14,7 @@
  */
 import type { AuthTokens, UserDTO } from "@flatmate/contracts";
 import { apiClient, ApiError } from "./api-client.ts";
+import { forgetPushSubscription } from "./push.ts";
 
 export const ACCESS_TOKEN_KEY = "flatmate_access_token";
 export const REFRESH_TOKEN_KEY = "flatmate_refresh_token";
@@ -155,6 +156,8 @@ export function signIn(tokens: AuthTokens, user: UserDTO, roles?: string[]): voi
 
 export async function signOut(): Promise<void> {
   generation++;
+  // Before the token goes: the next person on this browser must not get this account's pushes.
+  await forgetPushSubscription().catch(() => undefined);
   await apiClient("/auth/logout", { method: "POST", skipAuthRefresh: true }).catch(() => undefined);
   clearTokens();
   setState({ status: "anonymous", user: null, roles: [] });

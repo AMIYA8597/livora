@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { Suspense, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ApplicationDTO, AppointmentDTO } from "@flatmate/contracts";
 import { Avatar, Button, Card, ErrorState, Modal, Tabs } from "@flatmate/ui";
 import { Calendar, FileText, Heart, LayoutDashboard, Shield, ShieldCheck, Sparkles, User } from "lucide-react";
@@ -31,9 +32,13 @@ function ListSkeleton() {
   );
 }
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState<DashboardTab>("applications");
+  // Notification links open a specific tab (e.g. ?tab=applications).
+  const requestedTab = useSearchParams().get("tab");
+  const [activeTab, setActiveTab] = useState<DashboardTab>(
+    (["applications", "appointments", "saved", "profile", "quiz", "dealbreakers"] as const).includes(requestedTab as DashboardTab) ? (requestedTab as DashboardTab) : "applications",
+  );
   const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -200,5 +205,14 @@ export default function DashboardPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  // useSearchParams needs a Suspense boundary so the rest of the route can prerender.
+  return (
+    <Suspense fallback={<PageLoading />}>
+      <DashboardPageContent />
+    </Suspense>
   );
 }
