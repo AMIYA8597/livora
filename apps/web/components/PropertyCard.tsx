@@ -6,18 +6,22 @@ import Link from "next/link";
 import { PropertyDTO } from "@flatmate/contracts";
 import { Card, Badge } from "@flatmate/ui";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { ListingImage } from "@/components/ListingImage";
 import { MapPin, Bed, Bath, Sparkles, Heart, ShieldCheck, Check, ImageOff, Star } from "lucide-react";
 
 export interface PropertyCardProps {
   property: PropertyDTO;
   matchScore?: number;
   onSaveToggle?: (propertyId: string, isSaved: boolean) => void;
+  /** Set on the first cards of a grid so the largest image above the fold loads first. */
+  priority?: boolean;
 }
 
 export const PropertyCard: React.FC<PropertyCardProps> = ({
   property,
   matchScore,
   onSaveToggle,
+  priority = false,
 }) => {
   const saved = useSavedProperties();
   const isSaved = saved.isSaved(property.id);
@@ -46,10 +50,12 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
         {/* Image Container */}
         <div className="relative aspect-[16/10] w-full overflow-hidden bg-slate-100">
           {thumbnail ? (
-            <img
+            <ListingImage
               src={thumbnail}
               alt={property.title}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+              priority={priority}
+              className="object-cover group-hover:scale-105 transition-transform duration-300"
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">

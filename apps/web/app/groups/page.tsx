@@ -23,6 +23,8 @@ type ActiveModal =
   | { kind: "invite"; group: GroupDTO }
   | null;
 
+const GROUPS_PAGE_SIZE = 12;
+
 export default function GroupsPage() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
@@ -34,6 +36,8 @@ export default function GroupsPage() {
   const [modal, setModal] = useState<ActiveModal>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  // Rendering every group at once is slow on phones; show a page and let people ask for more.
+  const [visible, setVisible] = useState(GROUPS_PAGE_SIZE);
 
   /** Sign-in comes before any group action. */
   const requireAuth = (open: () => void) => {
@@ -107,7 +111,7 @@ export default function GroupsPage() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-          {groups.map((group) => (
+          {groups.slice(0, visible).map((group) => (
             <GroupCard
               key={group.id}
               group={group}
@@ -120,6 +124,13 @@ export default function GroupsPage() {
               onInvite={() => setModal({ kind: "invite", group })}
             />
           ))}
+        </div>
+      )}
+      {!isLoading && groups.length > visible && (
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={() => setVisible((n) => n + GROUPS_PAGE_SIZE)}>
+            Show more groups ({groups.length - visible} more)
+          </Button>
         </div>
       )}
 

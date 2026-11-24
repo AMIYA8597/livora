@@ -1,9 +1,18 @@
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { buildCsp } from "./lib/csp.mjs";
+import { isLocalHost, remotePatterns } from "./lib/image-hosts.mjs";
 
 const isDev = process.env.NODE_ENV !== "production";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const apiIsLocal = (() => {
+  try {
+    return isLocalHost(new URL(apiUrl).hostname);
+  } catch {
+    return false;
+  }
+})();
 const csp = buildCsp({
-  apiUrl: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1",
+  apiUrl,
   wsUrl: process.env.NEXT_PUBLIC_WS_URL,
   sentryDsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   dev: isDev,
@@ -19,20 +28,12 @@ const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@flatmate/ui", "@flatmate/contracts"],
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "images.unsplash.com",
-      },
-      {
-        protocol: "http",
-        hostname: "localhost",
-      },
-      {
-        protocol: "https",
-        hostname: "*.supabase.co",
-      },
-    ],
+    // Listing photos: AVIF/WebP at the sizes each layout asks for, cached for a day.
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 86400,
+    remotePatterns: remotePatterns(apiUrl),
+    // Local builds read uploads from the API on localhost, which the optimizer refuses by default.
+    dangerouslyAllowLocalIP: apiIsLocal,
   },
   async headers() {
     return [

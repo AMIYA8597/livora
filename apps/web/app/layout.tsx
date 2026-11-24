@@ -3,6 +3,7 @@ import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { MobileTabBar } from "@/components/MobileTabBar";
+import { indexable, siteUrl } from "@/lib/site";
 
 export const viewport: Viewport = {
   themeColor: "#173D32",
@@ -14,7 +15,11 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Flatmate | Find your place. Find your people. Live better together.",
+  metadataBase: new URL(siteUrl()),
+  title: {
+    default: "Flatmate | Find your place. Find your people. Live better together.",
+    template: "%s | Flatmate",
+  },
   description:
     "Intelligent flatmate compatibility and verified rental accommodation marketplace across Bengaluru, Mumbai, Delhi NCR, Pune, Hyderabad, and Chennai.",
   keywords: [
@@ -34,7 +39,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: "https://flatmate.platform",
+    url: "/",
     title: "Flatmate | Find your place. Find your people. Live better together.",
     description:
       "Transforming rental living in India with 10-dimension compatibility scoring, verified listings, and direct tenant connections.",
@@ -46,17 +51,14 @@ export const metadata: Metadata = {
     description:
       "Vector lifestyle matching and verified accommodations across major Indian cities.",
   },
-  robots: {
-    index: true,
-    follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      "max-video-preview": -1,
-      "max-image-preview": "large",
-      "max-snippet": -1,
-    },
-  },
+  // Only the production site is indexed; staging and local builds say noindex.
+  robots: indexable()
+    ? {
+        index: true,
+        follow: true,
+        googleBot: { index: true, follow: true, "max-video-preview": -1, "max-image-preview": "large", "max-snippet": -1 },
+      }
+    : { index: false, follow: false },
 };
 
 export default function RootLayout({

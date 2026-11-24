@@ -3,16 +3,30 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, Image as ImageIcon, X } from 'lucide-react';
 
+export interface GalleryImageArgs {
+  src: string;
+  alt: string;
+  /** "main" fills the gallery frame; "thumb" fills a small thumbnail button. */
+  variant: 'main' | 'thumb';
+  index: number;
+}
+
 export interface ImageGalleryProps {
   images: string[];
   alt?: string;
   className?: string;
+  /**
+   * Render an image that fills its positioned parent (e.g. with next/image). Without it a
+   * plain <img> is used. The fullscreen view always shows the original.
+   */
+  renderImage?: (args: GalleryImageArgs) => React.ReactNode;
 }
 
 export const ImageGallery: React.FC<ImageGalleryProps> = ({
   images,
   alt = 'Property photo',
   className,
+  renderImage,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -38,12 +52,16 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({
         onClick={() => displayImages.length > 0 && setIsFullscreen(true)}
       >
         {displayImages[currentIndex] ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={displayImages[currentIndex]}
-            alt={`${alt} - image ${currentIndex + 1}`}
-            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
-          />
+          renderImage ? (
+            renderImage({ src: displayImages[currentIndex], alt: `${alt} - image ${currentIndex + 1}`, variant: 'main', index: currentIndex })
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={displayImages[currentIndex]}
+              alt={`${alt} - image ${currentIndex + 1}`}
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
+            />
+          )
         ) : (
           <div className="flex flex-col items-center justify-center text-slate-400">
             <ImageIcon className="w-12 h-12 mb-2" />
@@ -90,8 +108,12 @@ export const ImageGallery: React.FC<ImageGalleryProps> = ({
                 idx === currentIndex ? 'border-forest ring-1 ring-forest' : 'border-transparent opacity-60 hover:opacity-100'
               }`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
+              {renderImage ? (
+                renderImage({ src: img, alt: `Thumbnail ${idx + 1}`, variant: 'thumb', index: idx })
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={img} alt={`Thumbnail ${idx + 1}`} loading="lazy" className="w-full h-full object-cover" />
+              )}
             </button>
           ))}
         </div>

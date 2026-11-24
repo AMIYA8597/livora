@@ -117,7 +117,8 @@ export default function FlatmatesDirectoryPage() {
 
   if (!authLoading && !isAuthenticated) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-20 text-center space-y-6">
+      // Full height, like the loading view it replaces, so the footer doesn't jump into view.
+      <div className="max-w-4xl mx-auto px-4 py-20 text-center space-y-6 min-h-[calc(100svh-4rem)]">
         <div className="w-16 h-16 rounded-2xl bg-pale-green/40 text-forest flex items-center justify-center mx-auto shadow-sm">
           <Users className="w-8 h-8" />
         </div>
