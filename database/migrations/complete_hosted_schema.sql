@@ -1855,6 +1855,32 @@ ALTER TABLE user_privacy_settings ADD COLUMN IF NOT EXISTS personalized_ranking 
 
 UPDATE alembic_version SET version_num='018_listing_ranking' WHERE alembic_version.version_num = '017_listing_location_precision';
 
+-- Running upgrade 018_listing_ranking -> 019_device_push_tokens
+
+CREATE TABLE IF NOT EXISTS device_push_tokens (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            platform VARCHAR(10) NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            app_version VARCHAR(32),
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_success_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_device_push_tokens_platform') THEN
+                ALTER TABLE device_push_tokens ADD CONSTRAINT ck_device_push_tokens_platform
+                    CHECK (platform IN ('android', 'ios'));
+            END IF;
+        END $$;
+
+CREATE INDEX IF NOT EXISTS ix_device_push_tokens_user_id ON device_push_tokens (user_id);
+
+UPDATE alembic_version SET version_num='019_device_push_tokens' WHERE alembic_version.version_num = '018_listing_ranking';
+
 DO $$
 DECLARE
     r record;

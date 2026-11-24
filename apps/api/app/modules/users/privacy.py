@@ -62,6 +62,7 @@ EXPORT_TABLES: Dict[str, Tuple[str, ...]] = {
     "notification_preferences": ("user_id",),
     "notifications": ("user_id",),
     "push_subscriptions": ("user_id",),
+    "device_push_tokens": ("user_id",),
     "match_interactions": ("user_id",),
     "listing_interactions": ("user_id",),
     "mutual_matches": ("user_one_id", "user_two_id"),
@@ -85,10 +86,10 @@ EXPORT_TABLES: Dict[str, Tuple[str, ...]] = {
     "messages": ("sender_id",),
     "attachments": ("uploader_id",),
 }
-# Never exported: credentials, one-time code hashes, push keys/endpoints (capability URLs),
-# internal search/ML columns.
+# Never exported: credentials, one-time code hashes, push keys/endpoints/device tokens
+# (capability URLs and tokens), internal search/ML columns.
 EXCLUDED_COLUMNS = {
-    "hashed_password", "code_hash", "subject_hash", "p256dh", "auth", "endpoint",
+    "hashed_password", "code_hash", "subject_hash", "p256dh", "auth", "endpoint", "token",
     "idempotency_key", "embedding", "search_vector", "features",
 }
 EXCLUDED_TYPES = ("vector", "tsvector", "geography", "geometry")
@@ -108,6 +109,7 @@ PURGE_DELETE: Tuple[Tuple[str, str], ...] = (
     ("notification_preferences", "user_id"),
     ("notifications", "user_id"),
     ("push_subscriptions", "user_id"),
+    ("device_push_tokens", "user_id"),
     ("match_interactions", "user_id"),
     ("match_interactions", "target_user_id"),
     ("listing_interactions", "user_id"),
@@ -232,6 +234,7 @@ async def request_deletion(
         .returning(properties.c.id)
     )).scalars().all()
     await db.execute(delete(_table("push_subscriptions")).where(_table("push_subscriptions").c.user_id == user.id))
+    await db.execute(delete(_table("device_push_tokens")).where(_table("device_push_tokens").c.user_id == user.id))
 
     now = datetime.now(timezone.utc)
     req = AccountDeletionRequest(

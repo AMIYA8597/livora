@@ -148,6 +148,38 @@ export interface NotificationDTO {
 export type PushPreferencesDTO = Record<NotificationCategory, boolean>;
 
 export interface PushConfigDTO {
+  /** Web Push (browsers): on or off, and the VAPID key to subscribe with. */
   enabled: boolean;
   public_key?: string | null;
+  /** App platforms whose native push (FCM / APNs) is on. */
+  native_platforms?: AppPlatform[];
+}
+
+export type AppPlatform = "android" | "ios";
+
+/** POST /notifications/push/devices: the app's push token, sent on every start. */
+export interface DeviceRegisterRequest {
+  platform: AppPlatform;
+  token: string;
+  app_version?: string | null;
+}
+
+export interface DeviceRegistrationResponse {
+  registered: boolean;
+  devices: number;
+}
+
+/** GET /meta/app-config: which app versions the API serves. Below `min_version` every call
+ *  answers 426 with error_code CLIENT_UPGRADE_REQUIRED. Apps send X-Client-Platform and
+ *  X-Client-Version on every request. */
+export interface PlatformVersionsDTO {
+  min_version?: string | null;
+  latest_version?: string | null;
+  update_url?: string | null;
+}
+
+export interface AppConfigDTO {
+  api_version: string;
+  android: PlatformVersionsDTO;
+  ios: PlatformVersionsDTO;
 }

@@ -9,8 +9,12 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.core.rate_limit import RateLimiter
-from app.modules.notifications.push import push_enabled
+from app.modules.notifications.native_push import enabled_platforms
+from app.modules.notifications.push import web_push_enabled
 from app.modules.notifications.schemas import (
+    DeviceRegisterRequest,
+    DeviceRegistrationResponse,
+    DeviceUnregisterRequest,
     NotificationResponse,
     PushConfigResponse,
     PushPreferences,
@@ -70,9 +74,11 @@ async def update_preferences(
 
 @router.get("/push/config", response_model=PushConfigResponse)
 async def push_config():
-    """Whether Web Push is available, and the VAPID public key browsers subscribe with."""
-    enabled = push_enabled()
-    return PushConfigResponse(enabled=enabled, public_key=settings.VAPID_PUBLIC_KEY if enabled else None)
+    """Whether Web Push is available (and the VAPID public key browsers subscribe with), and
+    which app platforms have native push."""
+    enabled = web_push_enabled()
+    return PushConfigResponse(enabled=enabled, public_key=settings.VAPID_PUBLIC_KEY if enabled else None,
+                              native_platforms=enabled_platforms())
 
 
 @router.post(
@@ -100,6 +106,33 @@ async def unsubscribe_push(
 ):
     count = await NotificationService(db).unsubscribe(current_user.id, data.endpoint)
     return {"subscribed": False, "devices": count}
+
+
+@router.post(
+    "/push/devices",
+    response_model=DeviceRegistrationResponse,
+    dependencies=[Depends(RateLimiter(max_requests=30, window_seconds=3600, key_prefix="push_device"))],
+)
+async def register_device(
+    data: DeviceRegisterRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save the Android or iOS app's push token for this account (idempotent; call it on every
+    app start and whenever the platform issues a new token)."""
+    count = await NotificationService(db).register_device(current_user.id, data.platform, data.token, data.app_version)
+    return DeviceRegistrationResponse(registered=True, devices=count)
+
+
+@router.post("/push/devices/unregister", response_model=DeviceRegistrationResponse)
+async def unregister_device(
+    data: DeviceUnregisterRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Forget this device's token (call before signing out in the app)."""
+    count = await NotificationService(db).unregister_device(current_user.id, data.token)
+    return DeviceRegistrationResponse(registered=False, devices=count)
 
 
 @router.patch("/{notification_id}/read", response_model=NotificationResponse)

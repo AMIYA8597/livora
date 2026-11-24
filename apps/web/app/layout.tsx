@@ -3,6 +3,7 @@ import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { MobileTabBar } from "@/components/MobileTabBar";
+import { ServiceWorkerRegistrar } from "@/components/ServiceWorkerRegistrar";
 import { indexable, siteUrl } from "@/lib/site";
 
 export const viewport: Viewport = {
@@ -34,6 +35,11 @@ export const metadata: Metadata = {
     "shared apartments India",
     "verified landlords",
   ],
+  icons: {
+    icon: [{ url: "/logo.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: { capable: true, title: "Flatmate", statusBarStyle: "default" },
   authors: [{ name: "Flatmate Platform" }],
   creator: "Flatmate Platform",
   openGraph: {
@@ -73,6 +79,7 @@ export default function RootLayout({
         <main className="flex-1" id="main-content">{children}</main>
         <Footer />
         <MobileTabBar />
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   );

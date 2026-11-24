@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,5 +48,27 @@ class PushUnsubscribeRequest(BaseModel):
 
 
 class PushConfigResponse(BaseModel):
+    # Web Push (browsers): whether it's on, and the VAPID key to subscribe with.
     enabled: bool
     public_key: Optional[str] = None
+    # App platforms whose native push is on ("android", "ios").
+    native_platforms: List[str] = []
+
+
+APP_VERSION_PATTERN = r"^\d{1,4}(\.\d{1,4}){0,3}$"
+
+
+class DeviceRegisterRequest(BaseModel):
+    platform: Literal["android", "ios"]
+    token: str = Field(..., min_length=32, max_length=4096)
+    app_version: Optional[str] = Field(None, max_length=32, pattern=APP_VERSION_PATTERN)
+
+
+class DeviceUnregisterRequest(BaseModel):
+    token: str = Field(..., min_length=32, max_length=4096)
+
+
+class DeviceRegistrationResponse(BaseModel):
+    registered: bool
+    # How many app devices this account now has registered.
+    devices: int

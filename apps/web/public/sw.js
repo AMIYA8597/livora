@@ -1,8 +1,38 @@
-/* Flatmate service worker: shows Web Push notifications and opens the right page on click.
- * It caches nothing, so it never serves stale pages. */
+/* Flatmate service worker: shows Web Push notifications and opens the right page on click,
+ * and shows an offline page when a page can't load for lack of network. It caches only that
+ * page, so it never serves stale content: every page and API call goes to the network. */
 
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+const OFFLINE_CACHE = "flatmate-offline-v1";
+const OFFLINE_URL = "/offline.html";
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches
+      .open(OFFLINE_CACHE)
+      .then((cache) => cache.add(new Request(OFFLINE_URL, { cache: "reload" })))
+      .then(() => self.skipWaiting()),
+  );
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith("flatmate-") && k !== OFFLINE_CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+// Page loads only: when the network fails (not on an error status), show the offline page.
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET" || request.mode !== "navigate") return;
+  event.respondWith(
+    fetch(request).catch(() =>
+      caches.match(OFFLINE_URL).then((cached) => cached || new Response("You're offline", { status: 503 })),
+    ),
+  );
+});
 
 function sameSitePath(url) {
   return typeof url === "string" && url.startsWith("/") && !url.startsWith("//") && !url.includes("\\")

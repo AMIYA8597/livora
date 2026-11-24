@@ -70,6 +70,22 @@ jobs:
         run: |
           python -m mypy apps/api/app
 
+      - name: API Contract Is Backward Compatible (packages/contracts/openapi/v1.json)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # Installed apps are built against the previous contract. (The pytest suite checks the
+          # snapshot matches the code.) Intended breaks are listed in accepted-breaking-changes.txt.
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "No previous commit to compare with."; exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if ! git cat-file -e "$BASE_SHA:packages/contracts/openapi/v1.json" 2>/dev/null; then
+            echo "The previous commit has no API contract snapshot yet."; exit 0
+          fi
+          git show "$BASE_SHA:packages/contracts/openapi/v1.json" > "$RUNNER_TEMP/openapi-base.json"
+          cd apps/api && python -m app.core.api_contract compat "$RUNNER_TEMP/openapi-base.json"
+
       - name: Install pgvector into PostGIS service (matches Supabase extensions)
         run: |
           PG_CONTAINER=$(docker ps --filter "ancestor=postgis/postgis:17-3.5" --format "{{.ID}}")

@@ -178,6 +178,29 @@ class Settings(BaseSettings):
     VAPID_PUBLIC_KEY: Optional[str] = None
     VAPID_PRIVATE_KEY: Optional[str] = None
     VAPID_SUBJECT: str = "mailto:support@flatmate.local"
+
+    # Native push for the Android and iOS apps. Each platform is on only when all its settings
+    # are set. Android goes through Firebase Cloud Messaging (HTTP v1): the project id and a
+    # service-account key (the JSON file's contents) with the "Firebase Cloud Messaging API
+    # Admin" role. iOS goes straight to APNs with a token-based .p8 key: its contents, key id,
+    # team id and the app's bundle id. APNS_SANDBOX=true for development builds.
+    FCM_PROJECT_ID: Optional[str] = None
+    FCM_SERVICE_ACCOUNT_JSON: Optional[str] = None
+    APNS_KEY_ID: Optional[str] = None
+    APNS_TEAM_ID: Optional[str] = None
+    APNS_BUNDLE_ID: Optional[str] = None
+    APNS_PRIVATE_KEY: Optional[str] = None
+    APNS_SANDBOX: bool = False
+
+    # Mobile app versions. Apps send X-Client-Platform (android|ios) and X-Client-Version
+    # (e.g. 1.4.0). Below the minimum, every API call answers 426 with where to update, so an
+    # app too old for the current API stops cleanly instead of misbehaving. Unset = no minimum.
+    MIN_APP_VERSION_ANDROID: Optional[str] = None
+    MIN_APP_VERSION_IOS: Optional[str] = None
+    LATEST_APP_VERSION_ANDROID: Optional[str] = None
+    LATEST_APP_VERSION_IOS: Optional[str] = None
+    APP_STORE_URL_ANDROID: Optional[str] = None
+    APP_STORE_URL_IOS: Optional[str] = None
     # Free tier (applies only while billing is on).
     FREE_DAILY_LIKES: int = 25
     FREE_ACTIVE_LISTINGS: int = 2

@@ -8,6 +8,7 @@ import uuid
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from app.core.client_version import is_exempt, upgrade_required
 from app.core.exceptions import AppException
 from app.core.logging import clean_request_id, cloud_trace, logger, request_id_var, trace_var
 from app.core.observability import tag_request
@@ -64,6 +65,27 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass
 
+        # 3. Mobile apps too old for this API are told to update (see app/core/client_version.py).
+        if not is_exempt(request.url.path):
+            upgrade = upgrade_required(request.headers.get("X-Client-Platform"), request.headers.get("X-Client-Version"))
+            if upgrade is not None:
+                return JSONResponse(
+                    status_code=426,
+                    content={
+                        "type": "https://errors.flatmate.platform/client_upgrade_required",
+                        "title": "Upgrade Required",
+                        "status": 426,
+                        "detail": "This version of the app is no longer supported. Please update to continue.",
+                        "error_code": "CLIENT_UPGRADE_REQUIRED",
+                        "instance": request.url.path,
+                        "request_id": request_id,
+                        "min_version": upgrade["min_version"],
+                        "update_url": upgrade["update_url"],
+                    },
+                    media_type="application/problem+json",
+                    headers={"X-Request-ID": request_id},
+                )
+
         try:
             response: Response = await call_next(request)
         except AppException as app_exc:
@@ -88,7 +110,7 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Process-Time-Ms"] = str(duration_ms)
 
-        # 3. Defense-in-depth Security Headers
+        # 4. Defense-in-depth Security Headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"

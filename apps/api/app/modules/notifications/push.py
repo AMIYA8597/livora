@@ -1,5 +1,6 @@
 """
-Web Push (RFC 8030 with VAPID, RFC 8292) for in-app notifications.
+Web Push (RFC 8030 with VAPID, RFC 8292) for in-app notifications, and the `push.send`
+outbox handler that also delivers to the Android and iOS apps (`native_push.py`).
 
   * Push is on only when VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set.
   * Browsers hand us an endpoint URL that the server later POSTs to. To stop that being used to
@@ -56,8 +57,15 @@ TTL_SECONDS = {"messages": 6 * 3600}
 DEFAULT_TTL_SECONDS = 24 * 3600
 
 
-def push_enabled() -> bool:
+def web_push_enabled() -> bool:
     return bool(settings.VAPID_PUBLIC_KEY and settings.VAPID_PRIVATE_KEY)
+
+
+def push_enabled() -> bool:
+    """Any push channel: Web Push, or native push for at least one app platform."""
+    from app.modules.notifications.native_push import enabled_platforms
+
+    return web_push_enabled() or bool(enabled_platforms())
 
 
 def _b64url_len(value: str) -> int:
@@ -161,16 +169,25 @@ def _first_attempt_at(payload: Dict[str, Any], now: datetime) -> datetime:
         return now
 
 
+def native_message(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """What the apps get: the same fields as the Web Push payload."""
+    data = json.loads(build_payload(payload))
+    return {"id": data["id"], "title": data["title"], "body": data["body"], "url": data["url"],
+            "category": data["category"] or "account"}
+
+
 async def handle_push(payload: Dict[str, Any], session_factory: async_sessionmaker[AsyncSession]) -> Dict[str, Any]:
-    """Outbox handler: deliver one notification to every browser the user subscribed (or, on a
-    retry, to the browsers that failed temporarily last time)."""
+    """Outbox handler: deliver one notification to every browser and app the user registered
+    (or, on a retry, only to the ones that failed temporarily last time)."""
     from app.modules.messaging.models import OutboxEvent
-    from app.modules.notifications.models import Notification, PushSubscription
+    from app.modules.notifications import native_push
+    from app.modules.notifications.models import DevicePushToken, Notification, PushSubscription
 
     if not push_enabled():
         return {"skipped": "push disabled"}
     attempt = int(payload.get("attempt") or 1)
-    only = payload.get("subscription_ids")
+    is_retry = "subscription_ids" in payload or "device_ids" in payload
+    platforms = native_push.enabled_platforms()
     async with session_factory() as session:
         if attempt > 1:
             is_read = (await session.execute(
@@ -178,62 +195,94 @@ async def handle_push(payload: Dict[str, Any], session_factory: async_sessionmak
             )).scalar_one_or_none()
             if is_read is None or is_read:
                 return {"skipped": "already read or removed", "attempt": attempt, "scrubbed": True}
-        query = select(PushSubscription).where(PushSubscription.user_id == payload["user_id"])
-        if only is not None:
-            query = query.where(PushSubscription.id.in_(only))
-        subs = (await session.execute(query)).scalars().all()
-        targets = [(s.id, {"endpoint": s.endpoint, "keys": {"p256dh": s.p256dh, "auth": s.auth}}) for s in subs]
+        web: List[Tuple[Any, Dict[str, Any]]] = []
+        if web_push_enabled():
+            query = select(PushSubscription).where(PushSubscription.user_id == payload["user_id"])
+            if is_retry:
+                query = query.where(PushSubscription.id.in_(payload.get("subscription_ids") or []))
+            web = [(s.id, {"endpoint": s.endpoint, "keys": {"p256dh": s.p256dh, "auth": s.auth}})
+                   for s in (await session.execute(query)).scalars().all()]
+        devices: List[Tuple[Any, str, str]] = []
+        if platforms:
+            query = select(DevicePushToken).where(
+                DevicePushToken.user_id == payload["user_id"], DevicePushToken.platform.in_(platforms)
+            )
+            if is_retry:
+                query = query.where(DevicePushToken.id.in_(payload.get("device_ids") or []))
+            devices = [(d.id, d.platform, d.token) for d in (await session.execute(query)).scalars().all()]
 
     category = payload.get("category") or "account"
     ttl = TTL_SECONDS.get(category, DEFAULT_TTL_SECONDS)
     urgency = "high" if category == "messages" else "normal"
     data = build_payload(payload)
-    sent, gone, failed = [], [], []
-    temporary: List[Tuple[Any, Optional[float]]] = []
-    for sub_id, info in targets:
+    message = native_message(payload)
+    # Results per kind ("web" subscriptions, "device" tokens).
+    sent: Dict[str, list] = {"web": [], "device": []}
+    gone: Dict[str, list] = {"web": [], "device": []}
+    failed: Dict[str, list] = {"web": [], "device": []}
+    temporary: List[Tuple[str, Any, Optional[float]]] = []
+
+    async def deliver(kind: str, target_id: Any, call: Callable[[], None]) -> None:
         try:
-            await asyncio.to_thread(_sender, info, data, ttl, urgency)
-            sent.append(sub_id)
+            await asyncio.to_thread(call)
+            sent[kind].append(target_id)
         except PushGone:
-            gone.append(sub_id)
+            gone[kind].append(target_id)
         except PushRetryable as exc:
-            temporary.append((sub_id, exc.retry_after))
+            temporary.append((kind, target_id, exc.retry_after))
         except Exception as exc:  # noqa: BLE001 - a permanent push-service error
             logger.warning("Push delivery failed: %s", type(exc).__name__)
-            failed.append(sub_id)
+            failed[kind].append(target_id)
+
+    for sub_id, info in web:
+        await deliver("web", sub_id, lambda info=info: _sender(info, data, ttl, urgency))
+    for device_id, platform, token in devices:
+        await deliver("device", device_id,
+                      lambda p=platform, t=token: native_push.send(p, t, message, ttl, urgency))
 
     now = datetime.now(timezone.utc)
     first_at = _first_attempt_at(payload, now)
     retry: Optional[OutboxEvent] = None
     if temporary:
-        delay = retry_delay(attempt, max((ra or 0 for _, ra in temporary), default=0))
+        delay = retry_delay(attempt, max((ra or 0 for _, _, ra in temporary), default=0))
         next_at = now + timedelta(seconds=delay)
         if attempt < MAX_PUSH_ATTEMPTS and next_at - first_at <= RETRY_WINDOW:
             retry = OutboxEvent(event_type=PUSH_EVENT, status="pending", next_attempt_at=next_at, payload={
-                **{k: v for k, v in payload.items() if k not in ("subscription_ids", "attempt", "first_attempt_at")},
-                "subscription_ids": [str(sub_id) for sub_id, _ in temporary],
+                **{k: v for k, v in payload.items()
+                   if k not in ("subscription_ids", "device_ids", "attempt", "first_attempt_at")},
+                "subscription_ids": [str(i) for kind, i, _ in temporary if kind == "web"],
+                "device_ids": [str(i) for kind, i, _ in temporary if kind == "device"],
                 "attempt": attempt + 1,
                 "first_attempt_at": first_at.isoformat(),
             })
         else:
             logger.warning("Push gave up after %s attempts", attempt)
-            failed.extend(sub_id for sub_id, _ in temporary)
+            for kind, target_id, _ in temporary:
+                failed[kind].append(target_id)
 
     async with session_factory() as session:
         if retry is not None:
             session.add(retry)
-        if gone:
-            await session.execute(delete(PushSubscription).where(PushSubscription.id.in_(gone)))
-        for sub in (await session.execute(
-            select(PushSubscription).where(PushSubscription.id.in_(sent + failed))
-        )).scalars().all():
-            if sub.id in sent:
-                sub.failure_count, sub.last_success_at = 0, now
-            else:
-                sub.failure_count += 1
-                if sub.failure_count >= MAX_FAILURES:
-                    await session.delete(sub)
+        for kind, model in (("web", PushSubscription), ("device", DevicePushToken)):
+            if gone[kind]:
+                await session.execute(delete(model).where(model.id.in_(gone[kind])))
+            touched = sent[kind] + failed[kind]
+            if not touched:
+                continue
+            for row in (await session.execute(select(model).where(model.id.in_(touched)))).scalars().all():
+                if row.id in sent[kind]:
+                    row.failure_count, row.last_success_at = 0, now
+                else:
+                    row.failure_count += 1
+                    if row.failure_count >= MAX_FAILURES:
+                        await session.delete(row)
         await session.commit()
     # The outbox scrubs payloads after success; keep only counts.
-    return {"sent": len(sent), "gone": len(gone), "failed": len(failed),
-            "retrying": len(temporary) if retry is not None else 0, "attempt": attempt, "scrubbed": True}
+    return {
+        "sent": len(sent["web"]) + len(sent["device"]),
+        "gone": len(gone["web"]) + len(gone["device"]),
+        "failed": len(failed["web"]) + len(failed["device"]),
+        "retrying": len(temporary) if retry is not None else 0,
+        "attempt": attempt,
+        "scrubbed": True,
+    }

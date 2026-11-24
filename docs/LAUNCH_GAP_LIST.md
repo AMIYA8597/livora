@@ -293,17 +293,42 @@ committed on your OK.
 
       It also lists what is out of date in the older design docs: ADR 008 still says Next.js 14,
       and `API_DESIGN.md` describes a success envelope the API doesn't use.
-- [ ] **P6. Ready for the mobile apps.** A stable versioned API contract for the apps, push
+- [x] **P6. Ready for the mobile apps.** A stable versioned API contract for the apps, push
       notifications through Firebase (Android) and APNs (iOS) next to web push, deep links, and
       an installable website (PWA) in the meantime. The apps themselves come after the website
       launch.
+      *Done:*
+      - **Contract.** `packages/contracts/openapi/v1.json` is generated from the code.
+        - Pytest fails when it's stale.
+        - CI compares it with the previous commit's and fails on changes that would break
+          an installed app; intended ones go in `accepted-breaking-changes.txt`.
+      - **App versions.**
+        - Apps send `X-Client-Platform` and `X-Client-Version`.
+        - Below `MIN_APP_VERSION_<PLATFORM>`, API calls answer 426 with where to update.
+        - `GET /meta/app-config` always answers.
+      - **Native push** (migration 019, `device_push_tokens`).
+        - `POST /notifications/push/devices` (and `/unregister`).
+        - The `push.send` worker now also delivers through FCM HTTP v1 and APNs (HTTP/2,
+          .p8 key), with no vendor SDK.
+        - Dead tokens are deleted, and temporary failures retry for that device only.
+        - Each platform switches on when its settings are set.
+        - The account export lists devices without their tokens.
+      - **Deep links.** `/.well-known/assetlinks.json` and `apple-app-site-association` come
+        from env settings and answer 404 until set; `APP_LINK_PATHS` is the list of in-app
+        paths.
+      - **PWA.**
+        - PNG, maskable and iPhone icons, plus shortcuts in the manifest.
+        - The service worker is registered for everyone and shows `/offline.html` when
+          there's no network.
+      - **Docs.** `docs/ARCHITECTURE.md` §7 is the guide for building the apps.
 
 ### Needs you (accounts, keys, decisions)
 - [ ] **E1. Rotate the Supabase keys and database password.** They were pasted into a chat. Do
       it before launch; then update `.env`, Secret Manager and GitHub.
 - [ ] **E2. Apply the hosted schema** (item 1). Postgres ports are blocked from this network
       (checked again 2026-11-24). Either store `STAGING_DATABASE_URL` in the GitHub `staging`
-      environment and run the migration workflow, or authorize the Supabase MCP connector.
+      environment and run the migration workflow, or authorize the Supabase MCP connector. The
+      hosted file now includes migrations 016-019.
 - [ ] **E3. Google Cloud:**
   - Secret Manager secrets, a managed Redis and the backup bucket.
   - The GitHub environments `production` and `production-backups`.
@@ -315,6 +340,8 @@ committed on your OK.
   - Production VAPID keys
   - Sentry DSN and alert rules, `UPTIME_*` variables
   - Optional: Anthropic and Voyage
+  - When the apps exist: Firebase (FCM) service account, APNs .p8 key, and the deep-link
+    settings (`ANDROID_APP_*`, `IOS_APP_IDS`) on Vercel
 - [ ] **E6. Razorpay:** test keys and webhook, one test subscribe/renew/cancel, then live keys.
       Decide GST and invoices.
 - [ ] **E7. Run Lighthouse** (mobile) against staging.

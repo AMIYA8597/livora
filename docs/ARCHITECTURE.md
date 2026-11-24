@@ -65,7 +65,7 @@ flowchart LR
 | `apps/web/hooks` | React hooks: `useAuth`, `useApiQuery`, `useSocket`, `useNearMe` and others. |
 | `apps/web/lib` | Plain TypeScript rules with no React (query building, chat state, auth store, socket hub), unit-tested in `apps/web/tests`. |
 | `apps/web/proxy.ts` | Next 16 request proxy (formerly `middleware.ts`). Security headers and the CSP are set in `next.config.mjs` (built by `lib/csp.mjs`). |
-| `packages/contracts` | TypeScript types for API requests and responses, plus shared constants (e.g. `LISTING_QUICK_QUESTIONS`). Written by hand to match the API's Pydantic schemas. |
+| `packages/contracts` | `openapi/v1.json`: the API contract, generated from the code and checked in CI (§7.1). `src/`: TypeScript types for requests and responses, written by hand to match it, and shared constants (e.g. `LISTING_QUICK_QUESTIONS`). |
 | `packages/ui` | Design-system components (`Button`, `Modal`, `Card`, ...). |
 | `apps/api/app/main.py` | App wiring: middleware, the error handler, health checks, `/api/v1` routes. |
 | `apps/api/app/api/v1/router.py` | Mounts every module router. |
@@ -74,7 +74,7 @@ flowchart LR
 | `apps/api/app/infrastructure` | Adapters to outside systems: storage, email, SMS, image processing, virus scanning, cache, geospatial helpers. |
 | `apps/api/app/workers` | Outbox dispatcher, Celery app and beat schedule, maintenance (retention) jobs. |
 | `apps/api/app/ml` | Rankers, embeddings and semantic search, moderation, smart replies, the Claude client, training and evaluation. |
-| `apps/api/migrations` | Alembic migrations (currently up to `018_listing_ranking`). |
+| `apps/api/migrations` | Alembic migrations (currently up to `019_device_push_tokens`). |
 | `database/migrations/complete_hosted_schema.sql` | The whole schema as one SQL file for the hosted database (generated from Alembic, see §4.6). |
 | `.github/workflows` | CI, security scans, image builds, staging and production deploys, backups, hosted migrations, uptime checks. |
 
@@ -346,7 +346,8 @@ nothing depends on an outside model being up.**
 - [ ] **Outside services** switch off cleanly without their key, and the feature still works.
 - [ ] **Schema changes:** an Alembic migration (one statement per `op.execute`, re-runnable,
       with a downgrade), the model updated, and the block spliced into the hosted SQL file.
-- [ ] **Contracts:** response changes are reflected in `packages/contracts`.
+- [ ] **Contracts:** the OpenAPI snapshot is re-exported (`python -m app.core.api_contract
+      export`) with no unintended breaking changes, and `packages/contracts/src` matches.
 - [ ] **Tests:**
   - database tests run against the local test database (never a hosted one) and clean up
     what they create, including outbox rows;
@@ -356,19 +357,81 @@ nothing depends on an outside model being up.**
 ## 7. For the mobile apps
 
 Everything the apps need is in the API. The rules above already apply to them, because the
-server enforces them, not the web app. Reuse:
+server enforces them, not the web app.
 
-- the HTTP API under `/api/v1`, bearer tokens and refresh, and RFC 7807 errors;
-- `packages/contracts` for types and shared constants, if the apps are built in
-  TypeScript/React Native;
-- the WebSocket protocol described in §4.11.
+### 7.1 The contract
 
-Still to do before the apps (gap list **P6**):
-- a stable, versioned contract (the TypeScript types are written by hand today, not generated
-  from the API's schema);
-- device push registration for FCM/APNs;
-- deep links;
-- a policy for supporting old app versions.
+- **What to build against.** `packages/contracts/openapi/v1.json` is the API's OpenAPI
+  document, committed. Generate the Kotlin and Swift API clients from it (e.g. OpenAPI
+  Generator). A React Native app can use the TypeScript types in `packages/contracts/src`
+  instead.
+- **Keeping it current.** The pytest suite fails when the code and the snapshot differ. To
+  update it, run `python -m app.core.api_contract export` in `apps/api`.
+- **Keeping it stable.** CI compares the snapshot with the previous commit's
+  (`app/core/api_contract.py` lists what counts as breaking) and fails on changes that would
+  break an installed app:
+  - removed endpoints or response fields;
+  - new required inputs;
+  - narrowed types;
+  - new response enum values.
+
+  Prefer additive changes: a new optional field, or a new endpoint next to the old one. When
+  a break is intended, list it in `packages/contracts/openapi/accepted-breaking-changes.txt`
+  with the reason. A redesign goes under `/api/v2` while `/api/v1` keeps serving the
+  installed apps.
+- **Errors** are RFC 7807 problem documents. Branch on `error_code`, never on the wording.
+
+### 7.2 Calls the apps make
+
+- **On every request,** send `X-Client-Platform: android|ios` and `X-Client-Version: 1.4.0`.
+- **On start and after any 426,** call `GET /api/v1/meta/app-config`. When the app is below
+  `min_version`, every API call answers **426** with `error_code: CLIENT_UPGRADE_REQUIRED`
+  and `update_url`; show an update screen. `latest_version` is for an optional "update
+  available" hint.
+- **How to retire an old app version:**
+  1. ship the app version that copes with the change;
+  2. wait for most people to update;
+  3. raise `MIN_APP_VERSION_<PLATFORM>`;
+  4. make the API change.
+- **Sign-in** is the same as the web: `POST /auth/login` gives access and refresh tokens. Keep
+  them in the Keystore/Keychain, and refresh on 401 with `POST /auth/refresh`.
+- **Realtime** uses the WebSocket protocol in §4.11. Reconnect with a fresh access token on
+  close code 4001, and stop on 4003.
+
+### 7.3 Push notifications
+
+- **Registering.** After sign-in and on every start, call `POST
+  /api/v1/notifications/push/devices` with `{platform, token, app_version}`. It is
+  idempotent; a token moves to whoever registered it last. Before signing out, call `POST
+  /api/v1/notifications/push/devices/unregister`.
+- **Delivery.** The `push.send` worker delivers each notification to the account's browsers
+  (Web Push) and apps. Android goes through FCM HTTP v1 and iOS through APNs (HTTP/2, a .p8
+  key); see `app/modules/notifications/native_push.py`. Each platform switches on when its
+  settings are present (`.env.example`).
+- **What a push contains.** `title`, `body`, and data `{url, id, category}`. `url` is a path
+  on this site: open the matching screen. On Android, `category` is the notification channel
+  (`messages`, `matches`, `rentals`, `account`), which the app must create. Message pushes
+  never contain the message text.
+- **Settings.** People's push settings (`/notifications/preferences`) apply to the apps too.
+  Message pushes are skipped while the person is connected to the socket.
+
+### 7.4 Deep links
+
+- **What the apps open.** Links to the product screens open in the apps; sign-in, password
+  reset, admin and legal pages stay on the web. The list is `APP_LINK_PATHS` in
+  `apps/web/lib/deep-links.ts`; the Android intent filters should match it.
+- **Proving the apps belong to the site.** The website serves `/.well-known/assetlinks.json`
+  (Android App Links) and `/.well-known/apple-app-site-association` (iOS Universal Links and
+  password autofill). They come from `ANDROID_APP_PACKAGE`, `ANDROID_APP_SHA256_FINGERPRINTS`
+  and `IOS_APP_IDS`, and answer 404 until those are set.
+
+### 7.5 Until the apps ship
+
+The website is installable (a PWA):
+- a manifest with PNG and maskable icons, an iPhone Home Screen icon, and shortcuts;
+- a service worker for every visitor that shows `/offline.html` when there's no network
+  (it caches nothing else);
+- Web Push, which on iPhone works from the Home Screen app.
 
 ## 8. Older documents and what is out of date
 

@@ -1,8 +1,8 @@
 """
-In-app notifications, their live delivery, and Web Push.
+In-app notifications, their live delivery, and push (Web Push to browsers, FCM/APNs to the apps).
 
 `create_notification` stores the notification and, in the same commit, queues a `push.send`
-outbox event when push is configured, the user has a browser subscribed and their preferences
+outbox event when push is configured, the user has a browser subscribed or an app registered, and their preferences
 allow the category. After the commit it broadcasts `notification.created` on the user's socket
 and kicks the outbox. Message pushes are skipped while the recipient is connected: they see
 the message live, and the chat has its own unread state.
@@ -14,13 +14,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
 from app.modules.messaging.models import OutboxEvent
-from app.modules.notifications.models import Notification, NotificationPreference, PushSubscription
-from app.modules.notifications.push import PUSH_EVENT, push_enabled, validate_subscription
+from app.modules.notifications.models import DevicePushToken, Notification, NotificationPreference, PushSubscription
+from app.modules.notifications import native_push
+from app.modules.notifications.push import PUSH_EVENT, push_enabled, validate_subscription, web_push_enabled
 
 logger = logging.getLogger("flatmate.notifications")
 
@@ -189,10 +190,7 @@ class NotificationService:
     async def _should_push(self, user_id: UUID, category: str) -> bool:
         if not push_enabled():
             return False
-        has_sub = (await self.db.execute(
-            select(PushSubscription.id).where(PushSubscription.user_id == user_id).limit(1)
-        )).scalar_one_or_none()
-        if not has_sub:
+        if not await self._has_push_target(user_id):
             return False
         prefs = await self.db.get(NotificationPreference, user_id)
         if prefs is not None and not getattr(prefs, f"push_{category}", True):
@@ -200,6 +198,19 @@ class NotificationService:
         if category == "messages" and await _is_online(user_id):
             return False
         return True
+
+    async def _has_push_target(self, user_id: UUID) -> bool:
+        """A browser subscribed (with Web Push on) or an app registered (with its platform on)."""
+        if web_push_enabled() and (await self.db.execute(
+            select(PushSubscription.id).where(PushSubscription.user_id == user_id).limit(1)
+        )).scalar_one_or_none():
+            return True
+        platforms = native_push.enabled_platforms()
+        return bool(platforms) and (await self.db.execute(
+            select(DevicePushToken.id).where(
+                DevicePushToken.user_id == user_id, DevicePushToken.platform.in_(platforms)
+            ).limit(1)
+        )).scalar_one_or_none() is not None
 
     # ------------------------------------------------------------------ preferences
 
@@ -249,4 +260,38 @@ class NotificationService:
 
     async def _subscription_count(self, user_id: UUID) -> int:
         res = await self.db.execute(select(func.count(PushSubscription.id)).where(PushSubscription.user_id == user_id))
+        return int(res.scalar() or 0)
+
+    # ------------------------------------------------------------------ app devices
+
+    async def register_device(self, user_id: UUID, platform: str, token: str, app_version: Optional[str]) -> int:
+        """Save an installed app's push token (idempotent; also refreshes it). Accepted even
+        while that platform's push is off, so devices are ready when it's switched on."""
+        token = native_push.normalize_token(platform, token)
+        now = datetime.now(timezone.utc)
+        device = (await self.db.execute(
+            select(DevicePushToken).where(DevicePushToken.token == token).with_for_update()
+        )).scalar_one_or_none()
+        if device is None:
+            self.db.add(DevicePushToken(user_id=user_id, platform=platform, token=token,
+                                        app_version=app_version, updated_at=now))
+        else:
+            # A device belongs to whoever registered it last (account switch on a shared phone).
+            device.user_id, device.platform, device.app_version = user_id, platform, app_version
+            device.failure_count, device.updated_at = 0, now
+        await self.db.commit()
+        return await self._device_count(user_id)
+
+    async def unregister_device(self, user_id: UUID, token: str) -> int:
+        """Forget a token (sign-out on that device). Only the owner's own token is removed."""
+        cleaned = (token or "").strip()
+        await self.db.execute(delete(DevicePushToken).where(
+            DevicePushToken.user_id == user_id,
+            DevicePushToken.token.in_({cleaned, cleaned.lower()}),
+        ))
+        await self.db.commit()
+        return await self._device_count(user_id)
+
+    async def _device_count(self, user_id: UUID) -> int:
+        res = await self.db.execute(select(func.count(DevicePushToken.id)).where(DevicePushToken.user_id == user_id))
         return int(res.scalar() or 0)

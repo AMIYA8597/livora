@@ -290,7 +290,7 @@ async def test_message_pushes_skip_people_who_are_online(people, pushes, monkeyp
 async def test_without_vapid_keys_nothing_is_queued(async_client, people, monkeypatch):
     monkeypatch.setattr(settings, "VAPID_PUBLIC_KEY", None)
     monkeypatch.setattr(settings, "VAPID_PRIVATE_KEY", None)
-    assert (await async_client.get(f"{API}/notifications/push/config")).json() == {"enabled": False, "public_key": None}
+    assert (await async_client.get(f"{API}/notifications/push/config")).json() == {"enabled": False, "public_key": None, "native_platforms": []}
     async with AsyncSessionLocal() as s:
         sub = _sub()
         s.add(PushSubscription(user_id=people.a, endpoint=sub["endpoint"], **sub["keys"]))

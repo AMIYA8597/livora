@@ -1,0 +1,3 @@
+# Breaking API changes made on purpose, one line each exactly as `python -m app.core.api_contract
+# compat` reports it, with a comment above saying why it's safe (for example: no released app
+# uses it, or the minimum app version was raised first). CI ignores the lines listed here.
