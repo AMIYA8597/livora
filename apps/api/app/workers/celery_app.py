@@ -2,6 +2,11 @@ from celery import Celery
 from celery.schedules import crontab
 
 from app.core.config import settings
+from app.core.logging import configure_logging
+from app.core.observability import init_sentry
+
+configure_logging()
+init_sentry("worker")  # Celery tasks are picked up by the SDK's Celery integration
 
 celery_app = Celery(
     "flatmate_worker",
@@ -11,6 +16,8 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    # Keep our log handler (JSON in production) instead of Celery's own.
+    worker_hijack_root_logger=False,
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",

@@ -1,0 +1,65 @@
+name: Uptime Checks
+
+# Every 10 minutes: is the API ready (database reachable) and does the web app answer?
+# Set the repository variables UPTIME_API_URL (API base, e.g. https://api.example.com) and
+# UPTIME_WEB_URL (e.g. https://example.com). A failing run is the alert: GitHub notifies on failed
+# workflow runs. Scheduled runs can start a few minutes late, and GitHub pauses schedules in repos
+# with no activity for 60 days. For tighter alerting, also add a Cloud Monitoring uptime check.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe API and web
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      API_URL: ${{ vars.UPTIME_API_URL }}
+      WEB_URL: ${{ vars.UPTIME_WEB_URL }}
+    steps:
+      - name: Check configuration
+        id: config
+        run: |
+          if [ -z "$API_URL" ] && [ -z "$WEB_URL" ]; then
+            echo "::notice::Set UPTIME_API_URL and UPTIME_WEB_URL repository variables to enable uptime checks."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: API readiness
+        if: steps.config.outputs.enabled == 'true' && env.API_URL != ''
+        run: |
+          url="${API_URL%/}/health/ready"
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /tmp/ready.json -w '%{http_code} %{time_total}' --max-time 15 "$url" || echo "000 0")
+            echo "Attempt $attempt: HTTP ${code% *} in ${code#* }s"
+            if [ "${code% *}" = "200" ] && grep -q '"status":"ready"' /tmp/ready.json; then
+              cat /tmp/ready.json; echo; exit 0
+            fi
+            sleep 20
+          done
+          cat /tmp/ready.json 2>/dev/null || true
+          echo "::error::API is not ready at $url"
+          exit 1
+
+      - name: Web app
+        if: steps.config.outputs.enabled == 'true' && env.WEB_URL != ''
+        run: |
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -L -w '%{http_code} %{time_total}' --max-time 20 "$WEB_URL" || echo "000 0")
+            echo "Attempt $attempt: HTTP ${code% *} in ${code#* }s"
+            if [ "${code% *}" = "200" ]; then exit 0; fi
+            sleep 20
+          done
+          echo "::error::Web app is not answering at $WEB_URL"
+          exit 1

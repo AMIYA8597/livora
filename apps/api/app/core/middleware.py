@@ -9,7 +9,8 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from app.core.exceptions import AppException
-from app.core.logging import logger
+from app.core.logging import clean_request_id, cloud_trace, logger, request_id_var, trace_var
+from app.core.observability import tag_request
 
 # Maximum allowed request body size in bytes (10 Megabytes)
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
@@ -17,10 +18,20 @@ MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
 
 class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # 1. Generate or extract correlation Request ID
-        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        # 1. Correlation ID: reuse the caller's only if it's safe to put in a log line.
+        request_id = clean_request_id(request.headers.get("X-Request-ID")) or str(uuid.uuid4())
         request.state.request_id = request_id
+        rid_token = request_id_var.set(request_id)
+        trace_token = trace_var.set(cloud_trace(request.headers.get("X-Cloud-Trace-Context")))
+        tag_request(request_id)
         start_time = time.perf_counter()
+        try:
+            return await self._handle(request, call_next, request_id, start_time)
+        finally:
+            request_id_var.reset(rid_token)
+            trace_var.reset(trace_token)
+
+    async def _handle(self, request: Request, call_next, request_id: str, start_time: float):
 
         # 2. Enforce Request Body Payload Size Limit (DoS Protection)
         content_length_header = request.headers.get("content-length")
@@ -51,7 +62,8 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
         except AppException as app_exc:
             return app_exc.to_problem_response(request)
         except Exception as exc:
-            logger.error(f"[Req {request_id}] Unhandled exception: {exc}", exc_info=True)
+            # Logged with the traceback; with Sentry on, this is what reports the error.
+            logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {type(exc).__name__}")
             return JSONResponse(
                 status_code=500,
                 content={
@@ -77,8 +89,13 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none';"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Log request summary
-        logger.info(
-            f"{request.method} {request.url.path} [{response.status_code}] ({duration_ms}ms) req_id={request_id}"
+        # Request summary (path only: query strings can carry tokens).
+        status = response.status_code
+        # At most WARNING: an unhandled error was already logged (and reported) with its traceback.
+        log = logger.warning if status >= 400 and status != 404 else logger.info
+        log(
+            f"{request.method} {request.url.path} [{status}] ({duration_ms}ms) req_id={request_id}",
+            extra={"fields": {"http": {"method": request.method, "path": request.url.path,
+                                       "status": status, "duration_ms": duration_ms}}},
         )
         return response

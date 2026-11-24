@@ -1,3 +1,4 @@
+import logging
 from typing import Any, AsyncGenerator, Dict
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -14,7 +15,8 @@ def uses_transaction_pooler(database_url: str) -> bool:
 
 def engine_options(database_url: str) -> Dict[str, Any]:
     options: Dict[str, Any] = {
-        "echo": settings.DEBUG and settings.ENVIRONMENT == "development",
+        # SQL echo goes through the app's log handler (below), not a second handler of its own.
+        "echo": False,
         "future": True,
         "pool_pre_ping": True,
         "pool_size": 10,
@@ -29,6 +31,9 @@ def engine_options(database_url: str) -> Dict[str, Any]:
         }
     return options
 
+
+if settings.DEBUG and settings.ENVIRONMENT == "development":
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 
 engine = create_async_engine(settings.DATABASE_URL, **engine_options(settings.DATABASE_URL))
 

@@ -632,7 +632,65 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - Only Chromium is tested. Safari/WebKit (iPhone) isn't run.
       - No real push notification and no email delivery; those use in-memory providers.
       - Visual regression and accessibility scans aren't part of the suite.
-- [ ] **15. Observability.** Sentry (web + api), structured logs shipped somewhere, uptime checks.
+- [x] **15. Observability.** *(Done; turning it on needs a Sentry project and two repository
+      variables.)* Sentry (web + api), structured logs shipped somewhere, uptime checks.
+      - **Error tracking (Sentry), off until a DSN is set:**
+        - API and worker (`app/core/observability.py`): `SENTRY_DSN`, `APP_RELEASE`,
+          `SENTRY_TRACES_SAMPLE_RATE`. Unhandled errors are logged with their traceback and
+          reported through the logging integration, tagged with the request ID. Celery tasks
+          are covered by the SDK's Celery integration.
+        - Web (`@sentry/nextjs`): browser, server render and route-handler errors, plus both
+          error boundaries. With no `NEXT_PUBLIC_SENTRY_DSN` at build time, the Next config
+          isn't wrapped and the SDK isn't loaded. Source maps upload only when `SENTRY_ORG`,
+          `SENTRY_PROJECT` and `SENTRY_AUTH_TOKEN` are set.
+        - Privacy, on both sides:
+          - no request bodies, cookies, auth headers, query strings, IPs or local variables
+          - users by id only
+          - tokens, OTPs and passwords redacted from messages and breadcrumbs
+          - no session replay
+      - **Structured logs:**
+        - Outside development and test, the API writes JSON lines in Cloud Logging's format
+          (`severity`, `message`, `stack_trace`, and `logging.googleapis.com/trace` when
+          `GOOGLE_CLOUD_PROJECT` is set). Cloud Run ships stdout to Cloud Logging, so nothing
+          else is needed. `LOG_FORMAT=text|json` overrides it.
+        - One root handler, so module loggers, uvicorn and SQL debug output all share the
+          format and carry the request ID. Uvicorn's duplicate access log is muted, as are
+          httpx's per-call INFO lines.
+        - Client `X-Request-ID` values are reused only if they're safe characters (64 at most),
+          so log lines can't be forged.
+        - Fixed: the Aadhaar redaction pattern was rewriting digits inside UUIDs. It now only
+          matches standalone 12-digit numbers.
+      - **Readiness is real:** `/health/ready` runs `SELECT 1` (3 s timeout) and returns 503 if
+          the database is down. Redis is reported (`ok` / `unavailable` / `error`) but doesn't
+          fail readiness, since the app runs without it. The response includes the release and
+          isn't cached.
+      - **Uptime:** `.github/workflows/uptime.yml` probes `UPTIME_API_URL/health/ready` and
+          `UPTIME_WEB_URL` every 10 minutes, with 3 tries each. A failed run is the alert. The
+          staging deploy now sets `APP_RELEASE` (the commit) and `GOOGLE_CLOUD_PROJECT`.
+      - **CI was red:** mypy had failed on `main` since 990cceb (21 errors: SQLAlchemy row types,
+        unchecked `None`s, the WebSocket frame `data`). So pytest and the new e2e job never ran.
+        All fixed; mypy is clean.
+      - **Tests:** `tests/test_observability.py` (7 tests):
+        - JSON lines with request ID, trace and redaction
+        - request ID and trace validation
+        - the Aadhaar pattern
+        - Sentry scrubbing, and Sentry off without a DSN
+        - safe request IDs over HTTP
+        - readiness 200 and 503
+        Web scrubbing is covered in `apps/web/tests/sentry-scrub.test.ts`.
+      - **Checked:**
+        - the web build with and without a DSN (dummy DSN on a closed local port)
+        - no Sentry SDK loaded on pages without a DSN
+        - readiness and request IDs against the running API
+        - e2e 12/12 against a production build
+      Not covered:
+      - No event was actually sent to Sentry; that needs a real project. After setting the DSN
+        on staging, trigger a test error and check the report has no personal data.
+      - Alert rules (in Sentry and Cloud Monitoring) and the `UPTIME_*` variables need setting
+        up in those consoles.
+      - GitHub's scheduled runs can be late and pause after 60 days without activity. Add a
+        Cloud Monitoring uptime check for tighter alerting.
+      - Web logs stay in Vercel's log view; they aren't drained anywhere else.
 - [ ] **16. Security pass.** CSP headers on the web app, rate limits on auth/chat/upload, file
       type sniffing and virus scan on uploads, account deletion/export (DPDP Act compliance).
       Note: `RateLimiter` (`app/core/rate_limit.py`) is in-memory per process, so limits reset on

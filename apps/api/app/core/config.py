@@ -159,6 +159,16 @@ class Settings(BaseSettings):
     FREE_DAILY_LIKES: int = 25
     FREE_ACTIVE_LISTINGS: int = 2
 
+    # Observability. Error tracking is on only when SENTRY_DSN is set. Logs are JSON lines (one
+    # object per line, Cloud Logging's format) unless LOG_FORMAT=text; text is the default only
+    # in development and test.
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+    APP_RELEASE: Optional[str] = None  # e.g. the git SHA, set by the deploy
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: Optional[str] = None  # "json" | "text"
+    GOOGLE_CLOUD_PROJECT: Optional[str] = None  # links log lines to Cloud Trace when set
+
     # Celery
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")

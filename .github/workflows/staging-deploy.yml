@@ -127,7 +127,7 @@ jobs:
             --region asia-south1 \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars "ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging" \
+            --set-env-vars "ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging,APP_RELEASE=${{ github.sha }},GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }}" \
             --set-secrets "DATABASE_URL=STAGING_APP_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
           URL=$(gcloud run services describe flatmate-api-staging --region asia-south1 --format 'value(status.url)')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
