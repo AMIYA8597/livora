@@ -1,7 +1,8 @@
 import React from "react";
 import { Input } from "@flatmate/ui";
-import { cityState, SUPPORTED_CITIES } from "@/features/properties/city-centres";
-import { SelectField, TextAreaField, type StepProps } from "./fields";
+import { CitySelect } from "@/features/locations/CitySelect";
+import { useCities } from "@/hooks/useCities";
+import { control, SelectField, TextAreaField, type StepProps } from "./fields";
 
 export function BasicsStep({ draft, update }: StepProps) {
   return (
@@ -37,16 +38,33 @@ export function BasicsStep({ draft, update }: StepProps) {
 }
 
 export function LocationStep({ draft, update }: StepProps) {
+  const { cities, error, retry } = useCities();
   return (
     <div className="space-y-4">
-      <SelectField
-        id="listing-city"
-        label="City"
-        value={draft.city}
-        placeholder="Choose a city"
-        onChange={(city) => update({ city, state: cityState(city) })}
-        options={SUPPORTED_CITIES.map((c) => ({ value: c, label: c }))}
-      />
+      <div>
+        <label htmlFor="listing-city" className="block text-xs font-semibold text-charcoal mb-1">City</label>
+        <CitySelect
+          id="listing-city"
+          cities={cities}
+          value={draft.city}
+          className={control}
+          onChange={(c) =>
+            update(
+              c && c.latitude != null && c.longitude != null
+                ? { city: c.name, state: c.state, centre: { latitude: c.latitude, longitude: c.longitude } }
+                : { city: "", state: "", centre: null },
+            )
+          }
+        />
+        {error ? (
+          <p className="mt-1 text-xs text-red-700">
+            Couldn&apos;t load the city list.{" "}
+            <button type="button" onClick={retry} className="underline font-semibold">Try again</button>
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-slate-500">Every state and union territory capital, plus major cities.</p>
+        )}
+      </div>
       <Input
         label="Locality or area (shown publicly)"
         value={draft.locality}

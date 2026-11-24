@@ -5,6 +5,8 @@ import { Button, Input, Modal } from "@flatmate/ui";
 import { apiClient } from "@/lib/api-client";
 import { localDateInputValue } from "@/lib/utils";
 import { InlineNotice } from "@/components/states/InlineNotice";
+import { CityDatalist } from "@/features/locations/CityDatalist";
+import { useCities } from "@/hooks/useCities";
 
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -18,6 +20,7 @@ export function CreateGroupModal({ isOpen, onClose, onCreated }: CreateGroupModa
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [city, setCity] = useState("Bengaluru");
+  const { cities } = useCities();
   const [budget, setBudget] = useState("50000");
   const [moveIn, setMoveIn] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -76,7 +79,8 @@ export function CreateGroupModal({ isOpen, onClose, onCreated }: CreateGroupModa
           />
         </div>
         <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
-          <Input label="City" required value={city} onChange={(e) => setCity(e.target.value)} />
+          <Input label="City" required list="group-city-suggestions" value={city} onChange={(e) => setCity(e.target.value)} />
+          <CityDatalist id="group-city-suggestions" cities={cities} />
           <Input
             label="Combined budget (₹/month)"
             type="number"

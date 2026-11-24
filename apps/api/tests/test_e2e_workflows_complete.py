@@ -192,6 +192,7 @@ async def test_workflow_a_flatmate_seeker_journey():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_workflow_b_property_owner_journey():
     """
     Workflow B: Property owner
@@ -455,6 +456,7 @@ async def test_workflow_d_pg_operator_occupancy_journey():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_workflow_e_group_flatmate_matching():
     """
     Workflow E: Group flatmate matching

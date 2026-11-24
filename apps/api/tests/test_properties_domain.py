@@ -44,6 +44,7 @@ async def test_property_capacity_invariant_create_async():
     assert "cannot exceed maximum capacity" in str(exc_info.value.detail).lower()
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_room_bed_capacity_invariant_rejection():
     """Room creation is rejected if occupied_beds > max_beds."""
     owner_id = uuid4()

@@ -30,6 +30,7 @@ API_ROOT = Path(__file__).resolve().parents[2] / "apps" / "api"
 sys.path.insert(0, str(API_ROOT))
 
 from geoalchemy2.elements import WKTElement  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
 from app.core.database import AsyncSessionLocal  # noqa: E402
@@ -141,13 +142,22 @@ async def seed(allow_remote: bool = False) -> dict:
     today = date.today()
 
     async with AsyncSessionLocal() as s:
-        country = await s.merge(Country(id=sid("country:IND"), code="IND", name="India"))
-        states = {code: await s.merge(State(id=sid(f"state:{code}"), country_id=country.id, name=name, code=code))
-                  for code, name in STATES.items()}
+        # India, its states and cities come from migration 016; reuse them (by code and slug).
+        country = (await s.execute(select(Country).where(Country.code == "IND"))).scalar_one_or_none()
+        if country is None:
+            country = await s.merge(Country(id=sid("country:IND"), code="IND", name="India"))
+        states = {}
+        for code, name in STATES.items():
+            found = (await s.execute(
+                select(State).where(State.country_id == country.id, State.code == code))).scalar_one_or_none()
+            states[code] = found or await s.merge(
+                State(id=sid(f"state:{code}"), country_id=country.id, name=name, code=code))
         cities = {}
         for slug, (name, st, lat, lng) in CITIES.items():
-            cities[slug] = await s.merge(City(id=sid(f"city:{slug}"), state_id=states[st].id, name=name, slug=slug,
-                                              tier=1, center_location=point(lat, lng)))
+            found = (await s.execute(select(City).where(City.slug == slug))).scalar_one_or_none()
+            cities[slug] = found or await s.merge(
+                City(id=sid(f"city:{slug}"), state_id=states[st].id, name=name, slug=slug,
+                     tier=1, center_location=point(lat, lng)))
         for key, (city_slug, name, pin, lat, lng) in LOCALITIES.items():
             await s.merge(Locality(id=sid(f"locality:{key}"), city_id=cities[city_slug].id, name=name,
                                    postal_code=pin, center_location=point(lat, lng)))

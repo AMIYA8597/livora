@@ -156,6 +156,7 @@ async def test_phase18_journey_a_flatmate_seeker_discovery_and_match():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_phase18_journey_b_owner_property_inventory_lifecycle():
     """
     Journey B: Owner Property Inventory Lifecycle
@@ -454,6 +455,7 @@ async def test_phase18_journey_d_pg_operator_building_management():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_phase18_journey_e_group_consensus_and_collective_score():
     """
     Journey E: Group Consensus & Collective Score

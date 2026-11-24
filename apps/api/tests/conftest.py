@@ -104,3 +104,24 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
     ) as client:
         yield client
 
+
+
+@pytest.fixture
+def stub_city_catalogue(monkeypatch):
+    """For tests that run services on a mocked database: city names resolve as the catalogue
+    (migration 016) would, without a query. Real-database tests use the real catalogue."""
+    from app.modules.locations.service import CatalogueCity, LocationService
+
+    known = {
+        "bengaluru": CatalogueCity(slug="bengaluru", name="Bengaluru", state="Karnataka", state_code="KA",
+                                   state_kind="state", is_capital=True, tier=1, latitude=12.9716,
+                                   longitude=77.5946, aliases=("Bangalore",)),
+        "mumbai": CatalogueCity(slug="mumbai", name="Mumbai", state="Maharashtra", state_code="MH",
+                                state_kind="state", is_capital=True, tier=1, latitude=19.076,
+                                longitude=72.8777, aliases=("Bombay",)),
+    }
+
+    async def resolve(self, name):
+        return known.get((name or "").strip().casefold())
+
+    monkeypatch.setattr(LocationService, "resolve", resolve)

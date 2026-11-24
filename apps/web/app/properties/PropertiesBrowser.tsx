@@ -8,7 +8,10 @@ import { useApiQuery } from "@/hooks/useApiQuery";
 import { type AppliedFilters, filtersFromSearch, LISTINGS_PAGE_SIZE, listingQueryParams } from "@/lib/listing-query";
 import { PropertyCard } from "@/components/PropertyCard";
 import { Input, Button, Badge, Skeleton, EmptyState, ErrorState, Pagination, Drawer } from "@flatmate/ui";
-import { TOP_INDIAN_CITIES, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
+import { CityDatalist } from "@/features/locations/CityDatalist";
+import { useCities } from "@/hooks/useCities";
+import { popularCities } from "@/lib/locations";
 import {
   Search,
   MapPin,
@@ -32,6 +35,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
   // Filter States initialized from URL
   const [q, setQ] = useState(searchParams.get("q") || "");
   const [city, setCity] = useState(searchParams.get("city") || "");
+  const { cities } = useCities();
   const [locality, setLocality] = useState(searchParams.get("locality") || "");
   const [minRent, setMinRent] = useState(searchParams.get("min_rent") || "");
   const [maxRent, setMaxRent] = useState(searchParams.get("max_rent") || "");
@@ -135,6 +139,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+      <CityDatalist id="city-suggestions" cities={cities} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -199,9 +204,9 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
         {/* Popular Cities */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-charcoal-muted mr-1">Popular:</span>
-          {TOP_INDIAN_CITIES.map((c) => (
+          {popularCities(cities).map((c) => (
             <button
-              key={c.name}
+              key={c.slug}
               type="button"
               onClick={() => handleCitySelect(c.name)}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
@@ -222,6 +227,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
             </label>
             <Input
               placeholder="e.g. Bengaluru, HSR Layout"
+              list="city-suggestions"
               value={city}
               onChange={(e) => setCity(e.target.value)}
             />
@@ -321,6 +327,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
             <Input
               value={city}
               onChange={(e) => setCity(e.target.value)}
+              list="city-suggestions"
               placeholder="e.g. Bengaluru, Mumbai"
             />
           </div>

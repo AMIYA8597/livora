@@ -13,6 +13,7 @@ from app.modules.profiles.models import Profile
 from app.modules.users.models import User
 from app.infrastructure.geospatial import fuzz_coordinates
 from app.ml.search import clean_query, rank_properties
+from app.modules.locations.service import city_condition
 from app.modules.search.schemas import (
     PropertySearchFilter,
     PropertySearchResultItem,
@@ -40,7 +41,7 @@ class SearchService:
             Property.listing_status == "published",
         ]
         if filters.city:
-            conditions.append(Property.city.ilike(f"%{filters.city}%"))
+            conditions.append(await city_condition(self.db, Property.city, filters.city))
         if filters.property_category:
             conditions.append(Property.property_category == filters.property_category)
         if filters.configuration:

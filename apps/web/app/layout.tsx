@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     template: "%s | Flatmate",
   },
   description:
-    "Intelligent flatmate compatibility and verified rental accommodation marketplace across Bengaluru, Mumbai, Delhi NCR, Pune, Hyderabad, and Chennai.",
+    "Intelligent flatmate compatibility and verified rental accommodation marketplace across India: major cities and every state and union territory capital.",
   keywords: [
     "flatmate",
     "roommate matching",

@@ -6,6 +6,7 @@ function completeDraft(): ListingDraft {
   const d = initialDraft();
   d.city = "Pune";
   d.state = "Maharashtra";
+  d.centre = { latitude: 18.5204, longitude: 73.8567 };
   d.locality = "Baner";
   d.postalCode = "411045";
   d.monthlyRent = "30000";
@@ -21,10 +22,11 @@ test("listing draft: starts empty, so sample values can't be published by accide
   assert.match(invalid!.message, /city/i);
 });
 
-test("listing draft: location needs a supported city, locality and 6-digit PIN", () => {
+test("listing draft: location needs a catalogue city, locality and 6-digit PIN", () => {
   const d = completeDraft();
   assert.equal(validateStep(1, d), null);
-  assert.match(validateStep(1, { ...d, city: "Atlantis" })!, /city/i);
+  assert.match(validateStep(1, { ...d, city: "Atlantis", centre: null })!, /city/i);
+  assert.match(validateStep(1, { ...d, centre: null })!, /city from the list/i);
   assert.match(validateStep(1, { ...d, postalCode: "4110" })!, /PIN/);
   assert.match(validateStep(1, { ...d, locality: " " })!, /locality/i);
 });

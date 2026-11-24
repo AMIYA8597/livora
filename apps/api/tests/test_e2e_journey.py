@@ -41,6 +41,7 @@ from app.modules.administration.service import AdminService
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_full_marketplace_end_to_end_journey():
     """
     Simulates complete cross-functional workflow from registration to administrative oversight.

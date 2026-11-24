@@ -14,6 +14,7 @@ from app.modules.lifestyle.models import UserDealbreaker
 from app.core.exceptions import BadRequestException, ForbiddenException
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_group_creation_assigns_creator_as_leader():
     """When a user creates a group, they are automatically designated as the group leader."""
     creator_id = uuid4()

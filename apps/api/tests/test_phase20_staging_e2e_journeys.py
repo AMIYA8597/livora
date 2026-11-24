@@ -215,6 +215,7 @@ async def test_journey_a_seeker_complete_lifecycle(mock_db):
 # Journey B — Owner Complete Lifecycle
 # ==============================================================================
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_journey_b_owner_lifecycle(mock_db):
     owner_id = uuid4()
     applicant_id = uuid4()
@@ -441,6 +442,7 @@ async def test_journey_d_pg_operator_lifecycle(mock_db):
 # Journey E — Group Collaboration & Wishlist
 # ==============================================================================
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("stub_city_catalogue")
 async def test_journey_e_group_collaboration(mock_db):
     leader_id = uuid4()
     member_id = uuid4()

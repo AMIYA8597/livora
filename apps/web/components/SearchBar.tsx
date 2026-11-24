@@ -4,11 +4,14 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, MapPin, IndianRupee, Home } from "lucide-react";
 import { Button } from "@flatmate/ui";
-import { TOP_INDIAN_CITIES } from "@/lib/utils";
+import { CitySelect } from "@/features/locations/CitySelect";
+import { useCities } from "@/hooks/useCities";
+import { popularCities } from "@/lib/locations";
 
 export const SearchBar: React.FC = () => {
   const router = useRouter();
-  const [city, setCity] = useState("Bengaluru");
+  const { cities } = useCities();
+  const [city, setCity] = useState("");
   const [budget, setBudget] = useState("30000");
   const [category, setCategory] = useState("all");
 
@@ -31,20 +34,17 @@ export const SearchBar: React.FC = () => {
         <div className="flex-1 flex items-center px-3.5 py-2.5 bg-warm-50/70 rounded-xl border border-warm-200 focus-within:ring-2 focus-within:ring-brand-500 focus-within:bg-white transition-all">
           <MapPin className="w-5 h-5 text-forest mr-2.5 shrink-0" />
           <div className="w-full text-left">
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-charcoal-muted">
+            <label htmlFor="search-city" className="block text-[10px] font-bold uppercase tracking-wider text-charcoal-muted">
               City
             </label>
-            <select
+            <CitySelect
+              id="search-city"
+              cities={cities}
               value={city}
-              onChange={(e) => setCity(e.target.value)}
+              placeholder="Any city in India"
+              onChange={(c) => setCity(c?.name ?? "")}
               className="w-full bg-transparent text-sm font-semibold text-charcoal focus:outline-none cursor-pointer"
-            >
-              {TOP_INDIAN_CITIES.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name} ({c.state})
-                </option>
-              ))}
-            </select>
+            />
           </div>
         </div>
 
@@ -101,9 +101,9 @@ export const SearchBar: React.FC = () => {
       {/* Quick City Filter Chips */}
       <div className="flex items-center justify-center flex-wrap gap-1.5 text-xs text-charcoal-muted pt-1">
         <span className="font-medium mr-1">Popular:</span>
-        {TOP_INDIAN_CITIES.map((c) => (
+        {popularCities(cities).map((c) => (
           <button
-            key={c.name}
+            key={c.slug}
             type="button"
             onClick={() => {
               setCity(c.name);

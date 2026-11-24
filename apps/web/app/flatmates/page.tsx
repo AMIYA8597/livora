@@ -8,7 +8,9 @@ import { apiClient } from "@/lib/api-client";
 import { FlatmateCard } from "@/components/FlatmateCard";
 import { Input, Button, Badge, Skeleton, EmptyState, ErrorState } from "@flatmate/ui";
 import { useAuth } from "@/hooks/useAuth";
-import { TOP_INDIAN_CITIES } from "@/lib/utils";
+import { CityDatalist } from "@/features/locations/CityDatalist";
+import { useCities } from "@/hooks/useCities";
+import { popularCities } from "@/lib/locations";
 import { DIET_OPTIONS } from "@/features/profile/lifestyle-options";
 import { upgradeFrom, type UpgradeHint } from "@/lib/billing-model";
 import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
@@ -26,6 +28,7 @@ import {
 export default function FlatmatesDirectoryPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [city, setCity] = useState("Bengaluru");
+  const { cities } = useCities();
   const [maxBudget, setMaxBudget] = useState("");
   const [sleepSchedule, setSleepSchedule] = useState("");
   const [diet, setDiet] = useState("");
@@ -151,6 +154,7 @@ export default function FlatmatesDirectoryPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+      <CityDatalist id="flatmate-city-suggestions" cities={cities} />
       <div>
         <h1 className="text-3xl font-extrabold text-charcoal tracking-tight">
           Find Compatible Flatmates
@@ -201,9 +205,9 @@ export default function FlatmatesDirectoryPage() {
         {/* Popular Cities */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-semibold text-charcoal-muted mr-1">Top Cities:</span>
-          {TOP_INDIAN_CITIES.map((c) => (
+          {popularCities(cities).map((c) => (
             <button
-              key={c.name}
+              key={c.slug}
               type="button"
               onClick={() => handleCitySelect(c.name)}
               className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
@@ -220,6 +224,7 @@ export default function FlatmatesDirectoryPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Input
             placeholder="Search by city (e.g. Bengaluru)"
+            list="flatmate-city-suggestions"
             value={city}
             onChange={(e) => setCity(e.target.value)}
           />

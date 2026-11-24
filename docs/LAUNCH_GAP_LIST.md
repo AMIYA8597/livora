@@ -164,10 +164,23 @@ Gathered from the open items below and every item's "Not covered" notes.
 Asked for after L1-L12: every state's capital, current location, smarter room finding, chat where
 it helps, clear layers, and later Android/iOS apps. Same workflow: one at a time, tested, then
 committed on your OK.
-- [ ] **P1. Every state and union territory capital.** The `countries`/`states`/`cities` tables
+- [x] **P1. Every state and union territory capital.** The `countries`/`states`/`cities` tables
       exist but nothing uses them; the web hardcodes six cities. Seed 28 states + 8 UTs and their
       capitals (keeping Pune and the current metros), serve them from `GET /locations/...`, and
       use that list in listing creation, search and profiles instead of the hardcoded one.
+      *Done:* migration `016_india_locations` seeds all 36 states and UTs with their capitals
+      (36 cities, including Pune and Jammu; Chandigarh serves Punjab, Haryana and its UT) and the
+      names people type ("Bangalore", "Delhi NCR", "Port Blair"). It also renames existing listings
+      to the official names. `GET /locations/cities` and `/locations/states` are cached for an
+      hour. New listings must be in a catalogue city (`UNSUPPORTED_CITY` otherwise) and take its
+      state and centre. Listing, search and group filters match any name of a city exactly, and
+      other text literally. Groups save a known city under its official name. On the web, the
+      wizard and home search use a grouped picker (popular first, then each state and UT), and the
+      browse, flatmates and group forms suggest every name. The six-city file is gone, and the
+      copy says India-wide. Profiles have no city field, so nothing changed there. The hosted
+      schema file includes 016 (still to apply: E2). Not in the list yet: big non-capital rental
+      markets such as Gurugram, Noida, Ahmedabad and Kochi. Listings there are refused until
+      they are added.
 - [ ] **P2. Current location and real addresses.** "Near me" from the browser's location (asked,
       never stored), nearest supported city, radius search (PostGIS is ready), and geocoding a
       listing's address instead of using the city centre. *Needs your choice of map provider.*

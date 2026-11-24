@@ -62,7 +62,7 @@ export default function AboutPage() {
       <Card className="p-8 bg-forest text-white text-center space-y-4">
         <h2 className="text-2xl font-bold">Ready to find your next home?</h2>
         <p className="text-sm text-pale-green max-w-xl mx-auto">
-          Join thousands of professionals, students, and property owners across Bengaluru, Mumbai, Delhi NCR, Hyderabad, and Pune.
+          Join thousands of professionals, students, and property owners across India, from Bengaluru and Mumbai to every state capital.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
           <Link href="/properties">

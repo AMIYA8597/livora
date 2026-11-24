@@ -15,6 +15,7 @@ from app.ml.moderation import prescreen
 from app.ml.moderation_jobs import ai_moderation_on, queue_property_moderation
 from app.ml.search import clean_query, rank_properties
 from app.modules.billing.entitlements import ensure_can_publish
+from app.modules.locations.service import LocationService, city_condition
 
 VALID_LISTING_STATUSES = {"draft", "pending_verification", "published", "paused", "archived"}
 # Changes to these refresh the listing's search embedding / trigger a safety review.
@@ -154,7 +155,7 @@ class PropertyService:
         if furnishing_status:
             conditions.append(Property.furnishing_status == furnishing_status)
         if city:
-            conditions.append(Property.city.ilike(f"%{city}%"))
+            conditions.append(await city_condition(self.db, Property.city, city))
         if min_rent is not None:
             conditions.append(Property.monthly_rent >= min_rent)
         if max_rent is not None:
@@ -197,6 +198,13 @@ class PropertyService:
         # Invariant: current occupants cannot exceed max capacity
         if data.current_occupants > data.max_capacity:
             raise BadRequestException("Current occupants cannot exceed maximum capacity")
+        # Listings are only in catalogue cities, saved under the official name and its state.
+        city = await LocationService(self.db).resolve(data.city)
+        if city is None or not city.is_active:
+            raise BadRequestException(
+                f"Listings in {data.city.strip() or 'that city'} aren't open yet. Choose a city from the list.",
+                error_code="UNSUPPORTED_CITY",
+            )
         await ensure_can_publish(self.db, owner_id)  # new listings are published at once
 
         wkt_point = f"POINT({data.longitude} {data.latitude})"
@@ -209,8 +217,8 @@ class PropertyService:
             location=WKTElement(wkt_point, srid=4326),
             address_display=data.address_display,
             address_exact=data.address_exact,
-            city=data.city,
-            state=data.state,
+            city=city.name,
+            state=city.state,
             postal_code=data.postal_code,
             country=data.country,
             currency=data.currency,

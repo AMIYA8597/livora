@@ -2,7 +2,6 @@
  * Listing wizard model: the draft, per-step validation and the API payload. Pure functions with
  * relative imports so they can be unit-tested with `node --test`.
  */
-import { cityCentre, SUPPORTED_CITIES } from "../properties/city-centres.ts";
 
 export interface DraftBed {
   id: string;
@@ -29,6 +28,8 @@ export interface ListingDraft {
   category: string;
   city: string;
   state: string;
+  /** The chosen catalogue city's centre: the listing's map position until address geocoding exists. */
+  centre: { latitude: number; longitude: number } | null;
   locality: string;
   addressExact: string;
   postalCode: string;
@@ -80,6 +81,7 @@ export function initialDraft(): ListingDraft {
     category: "apartment",
     city: "",
     state: "",
+    centre: null,
     locality: "",
     addressExact: "",
     postalCode: "",
@@ -111,7 +113,7 @@ export function validateStep(step: number, d: ListingDraft): string | null {
       if (d.title.trim() && d.title.trim().length < 10) return "Make the title at least 10 characters, or leave it blank.";
       return null;
     case 1:
-      if (!SUPPORTED_CITIES.includes(d.city)) return "Choose the city.";
+      if (!d.city || !d.centre) return "Choose the city from the list.";
       if (!d.locality.trim()) return "Enter the locality or area.";
       if (!/^\d{6}$/.test(d.postalCode.trim())) return "Enter the 6-digit PIN code.";
       return null;
@@ -168,7 +170,8 @@ export function buildListingPayload(d: ListingDraft, today: string) {
     property_category: d.category,
     configuration: d.configuration,
     // City-level position until address geocoding exists (the exact address stays private anyway).
-    ...cityCentre(d.city),
+    latitude: d.centre?.latitude,
+    longitude: d.centre?.longitude,
     address_display: location,
     address_exact: d.addressExact.trim() || location,
     city: d.city,

@@ -238,7 +238,7 @@ async def test_free_tier_listing_cap_and_owner_pro(async_client, people, billing
             await PropertyService(s).create(people.owner, PropertyCreate(
                 title="Third flat", description="d", property_category="apartment", configuration="1BHK",
                 latitude=12.93, longitude=77.62, address_display="Koramangala", address_exact="x",
-                city=people.city, state="Karnataka", postal_code="560034", monthly_rent=Decimal("15000"),
+                city="Bengaluru", state="Karnataka", postal_code="560034", monthly_rent=Decimal("15000"),
                 max_capacity=1, available_from=date.today(), currency="INR"))
         assert getattr(err.value, "status_code", None) == 402
 

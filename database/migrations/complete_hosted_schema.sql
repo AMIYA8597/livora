@@ -1653,6 +1653,170 @@ INSERT INTO outbox_events (id, event_type, payload, status, retry_count, created
 
 UPDATE alembic_version SET version_num='015_canonical_lifestyle_traits' WHERE alembic_version.version_num = '014_account_deletion';
 
+-- Running upgrade 015_canonical_lifestyle_traits -> 016_india_locations
+
+ALTER TABLE states ADD COLUMN IF NOT EXISTS kind varchar(16) NOT NULL DEFAULT 'state';
+
+ALTER TABLE states ADD COLUMN IF NOT EXISTS capital_city_id uuid REFERENCES cities(id) ON DELETE SET NULL;
+
+ALTER TABLE cities ADD COLUMN IF NOT EXISTS aliases varchar(100)[] NOT NULL DEFAULT '{}';
+
+ALTER TABLE cities ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+
+DO $$ BEGIN
+            ALTER TABLE states ADD CONSTRAINT chk_states_kind CHECK (kind IN ('state', 'union_territory'));
+        EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+INSERT INTO countries (id, code, name, currency_code, phone_code)
+        VALUES (gen_random_uuid(), 'IND', 'India', 'INR', '+91')
+        ON CONFLICT (code) DO NOTHING;
+
+WITH data(code, name, kind) AS (VALUES ('AP', 'Andhra Pradesh', 'state'),
+('AR', 'Arunachal Pradesh', 'state'),
+('AS', 'Assam', 'state'),
+('BR', 'Bihar', 'state'),
+('CG', 'Chhattisgarh', 'state'),
+('GA', 'Goa', 'state'),
+('GJ', 'Gujarat', 'state'),
+('HR', 'Haryana', 'state'),
+('HP', 'Himachal Pradesh', 'state'),
+('JH', 'Jharkhand', 'state'),
+('KA', 'Karnataka', 'state'),
+('KL', 'Kerala', 'state'),
+('MP', 'Madhya Pradesh', 'state'),
+('MH', 'Maharashtra', 'state'),
+('MN', 'Manipur', 'state'),
+('ML', 'Meghalaya', 'state'),
+('MZ', 'Mizoram', 'state'),
+('NL', 'Nagaland', 'state'),
+('OD', 'Odisha', 'state'),
+('PB', 'Punjab', 'state'),
+('RJ', 'Rajasthan', 'state'),
+('SK', 'Sikkim', 'state'),
+('TN', 'Tamil Nadu', 'state'),
+('TS', 'Telangana', 'state'),
+('TR', 'Tripura', 'state'),
+('UP', 'Uttar Pradesh', 'state'),
+('UK', 'Uttarakhand', 'state'),
+('WB', 'West Bengal', 'state'),
+('AN', 'Andaman and Nicobar Islands', 'union_territory'),
+('CH', 'Chandigarh', 'union_territory'),
+('DD', 'Dadra and Nagar Haveli and Daman and Diu', 'union_territory'),
+('DL', 'Delhi', 'union_territory'),
+('JK', 'Jammu and Kashmir', 'union_territory'),
+('LA', 'Ladakh', 'union_territory'),
+('LD', 'Lakshadweep', 'union_territory'),
+('PY', 'Puducherry', 'union_territory')),
+        india AS (SELECT id FROM countries WHERE code = 'IND'),
+        updated AS (
+            UPDATE states s SET name = d.name, kind = d.kind
+              FROM data d, india
+             WHERE s.country_id = india.id AND s.code = d.code
+         RETURNING s.code
+        )
+        INSERT INTO states (id, country_id, code, name, kind)
+        SELECT gen_random_uuid(), india.id, d.code, d.name, d.kind
+          FROM data d, india
+         WHERE d.code NOT IN (SELECT code FROM updated)
+           AND NOT EXISTS (SELECT 1 FROM states s WHERE s.country_id = india.id AND s.code = d.code);
+
+DO $$ BEGIN
+            ALTER TABLE states ADD CONSTRAINT uq_states_country_code UNIQUE (country_id, code);
+        EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL; END $$;;
+
+WITH data(slug, name, state_code, tier, lat, lng, aliases) AS (VALUES ('amaravati', 'Amaravati', 'AP', 2, 16.515, 80.515, '{}'::varchar[]),
+('itanagar', 'Itanagar', 'AR', 2, 27.0844, 93.6053, '{}'::varchar[]),
+('dispur', 'Dispur', 'AS', 2, 26.1433, 91.7898, ARRAY['Guwahati']::varchar[]),
+('patna', 'Patna', 'BR', 2, 25.5941, 85.1376, '{}'::varchar[]),
+('raipur', 'Raipur', 'CG', 2, 21.2514, 81.6296, ARRAY['Nava Raipur']::varchar[]),
+('panaji', 'Panaji', 'GA', 2, 15.4909, 73.8278, ARRAY['Panjim']::varchar[]),
+('gandhinagar', 'Gandhinagar', 'GJ', 2, 23.2156, 72.6369, '{}'::varchar[]),
+('shimla', 'Shimla', 'HP', 2, 31.1048, 77.1734, ARRAY['Simla']::varchar[]),
+('ranchi', 'Ranchi', 'JH', 2, 23.3441, 85.3096, '{}'::varchar[]),
+('bengaluru', 'Bengaluru', 'KA', 1, 12.9716, 77.5946, ARRAY['Bangalore']::varchar[]),
+('thiruvananthapuram', 'Thiruvananthapuram', 'KL', 2, 8.5241, 76.9366, ARRAY['Trivandrum']::varchar[]),
+('bhopal', 'Bhopal', 'MP', 2, 23.2599, 77.4126, '{}'::varchar[]),
+('mumbai', 'Mumbai', 'MH', 1, 19.076, 72.8777, ARRAY['Bombay']::varchar[]),
+('pune', 'Pune', 'MH', 1, 18.5204, 73.8567, ARRAY['Poona']::varchar[]),
+('imphal', 'Imphal', 'MN', 2, 24.817, 93.9368, '{}'::varchar[]),
+('shillong', 'Shillong', 'ML', 2, 25.5788, 91.8933, '{}'::varchar[]),
+('aizawl', 'Aizawl', 'MZ', 2, 23.7271, 92.7176, '{}'::varchar[]),
+('kohima', 'Kohima', 'NL', 2, 25.6751, 94.1086, '{}'::varchar[]),
+('bhubaneswar', 'Bhubaneswar', 'OD', 2, 20.2961, 85.8245, '{}'::varchar[]),
+('jaipur', 'Jaipur', 'RJ', 2, 26.9124, 75.7873, '{}'::varchar[]),
+('gangtok', 'Gangtok', 'SK', 2, 27.3389, 88.6065, '{}'::varchar[]),
+('chennai', 'Chennai', 'TN', 1, 13.0827, 80.2707, ARRAY['Madras']::varchar[]),
+('hyderabad', 'Hyderabad', 'TS', 1, 17.385, 78.4867, ARRAY['Secunderabad']::varchar[]),
+('agartala', 'Agartala', 'TR', 2, 23.8315, 91.2868, '{}'::varchar[]),
+('lucknow', 'Lucknow', 'UP', 2, 26.8467, 80.9462, '{}'::varchar[]),
+('dehradun', 'Dehradun', 'UK', 2, 30.3165, 78.0322, '{}'::varchar[]),
+('kolkata', 'Kolkata', 'WB', 1, 22.5726, 88.3639, ARRAY['Calcutta']::varchar[]),
+('sri-vijaya-puram', 'Sri Vijaya Puram', 'AN', 2, 11.6234, 92.7265, ARRAY['Port Blair']::varchar[]),
+('chandigarh', 'Chandigarh', 'CH', 2, 30.7333, 76.7794, '{}'::varchar[]),
+('daman', 'Daman', 'DD', 2, 20.3974, 72.8328, '{}'::varchar[]),
+('new-delhi', 'New Delhi', 'DL', 1, 28.6139, 77.209, ARRAY['Delhi', 'Delhi NCR']::varchar[]),
+('srinagar', 'Srinagar', 'JK', 2, 34.0837, 74.7973, '{}'::varchar[]),
+('jammu', 'Jammu', 'JK', 2, 32.7266, 74.857, '{}'::varchar[]),
+('leh', 'Leh', 'LA', 2, 34.1526, 77.5771, '{}'::varchar[]),
+('kavaratti', 'Kavaratti', 'LD', 2, 10.5669, 72.642, '{}'::varchar[]),
+('puducherry', 'Puducherry', 'PY', 2, 11.9416, 79.8083, ARRAY['Pondicherry']::varchar[]))
+        INSERT INTO cities (id, state_id, slug, name, tier, center_location, aliases, is_active)
+        SELECT gen_random_uuid(), s.id, d.slug, d.name, d.tier,
+               ST_SetSRID(ST_MakePoint(d.lng, d.lat), 4326), d.aliases, true
+          FROM data d
+          JOIN states s ON s.code = d.state_code
+          JOIN countries c ON c.id = s.country_id AND c.code = 'IND'
+        ON CONFLICT (slug) DO UPDATE
+           SET name = EXCLUDED.name, state_id = EXCLUDED.state_id, tier = EXCLUDED.tier,
+               center_location = EXCLUDED.center_location, aliases = EXCLUDED.aliases;
+
+WITH data(code, slug) AS (VALUES ('AP', 'amaravati'),
+('AR', 'itanagar'),
+('AS', 'dispur'),
+('BR', 'patna'),
+('CG', 'raipur'),
+('GA', 'panaji'),
+('GJ', 'gandhinagar'),
+('HR', 'chandigarh'),
+('HP', 'shimla'),
+('JH', 'ranchi'),
+('KA', 'bengaluru'),
+('KL', 'thiruvananthapuram'),
+('MP', 'bhopal'),
+('MH', 'mumbai'),
+('MN', 'imphal'),
+('ML', 'shillong'),
+('MZ', 'aizawl'),
+('NL', 'kohima'),
+('OD', 'bhubaneswar'),
+('PB', 'chandigarh'),
+('RJ', 'jaipur'),
+('SK', 'gangtok'),
+('TN', 'chennai'),
+('TS', 'hyderabad'),
+('TR', 'agartala'),
+('UP', 'lucknow'),
+('UK', 'dehradun'),
+('WB', 'kolkata'),
+('AN', 'sri-vijaya-puram'),
+('CH', 'chandigarh'),
+('DD', 'daman'),
+('DL', 'new-delhi'),
+('JK', 'srinagar'),
+('LA', 'leh'),
+('LD', 'kavaratti'),
+('PY', 'puducherry'))
+        UPDATE states s SET capital_city_id = ci.id
+          FROM data d, cities ci, countries c
+         WHERE s.code = d.code AND ci.slug = d.slug AND c.id = s.country_id AND c.code = 'IND';
+
+UPDATE properties p SET city = ci.name, state = COALESCE(NULLIF(p.state, ''), s.name)
+          FROM cities ci JOIN states s ON s.id = ci.state_id
+         WHERE p.city <> ci.name
+           AND lower(btrim(p.city)) IN (SELECT lower(a) FROM unnest(ci.aliases) a UNION SELECT lower(ci.name));
+
+UPDATE alembic_version SET version_num='016_india_locations' WHERE alembic_version.version_num = '015_canonical_lifestyle_traits';
+
 DO $$
 DECLARE
     r record;

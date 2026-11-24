@@ -82,7 +82,7 @@ export default function HomePage() {
 
           <p className="mt-6 text-base sm:text-lg text-charcoal-muted max-w-2xl mx-auto leading-relaxed">
             Match lifestyle preferences, quiet hours, cleanliness, and budget with verified flatmates and
-            vetted shared rentals in Bengaluru, Mumbai, Delhi NCR, Hyderabad, and Pune.
+            vetted shared rentals across India, from the big metros to every state capital.
           </p>
 
           {/* Search Bar */}

@@ -6,7 +6,7 @@ export interface StepProps {
   update: (patch: Partial<ListingDraft>) => void;
 }
 
-const control =
+export const control =
   "w-full min-h-[44px] px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-forest";
 
 export function SelectField({

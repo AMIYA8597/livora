@@ -15,6 +15,7 @@ from app.modules.groups.schemas import (
     GroupCompatibilityResponse,
 )
 from app.core.exceptions import NotFoundException, ForbiddenException, BadRequestException
+from app.modules.locations.service import LocationService, city_condition
 
 class GroupService:
     def __init__(self, db: AsyncSession):
@@ -26,7 +27,7 @@ class GroupService:
             .options(selectinload(Group.members), selectinload(Group.wishlist_items))
         )
         if city:
-            query = query.where(Group.target_city.icontains(city, autoescape=True))
+            query = query.where(await city_condition(self.db, Group.target_city, city))
         result = await self.db.execute(query.order_by(Group.created_at.desc()).limit(200))
         return list(result.scalars().all())
 
@@ -40,12 +41,15 @@ class GroupService:
         return result.scalar_one_or_none()
 
     async def create(self, creator_id: UUID, data: GroupCreate) -> Group:
+        # Groups may aim anywhere, but a known city is saved under its official name so that
+        # "Bangalore" and "Bengaluru" groups find each other.
+        known = await LocationService(self.db).resolve(data.target_city)
         group = Group(
             creator_id=creator_id,
             name=data.name,
             description=data.description,
             target_budget_total=data.target_budget_total,
-            target_city=data.target_city,
+            target_city=known.name if known else data.target_city.strip(),
             target_move_in=data.target_move_in,
         )
         self.db.add(group)
