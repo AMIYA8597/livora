@@ -8,6 +8,7 @@ import { useApiQuery } from "@/hooks/useApiQuery";
 import { apiClient } from "@/lib/api-client";
 import { Card, Button, Badge, Modal, Input, EmptyState, ErrorState, LoadingIndicator } from "@flatmate/ui";
 import { formatDate, formatCurrency } from "@/lib/utils";
+import { ApplicationsPanel } from "@/features/admin/ApplicationsPanel";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -25,6 +26,7 @@ import {
   Eye,
   MapPin,
   Lock,
+  FileText,
 } from "lucide-react";
 
 interface AdminStats {
@@ -70,7 +72,7 @@ interface AdminProperty {
 export default function AdminModerationPage() {
   const { isAuthenticated, isLoading: authLoading, isAdmin, user } = useAuth();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"stats" | "moderation" | "properties" | "users">("stats");
+  const [activeTab, setActiveTab] = useState<"stats" | "moderation" | "properties" | "applications" | "users">("stats");
 
   const canView = isAuthenticated && (isAdmin || user?.role === "super_admin" || user?.role === "admin");
   const statsQuery = useApiQuery<AdminStats>(canView ? "/admin/stats" : null);
@@ -233,6 +235,14 @@ export default function AdminModerationPage() {
           <Building className="w-4 h-4" /> Property Verification ({properties.length})
         </button>
         <button
+          onClick={() => setActiveTab("applications")}
+          className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "applications" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
+          }`}
+        >
+          <FileText className="w-4 h-4" /> Applications
+        </button>
+        <button
           onClick={() => setActiveTab("users")}
           className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
             activeTab === "users" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
@@ -389,6 +399,17 @@ export default function AdminModerationPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Applications: find one and override its status with a reason */}
+      {activeTab === "applications" && (
+        <ApplicationsPanel
+          onDone={(message) => {
+            setActionNotice(message);
+            statsQuery.refetch();
+            setTimeout(() => setActionNotice(null), 4000);
+          }}
+        />
       )}
 
       {/* Tab 4: Users */}
