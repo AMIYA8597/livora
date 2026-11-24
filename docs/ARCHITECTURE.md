@@ -64,7 +64,7 @@ flowchart LR
 | `apps/web/components` | Shared app components (navbar, cards, report dialog, empty and error states). |
 | `apps/web/hooks` | React hooks: `useAuth`, `useApiQuery`, `useSocket`, `useNearMe` and others. |
 | `apps/web/lib` | Plain TypeScript rules with no React (query building, chat state, auth store, socket hub), unit-tested in `apps/web/tests`. |
-| `apps/web/proxy.ts` | Next 16 request proxy (formerly `middleware.ts`). Security headers and the CSP are set in `next.config.mjs` (built by `lib/csp.mjs`). |
+| `apps/web/next.config.mjs` | Security headers and the CSP (built by `lib/csp.mjs`). There is no request proxy (`proxy.ts`): the web app has no per-request server logic, and it doesn't use Supabase Auth. |
 | `packages/contracts` | `openapi/v1.json`: the API contract, generated from the code and checked in CI (§7.1). `src/`: TypeScript types for requests and responses, written by hand to match it, and shared constants (e.g. `LISTING_QUICK_QUESTIONS`). |
 | `packages/ui` | Design-system components (`Button`, `Modal`, `Card`, ...). |
 | `apps/api/app/main.py` | App wiring: middleware, the error handler, health checks, `/api/v1` routes. |

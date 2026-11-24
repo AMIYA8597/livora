@@ -322,6 +322,19 @@ committed on your OK.
           there's no network.
       - **Docs.** `docs/ARCHITECTURE.md` §7 is the guide for building the apps.
 
+- [x] **P7. The web app called Supabase Auth on every page load.** `proxy.ts` ran Supabase's
+      quickstart session refresh (`auth.getUser()`) on every request once the publishable key
+      was set, even though sign-in goes through the API's own tokens and the browser has no
+      data access to Supabase.
+      *Done:*
+      - Removed `proxy.ts`, `utils/supabase/*`, `@supabase/ssr` and `@supabase/supabase-js`.
+        This takes a network round-trip off every page and drops a dependency on Supabase Auth
+        being up.
+      - The env files were checked against the project's current Supabase values: all match,
+        and the database password is URL-encoded.
+      - Prisma and `@supabase/server` from Supabase's setup page are not used: Alembic owns the
+        schema and the FastAPI service is the only database client.
+
 ### Needs you (accounts, keys, decisions)
 - [ ] **E1. Rotate the Supabase keys and database password.** They were pasted into a chat. Do
       it before launch; then update `.env`, Secret Manager and GitHub.
