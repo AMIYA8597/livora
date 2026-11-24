@@ -62,7 +62,7 @@ def _import_models():
             Attachment, ConversationReadCursor, ConversationPreference, OutboxEvent
         )
         from app.modules.matching.models import MatchInteraction, MutualMatch  # noqa: F401
-        from app.modules.notifications.models import Notification  # noqa: F401
+        from app.modules.notifications.models import Notification, NotificationPreference, PushSubscription  # noqa: F401
         from app.modules.verification.models import Verification  # noqa: F401
         from app.modules.auth.models import PhoneVerification  # noqa: F401
         from app.modules.moderation.models import ModerationReport, UserBlock  # noqa: F401

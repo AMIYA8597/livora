@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, func, text
+from app.modules.notifications import events as notification_events
 from app.modules.profiles.models import Profile
 from app.modules.users.models import User, UserPrivacySetting
 from app.modules.lifestyle.models import UserDealbreaker
@@ -263,7 +264,8 @@ class MatchingService:
         interaction = existing_res.scalar_one_or_none()
 
         # Free tier: a daily cap on new likes (re-liking someone already liked doesn't count).
-        if action in ("like", "super_like") and not (interaction and interaction.action in ("like", "super_like")):
+        is_new_like = action in ("like", "super_like") and not (interaction and interaction.action in ("like", "super_like"))
+        if is_new_like:
             await ensure_can_like(self.db, user_id)
 
         # Snapshot what the user saw when they decided: training data for the learned ranker.
@@ -332,8 +334,13 @@ class MatchingService:
                     mutual_id = new_match.id
 
         await self.db.commit()
+        interaction_id = interaction.id
+        if is_mutual:
+            await notification_events.match_created(self.db, user_id, target_user_id, mutual_id)
+        elif is_new_like:
+            await notification_events.like_received(self.db, target_user_id, super_like=action == "super_like")
         return MatchInteractionResponse(
-            interaction_id=interaction.id or uuid4(),
+            interaction_id=interaction_id or uuid4(),
             user_id=user_id,
             target_user_id=target_user_id,
             action=action,

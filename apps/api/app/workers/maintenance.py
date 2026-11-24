@@ -34,6 +34,12 @@ JOBS = {
         "(provider_subscription_id IS NULL AND status IN ('active', 'cancelled')) "
         "OR status IN ('cancelled', 'completed', 'halted'))"
     ),
+    # The notification centre shows recent activity; old read items are noise, and nothing
+    # is kept for more than a year.
+    "purge_old_notifications": (
+        "DELETE FROM notifications WHERE (is_read AND created_at < now() - interval '90 days') "
+        "OR created_at < now() - interval '365 days'"
+    ),
     "expire_unconfirmed_appointments": (
         "UPDATE appointments SET status = 'cancelled', "
         "cancellation_reason = 'Expired: not confirmed before the visit time', updated_at = now() "

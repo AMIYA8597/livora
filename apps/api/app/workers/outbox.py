@@ -97,12 +97,19 @@ async def _handle_property_moderate(payload: Dict[str, Any], session_factory: Se
     return await moderate_property(session_factory, UUID(payload["property_id"]))
 
 
+async def _handle_push(payload: Dict[str, Any], session_factory: SessionFactory) -> Dict[str, Any]:
+    from app.modules.notifications.push import handle_push
+
+    return await handle_push(payload, session_factory)
+
+
 HANDLERS: Dict[str, Handler] = {
     EMAIL_EVENT: _handle_email,
     MESSAGE_CREATED_EVENT: _handle_message_created,
     "embedding.refresh": _handle_embedding_refresh,
     "message.moderate": _handle_message_moderate,
     "property.moderate": _handle_property_moderate,
+    "push.send": _handle_push,
 }
 
 

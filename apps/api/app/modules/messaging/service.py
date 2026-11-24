@@ -3,6 +3,7 @@ Production-Grade Messaging and Communication Service.
 Handles conversation lifecycle, message durability, idempotency, read cursors,
 group permissions, moderation blocking, attachments, and real-time dispatch.
 """
+import logging
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
@@ -20,12 +21,15 @@ from app.modules.messaging.schemas import (
 )
 from app.modules.messaging.websocket import manager
 from app.modules.moderation.models import UserBlock
+from app.modules.notifications.events import first_name
 from app.modules.notifications.service import NotificationService
 from app.core.config import settings
 from app.core.exceptions import ForbiddenException, NotFoundException, BadRequestException
 from app.ml.moderation import prescreen
 from app.ml.moderation_jobs import ai_moderation_on, queue_message_moderation
 from app.workers.outbox import schedule_dispatch
+
+logger = logging.getLogger("flatmate.messaging")
 
 DELETED_TEXT = "This message was deleted."
 
@@ -601,19 +605,23 @@ class MessagingService:
             )).scalars().all()
         } if recipient_ids else {}
         notif_service = NotificationService(self.db)
+        sender_name = await first_name(self.db, sender_id) if recipient_ids else ""
         for r_id in recipient_ids:
             if is_muted(prefs.get(r_id), now_dt):
                 continue
             try:
+                # Never the message text: notifications reach lock screens and push services, and
+                # a scam message shouldn't get a second channel. One per chat per 5 minutes.
                 await notif_service.create_notification(
                     user_id=r_id,
-                    title="New message",
-                    body=req.content[:100],
+                    title=f"New message from {sender_name}",
+                    body="Open the chat to read and reply.",
                     notification_type="new_message",
-                    reference_id=conv.id
+                    reference_id=conv.id,
+                    link=f"/messages?conversationId={conv.id}",
                 )
             except Exception:
-                pass
+                logger.warning("Message notification failed", exc_info=True)
 
         return msg
 

@@ -213,6 +213,10 @@ class ConnectionManager:
                 logger.warning("Presence lookup failed: %s", type(exc).__name__)
         return self.get_presence(user_id)
 
+    async def is_online(self, user_id: str) -> bool:
+        """Connected to this instance or, through shared presence, to any other."""
+        return bool(self.active_connections.get(user_id)) or await self._is_online_shared(user_id)
+
     async def _is_online_shared(self, user_id: str) -> bool:
         redis = broker.redis
         if redis is None:

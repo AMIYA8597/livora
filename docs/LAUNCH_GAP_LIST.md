@@ -474,7 +474,79 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - The free-provider list is hand-made. Extend it if abuse shows up.
       - The privacy page wording changed, to say what is stored for email checks. Review it
         with the rest of the legal copy.
-- [ ] **13. Web push and in-app notification centre.**
+- [x] **13. Web push and in-app notification centre.** *(Done.)* Migration
+      `012_notifications_push`.
+      - **What notifies, and where it links:** every notification has a `category` (messages,
+        matches, rentals, account) and a same-site `link`. Links must start with a single `/`;
+        anything else is dropped.
+        - New match: both people, to `/matches`.
+        - A like or super-like: "Someone new likes you", with no name (that stays a paid
+          feature).
+        - Application received (owner) or status changed (applicant, or the owner when it's
+          withdrawn): opens the right tab, e.g. `/owner?tab=applications`.
+        - Visit requested or changed: the other party, with the time in IST.
+        - New chat message: "New message from {first name}". The message text is never
+          included, because notifications show on lock screens and go through push services.
+        - Billing notices link to `/pricing`.
+        - The same event on the same thing is one notification while it's unread. Chat bursts
+          collapse into one per chat per 5 minutes, but once it's read the next message
+          notifies again.
+        - Event hooks run after the main commit and can't break the action that caused them.
+      - **In-app centre:**
+        - The navbar bell shows a live unread count from the socket's `notification.created`.
+          It refetches after reconnects and when the centre changes anything.
+        - Its dropdown shows the latest 6. Clicking one marks it read and opens its link, and
+          there's "Mark all as read".
+        - `/notifications` has All and Unread tabs, groups by day, loads older pages, updates
+          live, and stays in step with the bell.
+        - API: `GET /notifications/?unread_only&before&limit`, `/unread-count`, `/read-all`,
+          `PATCH /{id}/read`.
+        - Read rows are purged after 90 days and all rows after 365 days (maintenance task).
+      - **Web Push (VAPID, `pywebpush`):**
+        - `public/sw.js` shows the push and opens its link, same-site only. `app/manifest.ts`
+          makes the app installable, which iPhone and iPad need for push.
+        - Settings on `/notifications`: turn push on or off per device, and choose which
+          categories may push. Everything still shows in the app.
+        - Subscriptions are only accepted for the real push services (Google, Mozilla,
+          Microsoft, Apple) over https, with keys of the right length. That blocks using the
+          server to call arbitrary URLs. An endpoint moves to whoever subscribed last, and
+          signing out removes this browser's subscription.
+        - Delivery goes through the outbox (`push.send`), queued in the same commit as the
+          notification:
+          - gone subscriptions (404/410) are deleted
+          - other failures are counted, and a subscription is dropped after 10
+          - chat pushes are urgent with a 6-hour TTL; others have a 24-hour TTL
+          - no chat push is sent while the person is online, because they see it live
+        - Push is off unless `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are set.
+          Generate a pair with `python -m app.modules.notifications.vapid`.
+      - **Tests:** `tests/test_notifications_push_db.py` has 9 tests:
+        - link safety and the push-service allowlist
+        - paging and read state
+        - each event's text and link
+        - chat without text, including the burst-then-read rule
+        - subscriptions with preferences
+        - delivery and cleaning up gone subscriptions
+        - skipping online users
+        - no VAPID means nothing is queued
+        - the purge
+        Web helpers are covered in `apps/web/tests/notifications.test.ts`.
+      - **Checked in the browser** (local):
+        - a chat message arrives live in the bell and the centre
+        - clicking opens the chat and marks it read
+        - a new message after reading notifies again
+        - "Mark all" from the bell updates the centre
+        - `?tab=` links open the right dashboard tab
+        - mobile layout
+      Not covered:
+      - A real push wasn't delivered: the app's browser pane blocks notification permission.
+        Test on staging in Chrome, Firefox and an installed iPhone app.
+      - iPhone and iPad only get push from the Home Screen app (iOS 16.4+). The settings card
+        says so.
+      - A push that fails for a temporary reason isn't retried; only the failure is counted.
+        The notification is still in the app.
+      - `/messages` and `/notifications` open a second WebSocket, because the bell has its own.
+      - Production needs its own VAPID keys. Changing them later makes every browser
+        subscribe again.
 - [ ] **13b. Admins cannot override application status.** `PATCH /applications/{id}/status`
       never passes `is_admin`, unlike appointments, so moderators cannot intervene.
 

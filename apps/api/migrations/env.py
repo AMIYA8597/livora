@@ -27,7 +27,7 @@ from app.modules.groups.models import Group, GroupMember, GroupWishlistItem  # n
 from app.modules.applications.models import Application  # noqa: F401
 from app.modules.messaging.models import Conversation, ConversationParticipant, Message  # noqa: F401
 from app.modules.matching.models import MatchInteraction, MutualMatch  # noqa: F401
-from app.modules.notifications.models import Notification  # noqa: F401
+from app.modules.notifications.models import Notification, NotificationPreference, PushSubscription  # noqa: F401
 from app.modules.verification.models import Verification  # noqa: F401
 from app.modules.auth.models import PhoneVerification  # noqa: F401
 from app.modules.moderation.models import ModerationReport  # noqa: F401

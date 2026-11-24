@@ -148,6 +148,13 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: Optional[str] = None
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
     RAZORPAY_TIMEOUT_SECONDS: float = 15.0
+
+    # Web Push (VAPID). Push is on only when both keys are set; generate a pair with
+    # `python -m app.modules.notifications.vapid`. The subject is a mailto: or https: contact
+    # that push services can use to reach the operator.
+    VAPID_PUBLIC_KEY: Optional[str] = None
+    VAPID_PRIVATE_KEY: Optional[str] = None
+    VAPID_SUBJECT: str = "mailto:support@flatmate.local"
     # Free tier (applies only while billing is on).
     FREE_DAILY_LIKES: int = 25
     FREE_ACTIVE_LISTINGS: int = 2

@@ -391,7 +391,7 @@ class BillingService:
         try:
             await NotificationService(self.db).create_notification(
                 user_id=sub.user_id, title=title, body=body.format(plan=plan.name if plan else "your plan"),
-                notification_type="billing", reference_id=sub.id,
+                notification_type="billing", reference_id=sub.id, link="/pricing",
             )
         except Exception:  # a notification must never fail a payment event
             logger.warning("Billing notification failed for %s", sub.id, exc_info=True)

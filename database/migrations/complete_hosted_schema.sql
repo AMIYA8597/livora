@@ -290,13 +290,13 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_properties_owner_id ON properties (owner_id);
+
 CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE INDEX ix_properties_featured_until ON properties (featured_until);
 
 CREATE INDEX ix_properties_postal_code ON properties (postal_code);
-
-CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
 CREATE INDEX ix_properties_city ON properties (city);
 
@@ -356,6 +356,8 @@ CREATE TABLE notifications (
     title VARCHAR(200) NOT NULL, 
     body TEXT NOT NULL, 
     notification_type VARCHAR(50) NOT NULL, 
+    category VARCHAR(20) DEFAULT 'account' NOT NULL, 
+    link VARCHAR(300), 
     reference_id UUID, 
     is_read BOOLEAN NOT NULL, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
@@ -363,9 +365,40 @@ CREATE TABLE notifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_notifications_is_read ON notifications (is_read);
+
+CREATE INDEX ix_notifications_user_created ON notifications (user_id, created_at);
+
 CREATE INDEX ix_notifications_user_id ON notifications (user_id);
 
-CREATE INDEX ix_notifications_is_read ON notifications (is_read);
+CREATE TABLE push_subscriptions (
+    id UUID NOT NULL, 
+    user_id UUID NOT NULL, 
+    endpoint TEXT NOT NULL, 
+    p256dh VARCHAR(200) NOT NULL, 
+    auth VARCHAR(100) NOT NULL, 
+    user_agent VARCHAR(300), 
+    failure_count INTEGER DEFAULT '0' NOT NULL, 
+    last_success_at TIMESTAMP WITH TIME ZONE, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    PRIMARY KEY (id), 
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+    UNIQUE (endpoint)
+);
+
+CREATE INDEX ix_push_subscriptions_user_id ON push_subscriptions (user_id);
+
+CREATE TABLE notification_preferences (
+    user_id UUID NOT NULL, 
+    push_messages BOOLEAN DEFAULT 'true' NOT NULL, 
+    push_matches BOOLEAN DEFAULT 'true' NOT NULL, 
+    push_rentals BOOLEAN DEFAULT 'true' NOT NULL, 
+    push_account BOOLEAN DEFAULT 'true' NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    PRIMARY KEY (user_id), 
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
 
 CREATE TABLE verifications (
     id UUID NOT NULL, 
@@ -386,13 +419,13 @@ CREATE TABLE verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_verifications_subject_created ON verifications (subject_hash, created_at);
-
-CREATE INDEX ix_verifications_user_id ON verifications (user_id);
+CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
 
 CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
 
-CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
+CREATE INDEX ix_verifications_subject_created ON verifications (subject_hash, created_at);
+
+CREATE INDEX ix_verifications_user_id ON verifications (user_id);
 
 CREATE TABLE phone_verifications (
     id UUID NOT NULL, 
@@ -407,9 +440,9 @@ CREATE TABLE phone_verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_phone_verifications_user_created ON phone_verifications (user_id, created_at);
-
 CREATE INDEX idx_phone_verifications_phone_created ON phone_verifications (phone_e164, created_at);
+
+CREATE INDEX idx_phone_verifications_user_created ON phone_verifications (user_id, created_at);
 
 CREATE TABLE moderation_reports (
     id UUID NOT NULL, 
@@ -1430,6 +1463,49 @@ UPDATE users u SET is_verified = EXISTS (
                  AND v.verification_type IN ('work_email', 'student_email'));
 
 UPDATE alembic_version SET version_num='011_email_verification' WHERE alembic_version.version_num = '010_billing';
+
+-- Running upgrade 011_email_verification -> 012_notifications_push
+
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS category VARCHAR(20) NOT NULL DEFAULT 'account';
+
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS link VARCHAR(300);
+
+CREATE INDEX IF NOT EXISTS ix_notifications_user_created ON notifications (user_id, created_at);
+
+UPDATE notifications SET category = CASE
+               WHEN notification_type = 'new_message' THEN 'messages'
+               WHEN notification_type IN ('match_created', 'new_interest') THEN 'matches'
+               WHEN notification_type IN ('application_received', 'application_status_change', 'appointment_requested',
+                                          'appointment_status_change', 'viewing_reminder', 'property_enquiry',
+                                          'listing_expiry') THEN 'rentals'
+               ELSE 'account' END
+           WHERE category = 'account';
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+               id UUID PRIMARY KEY,
+               user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+               endpoint TEXT NOT NULL UNIQUE,
+               p256dh VARCHAR(200) NOT NULL,
+               auth VARCHAR(100) NOT NULL,
+               user_agent VARCHAR(300),
+               failure_count INTEGER NOT NULL DEFAULT 0,
+               last_success_at TIMESTAMPTZ,
+               created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+               updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+           );
+
+CREATE INDEX IF NOT EXISTS ix_push_subscriptions_user_id ON push_subscriptions (user_id);
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+               user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+               push_messages BOOLEAN NOT NULL DEFAULT true,
+               push_matches BOOLEAN NOT NULL DEFAULT true,
+               push_rentals BOOLEAN NOT NULL DEFAULT true,
+               push_account BOOLEAN NOT NULL DEFAULT true,
+               updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+           );
+
+UPDATE alembic_version SET version_num='012_notifications_push' WHERE alembic_version.version_num = '011_email_verification';
 
 DO $$
 DECLARE

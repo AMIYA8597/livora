@@ -7,6 +7,7 @@ from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
+from app.modules.notifications import events as notification_events
 from app.modules.appointments.models import Appointment
 from app.modules.properties.models import Property
 from app.modules.appointments.schemas import AppointmentCreate, AppointmentStatusUpdate
@@ -80,6 +81,7 @@ class AppointmentService:
         self.db.add(appointment)
         await self.db.commit()
         await self.db.refresh(appointment)
+        await notification_events.appointment_requested(self.db, appointment, prop)
         return appointment
 
     async def update_status(
@@ -112,4 +114,7 @@ class AppointmentService:
 
         await self.db.commit()
         await self.db.refresh(appt)
+        prop = await self.db.get(Property, appt.property_id)
+        if prop:
+            await notification_events.appointment_status_changed(self.db, appt, prop, user_id)
         return appt

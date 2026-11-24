@@ -3,6 +3,7 @@ from uuid import UUID
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from app.modules.notifications import events as notification_events
 from app.modules.applications.models import Application
 from app.modules.properties.models import Property
 from app.modules.applications.schemas import ApplicationCreate, ApplicationStatusUpdate
@@ -82,6 +83,7 @@ class ApplicationService:
         self.db.add(app)
         await self.db.commit()
         await self.db.refresh(app)
+        await notification_events.application_received(self.db, app, prop)
         return app
 
     async def update_status(self, application_id: UUID, current_user_id: UUID, data: ApplicationStatusUpdate, is_admin: bool = False) -> Application:
@@ -112,4 +114,6 @@ class ApplicationService:
         app.updated_at = datetime.now(timezone.utc)
         await self.db.commit()
         await self.db.refresh(app)
+        if prop:
+            await notification_events.application_status_changed(self.db, app, prop, current_user_id)
         return app
