@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, is_staff
 from app.modules.users.models import User
-from app.modules.applications.schemas import ApplicationResponse, ApplicationCreate, ApplicationStatusUpdate
+from app.modules.applications.schemas import (
+    ApplicationCreate, ApplicationResponse, ApplicationStatusUpdate, PartyStatusEventResponse,
+)
 from app.modules.applications.service import ApplicationService
 from app.modules.notifications import emails as notify
 from app.modules.properties.models import Property
@@ -43,6 +45,17 @@ async def get_application(
     is_admin = is_staff(current_user)
     service = ApplicationService(db)
     return await service.get_by_id_authorized(application_id, current_user.id, is_admin=is_admin)
+
+@router.get("/{application_id}/history", response_model=List[PartyStatusEventResponse])
+async def get_application_history(
+    application_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The application's status timeline, for its applicant and the listing's owner."""
+    service = ApplicationService(db)
+    app = await service.get_by_id_authorized(application_id, current_user.id, is_admin=is_staff(current_user))
+    return await service.history_for_parties(app)
 
 @router.patch("/{application_id}/status", response_model=ApplicationResponse)
 async def update_application_status(

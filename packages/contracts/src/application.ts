@@ -30,6 +30,16 @@ export interface ApplicationStatusUpdate {
   note?: string;
 }
 
+/** One entry of GET /applications/{id}/history, as the applicant and the owner see it. */
+export interface ApplicationTimelineEntryDTO {
+  /** Null for the submission itself. */
+  from_status: string | null;
+  to_status: string;
+  /** A role, never a name: staff changes show as "support", and staff reasons stay with staff. */
+  actor: "applicant" | "owner" | "support" | "unknown";
+  created_at: string;
+}
+
 export type AppointmentType = 'physical_visit' | 'video_call';
 export type AppointmentStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rescheduled';
 

@@ -156,6 +156,33 @@ class ApplicationService:
             await notification_events.application_status_changed(self.db, app, prop, current_user_id, by_staff=override)
         return app
 
+    async def history_for_parties(self, app: Application) -> List[dict]:
+        """The application's timeline for its applicant and owner: the submission, then every
+        status change, oldest first. See PartyStatusEventResponse for what is left out."""
+        owner_id = (await self.db.execute(
+            select(Property.owner_id).where(Property.id == app.property_id)
+        )).scalar_one_or_none()
+        events = (await self.db.execute(
+            select(ApplicationStatusEvent)
+            .where(ApplicationStatusEvent.application_id == app.id)
+            .order_by(ApplicationStatusEvent.created_at)
+        )).scalars().all()
+
+        def actor(ev: ApplicationStatusEvent) -> str:
+            if ev.by_staff:
+                return "support"
+            if ev.actor_id is not None and ev.actor_id == app.applicant_id:
+                return "applicant"
+            if ev.actor_id is not None and ev.actor_id == owner_id:
+                return "owner"
+            return "unknown"
+
+        timeline = [{"from_status": None, "to_status": "submitted", "actor": "applicant",
+                     "created_at": app.submitted_at}]
+        timeline += [{"from_status": ev.from_status, "to_status": ev.to_status, "actor": actor(ev),
+                      "created_at": ev.created_at} for ev in events]
+        return timeline
+
     async def history(self, application_id: UUID) -> List[dict]:
         """Status changes, oldest first, with the actor's name (for staff)."""
         rows = (await self.db.execute(

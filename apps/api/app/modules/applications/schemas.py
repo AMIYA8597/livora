@@ -33,6 +33,15 @@ class ApplicationStatusEventResponse(BaseModel):
     by_staff: bool
     created_at: datetime
 
+class PartyStatusEventResponse(BaseModel):
+    """A status change as the applicant and the owner see it: who acted is a role, never a staff
+    member's name, and staff reasons stay with staff (parties are told only that support acted)."""
+    from_status: Optional[str] = None  # None for the submission itself
+    to_status: str
+    actor: Literal["applicant", "owner", "support", "unknown"]
+    created_at: datetime
+
+
 class ApplicationResponse(ApplicationBase):
     id: uuid.UUID
     applicant_id: uuid.UUID

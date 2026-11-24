@@ -7,6 +7,7 @@ import type { ApplicationDTO } from "@flatmate/contracts";
 import { Badge, Button, Card, EmptyState } from "@flatmate/ui";
 import { FileText } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { ApplicationTimeline } from "@/features/applications/ApplicationTimeline";
 
 const WITHDRAWABLE = new Set(["submitted", "reviewing", "under_review"]);
 
@@ -57,6 +58,7 @@ export function ApplicationsList({ items, onWithdraw, busyId }: ApplicationsList
                 &ldquo;{app.introduction}&rdquo;
               </p>
             )}
+            <ApplicationTimeline applicationId={app.id} viewer="applicant" />
           </div>
 
           <div className="flex items-center gap-2 self-stretch sm:self-center justify-end">

@@ -3,6 +3,7 @@ import { Avatar, Badge, Button, Card } from "@flatmate/ui";
 import { Check, X } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { OwnerApplication } from "../types";
+import { ApplicationTimeline } from "@/features/applications/ApplicationTimeline";
 
 const OPEN = new Set(["submitted", "reviewing", "pending"]);
 
@@ -37,6 +38,7 @@ export function OwnerApplicationsList({ items, busyId, onDecide }: OwnerApplicat
                 {app.introduction && (
                   <p className="text-xs text-charcoal-muted mt-2 italic line-clamp-3 break-words">&ldquo;{app.introduction}&rdquo;</p>
                 )}
+                {app.id && <ApplicationTimeline applicationId={app.id} viewer="owner" />}
               </div>
             </div>
 

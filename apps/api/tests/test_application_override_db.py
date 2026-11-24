@@ -151,3 +151,42 @@ async def test_staff_can_find_applications(async_client, world):
     assert (await async_client.get(f"{API}/admin/applications/{world.app}/history",
                                    headers=_auth(world.applicant))).status_code == 403
     assert (await async_client.get(f"{API}/admin/applications/{uuid4()}/history", headers=h)).status_code == 404
+
+
+# --------------------------------------------------------------------------- history for the parties
+
+async def test_applicant_and_owner_see_the_timeline_without_staff_details(async_client, world):
+    assert (await _set(async_client, world, world.owner, "under_review", role="owner")).status_code == 200
+    assert (await _set(async_client, world, world.mod, "rejected", note="Listing confirmed as a scam",
+                       role="moderator")).status_code == 200
+    assert (await _set(async_client, world, world.mod, "under_review", note="Owner verified after all",
+                       role="moderator")).status_code == 200
+    assert (await _set(async_client, world, world.applicant, "withdrawn")).status_code == 200
+
+    expected = [
+        (None, "submitted", "applicant"),
+        ("submitted", "under_review", "owner"),
+        ("under_review", "rejected", "support"),
+        ("rejected", "under_review", "support"),
+        ("under_review", "withdrawn", "applicant"),
+    ]
+    for who, role in ((world.applicant, "seeker"), (world.owner, "owner")):
+        res = await async_client.get(f"{API}/applications/{world.app}/history", headers=_auth(who, role))
+        assert res.status_code == 200, res.text
+        timeline = res.json()
+        assert [(h["from_status"], h["to_status"], h["actor"]) for h in timeline] == expected
+        times = [h["created_at"] for h in timeline]
+        assert times == sorted(times)
+        # Who on the staff acted, and why, stays with staff.
+        raw = res.text
+        assert "scam" not in raw and "verified after all" not in raw and "Mona" not in raw
+        assert str(world.mod) not in raw
+        assert set(timeline[0]) == {"from_status", "to_status", "actor", "created_at"}
+
+
+async def test_history_is_private_to_the_application(async_client, world):
+    res = await async_client.get(f"{API}/applications/{world.app}/history", headers=_auth(world.stranger))
+    assert res.status_code == 403
+    res = await async_client.get(f"{API}/applications/{uuid4()}/history", headers=_auth(world.applicant))
+    assert res.status_code == 404
+    assert (await async_client.get(f"{API}/applications/{world.app}/history")).status_code in (401, 403)

@@ -68,7 +68,15 @@ Gathered from the open items below and every item's "Not covered" notes.
       returned. Without a query, the order is unchanged (distance, else newest). Tests: five in
       `tests/test_search_geospatial.py` (stemming, title-first ranking, exclusions, paging,
       radius, and the endpoint itself).
-- [ ] **L7. Owners and applicants can't see an application's status history**; only staff can.
+- [x] **L7. Owners and applicants can't see an application's status history**; only staff can.
+      *Done:* `GET /applications/{id}/history` serves the applicant, the listing's owner and
+      staff (anyone else gets 403). It returns the submission, then every change, oldest first.
+      Who acted is a role (applicant, owner, support), never a staff name or id, and staff
+      reasons stay with staff, matching what the notifications already say. The applicant's
+      dashboard and the owner's applications tab have a "History" toggle that loads on open
+      ("Under review by the owner", "Rejected by Flatmate support"). Checked in the browser as the
+      applicant. Tests: two in `tests/test_application_override_db.py` and
+      `tests/application_timeline.test.ts`.
 - [ ] **L8. Moderators can use the moderation API but can't open the admin console.**
 - [ ] **L9. No way to replay a failed Razorpay webhook** except waiting for Razorpay's retry.
 - [ ] **L10. The PDF upload check reads raw bytes**, so active content inside compressed object
