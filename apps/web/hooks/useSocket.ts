@@ -1,18 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MessageDTO, WebSocketEnvelope } from "@flatmate/contracts";
+import type { MessageDTO } from "@flatmate/contracts";
 import { API_BASE_URL, refreshAccessToken } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  HEARTBEAT_INTERVAL_MS,
-  closeAction,
-  isStale,
-  reconnectDelay,
-  socketUrl,
-} from "@/lib/realtime";
+import { socketUrl } from "@/lib/realtime";
+import { SocketHub, type Envelope, type SocketLike, type SocketStatus } from "@/lib/socket-hub";
 
-export type SocketStatus = "idle" | "connecting" | "open" | "offline";
+export type { SocketStatus };
 
 export interface SocketCallbacks {
   onMessageCreated?: (msg: MessageDTO) => void;
@@ -32,8 +27,53 @@ export interface SocketCallbacks {
 
 const WS_URL = socketUrl(API_BASE_URL, process.env.NEXT_PUBLIC_WS_URL);
 
+let hub: SocketHub | null = null;
+
+/** The tab's one connection, created on first use. */
+function tabHub(): SocketHub {
+  hub ??= new SocketHub({
+    url: WS_URL,
+    createSocket: (url) => new WebSocket(url) as unknown as SocketLike,
+    getToken: () => localStorage.getItem("flatmate_access_token"),
+    refreshToken: refreshAccessToken,
+    isOnline: () => typeof navigator === "undefined" || navigator.onLine !== false,
+    watchBrowser: ({ online, offline, visible }) => {
+      const onVisible = () => {
+        if (document.visibilityState === "visible") visible();
+      };
+      window.addEventListener("online", online);
+      window.addEventListener("offline", offline);
+      document.addEventListener("visibilitychange", onVisible);
+      return () => {
+        window.removeEventListener("online", online);
+        window.removeEventListener("offline", offline);
+        document.removeEventListener("visibilitychange", onVisible);
+      };
+    },
+  });
+  return hub;
+}
+
+function dispatch(cb: SocketCallbacks, envelope: Envelope): void {
+  const { event, data } = envelope;
+  switch (event) {
+    case "message.created": cb.onMessageCreated?.(data); break;
+    case "message.updated": cb.onMessageUpdated?.(data); break;
+    case "message.deleted": cb.onMessageDeleted?.(data); break;
+    case "message.moderated": cb.onMessageModerated?.(data); break;
+    case "message.read": cb.onMessageRead?.(data); break;
+    case "typing.started": cb.onTypingStarted?.(data); break;
+    case "typing.stopped": cb.onTypingStopped?.(data); break;
+    case "presence.changed": cb.onPresenceChanged?.(data); break;
+    case "notification.created": cb.onNotificationCreated?.(data); break;
+    case "conversation.updated": cb.onConversationUpdated?.(data); break;
+    default: break; // connection.ready, pong, error and future events
+  }
+}
+
 /**
- * The signed-in user's realtime channel.
+ * The signed-in user's realtime channel. Every caller in a tab shares one connection
+ * (lib/socket-hub.ts), which:
  *
  * - Authenticates with the first frame, so the token never appears in a URL or access log.
  * - Reconnects with backoff, at once when the browser comes back online or the tab is shown, and
@@ -42,7 +82,8 @@ const WS_URL = socketUrl(API_BASE_URL, process.env.NEXT_PUBLIC_WS_URL);
  * - Calls `onReconnected` after every reconnection so the page can catch up on missed events.
  */
 export function useSocket(callbacks?: SocketCallbacks) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const userKey = user?.id ?? "signed-in";
   const [status, setStatus] = useState<SocketStatus>("idle");
 
   const cbRef = useRef<SocketCallbacks>({});
@@ -50,160 +91,23 @@ export function useSocket(callbacks?: SocketCallbacks) {
     cbRef.current = callbacks ?? {};
   }, [callbacks]);
 
-  const socketRef = useRef<WebSocket | null>(null);
-
   useEffect(() => {
     if (!isAuthenticated || typeof window === "undefined") return;
-
-    let disposed = false;
-    let attempts = 0;
-    let everConnected = false;
-    let lastFrameAt = Date.now();
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let heartbeat: ReturnType<typeof setInterval> | null = null;
-
-    const clearTimers = () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (heartbeat) clearInterval(heartbeat);
-      reconnectTimer = heartbeat = null;
-    };
-
-    const scheduleReconnect = (delay: number) => {
-      if (disposed) return;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(() => connect(), delay);
-    };
-
-    const dispatch = (envelope: WebSocketEnvelope<any>) => {
-      const cb = cbRef.current;
-      const { event, data } = envelope;
-      switch (event) {
-        case "connection.ready":
-          attempts = 0;
-          setStatus("open");
-          if (everConnected) cb.onReconnected?.();
-          everConnected = true;
-          break;
-        case "message.created": cb.onMessageCreated?.(data); break;
-        case "message.updated": cb.onMessageUpdated?.(data); break;
-        case "message.deleted": cb.onMessageDeleted?.(data); break;
-        case "message.moderated": cb.onMessageModerated?.(data); break;
-        case "message.read": cb.onMessageRead?.(data); break;
-        case "typing.started": cb.onTypingStarted?.(data); break;
-        case "typing.stopped": cb.onTypingStopped?.(data); break;
-        case "presence.changed": cb.onPresenceChanged?.(data); break;
-        case "notification.created": cb.onNotificationCreated?.(data); break;
-        case "conversation.updated": cb.onConversationUpdated?.(data); break;
-        default: break; // pong, error and future events
-      }
-    };
-
-    function connect() {
-      if (disposed) return;
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        setStatus("offline");
-        return; // the "online" listener reconnects
-      }
-      const token = localStorage.getItem("flatmate_access_token");
-      if (!token) return;
-
-      const previous = socketRef.current;
-      socketRef.current = null; // its close handler must not schedule anything now
-      previous?.close(1000, "replaced");
-      clearTimers();
-
-      setStatus("connecting");
-      const ws = new WebSocket(WS_URL);
-      socketRef.current = ws;
-      lastFrameAt = Date.now();
-
-      ws.onopen = () => {
-        if (socketRef.current !== ws) return;
-        ws.send(JSON.stringify({ version: "1.0", event: "auth", data: { token } }));
-        heartbeat = setInterval(() => {
-          if (ws.readyState !== WebSocket.OPEN) return;
-          if (isStale(lastFrameAt, Date.now())) {
-            ws.close(4000, "stale"); // dead connection: reconnect
-            return;
-          }
-          ws.send(JSON.stringify({ version: "1.0", event: "ping", data: {} }));
-        }, HEARTBEAT_INTERVAL_MS);
-      };
-
-      ws.onmessage = (event) => {
-        if (socketRef.current !== ws) return;
-        lastFrameAt = Date.now();
-        try {
-          dispatch(JSON.parse(event.data));
-        } catch {
-          // ignore malformed frames
-        }
-      };
-
-      ws.onclose = (event) => {
-        if (socketRef.current !== ws) return; // a replaced socket: nothing to do
-        socketRef.current = null;
-        clearTimers();
-        if (disposed) return;
-        const action = closeAction(event.code, false);
-        if (action === "stop") {
-          setStatus("idle");
-          return;
-        }
-        setStatus(typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "connecting");
-        if (action === "refresh") {
-          refreshAccessToken().then(
-            (newToken) => {
-              if (newToken) scheduleReconnect(0); // else signed out: the auth store takes over
-            },
-            () => scheduleReconnect(reconnectDelay(attempts++)), // offline: keep the session, retry
-          );
-          return;
-        }
-        scheduleReconnect(reconnectDelay(attempts++));
-      };
-
-      ws.onerror = () => {
-        // onclose follows and decides what to do
-      };
-    }
-
-    const reconnectNow = () => {
-      const ws = socketRef.current;
-      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-        attempts = 0;
-        connect();
-      }
-    };
-    const onOffline = () => setStatus("offline");
-    const onVisible = () => {
-      if (document.visibilityState === "visible") reconnectNow();
-    };
-    window.addEventListener("online", reconnectNow);
-    window.addEventListener("offline", onOffline);
-    document.addEventListener("visibilitychange", onVisible);
-
-    connect();
-
+    const unsubscribe = tabHub().subscribe({
+      onEnvelope: (envelope) => dispatch(cbRef.current, envelope),
+      onStatus: setStatus,
+      onReconnected: () => cbRef.current.onReconnected?.(),
+    }, userKey);
     return () => {
-      disposed = true;
-      clearTimers();
-      window.removeEventListener("online", reconnectNow);
-      window.removeEventListener("offline", onOffline);
-      document.removeEventListener("visibilitychange", onVisible);
-      const ws = socketRef.current;
-      socketRef.current = null;
-      ws?.close(1000, "unmount");
+      unsubscribe();
       setStatus("idle");
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, userKey]);
 
-  const sendEvent = useCallback((event: string, data: Record<string, unknown>): boolean => {
-    const ws = socketRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify({ version: "1.0", event, timestamp: new Date().toISOString(), data }));
-    return true;
-  }, []);
+  const sendEvent = useCallback(
+    (event: string, data: Record<string, unknown>): boolean => hub?.send(event, data) ?? false,
+    [],
+  );
 
   const startTyping = useCallback((conversationId: string) => {
     sendEvent("typing.started", { conversation_id: conversationId });

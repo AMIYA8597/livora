@@ -31,8 +31,15 @@ Gathered from the open items below and every item's "Not covered" notes.
       lost, each socket re-checks its account on the heartbeat at most once a minute, so it
       closes within about 85 seconds. Tests: three in `tests/test_chat_realtime_db.py`. Other
       people's sockets stay open.
-- [ ] **L3. Two WebSockets per tab** on `/messages` and `/notifications`, because the bell opens
+- [x] **L3. Two WebSockets per tab** on `/messages` and `/notifications`, because the bell opens
       its own. Share one connection.
+      *Done:* `lib/socket-hub.ts` holds the tab's one connection, and `useSocket` subscribes to it
+      with the same API as before. The first subscriber opens it. It closes one second after the
+      last one leaves, so moving between pages doesn't reconnect. A different account never reuses
+      it, and one listener throwing doesn't stop the others. Checked in the browser: `/messages`
+      with the bell opened one socket. A message from the other user updated both the
+      conversation list and the bell live, and navigating to `/matches` kept the same socket.
+      Tests: `tests/socket_hub.test.ts` (6).
 - [ ] **L4. Push failures aren't retried.** A temporary failure (timeout, 5xx, 429) should be
       retried through the outbox.
 - [ ] **L5. Worker jobs inherit the API role's 15-second statement timeout.** Maintenance and
