@@ -81,3 +81,8 @@ postgres_data/
 redis_data/
 uploads/
 apps/api/uploads/
+
+# Playwright output
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/

@@ -594,8 +594,44 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 
 ## P2 — Operations and hardening
 
-- [ ] **14. Browser E2E tests.** No Playwright. Add core journeys on mobile and desktop
-      viewports in CI.
+- [x] **14. Browser E2E tests.** *(Done.)* Playwright (`apps/web/e2e`, `playwright.config.ts`).
+      Every journey runs twice: `desktop` (1366×900) and `mobile` (Pixel 7). Both use Chromium.
+      - **Journeys:**
+        - A visitor finds a listing by search, opens it, and is sent to sign-in on "Apply".
+        - A wrong password is refused. Priya signs in, sees her space, signs out, and
+          `/notifications` asks her to sign in again.
+        - A non-admin gets "Access Denied" on `/admin`.
+        - A new seeker applies through the listing page. `owner_ravi` accepts from
+          `/owner?tab=applications`. The seeker sees it accepted in My Space and in
+          notifications.
+        - Live chat between two new members:
+          - the message reaches the reader's open notification centre over the socket, with no
+            reload
+          - the bell shows 1 unread
+          - the notification doesn't contain the message
+          - clicking it opens the chat with the message
+        - The API is reachable from the test runner.
+      - **Data:** journeys that change data register fresh users, so runs (and both viewports in
+        parallel) never collide and the suite can rerun on the same database. The seeded
+        password is read from `database/seeds/seed.py` (or `E2E_SEED_PASSWORD`), not copied.
+      - **CI:** a new `e2e` job in `ci.yml` runs after the backend and frontend gates:
+        - PostGIS with pgvector, plus Redis
+        - migrate and seed
+        - the API with in-memory email and SMS
+        - a production build of the web app
+        - Playwright Chromium
+        On failure it uploads the report, traces, screenshots and both server logs.
+      - **Locally:** start the API and a production build (`next build && next start`), then run
+        `pnpm --filter @flatmate/web test:e2e`. Use `E2E_BASE_URL` / `E2E_API_URL` for other
+        ports. Against `next dev`, the first visit to each page compiles slowly enough to time
+        out redirects.
+      - **Checked:** 12/12 passing, twice in a row, against a local production build (about 45
+        seconds).
+      Not covered:
+      - The CI job hasn't run on GitHub yet. Its first run is the real check of the workflow.
+      - Only Chromium is tested. Safari/WebKit (iPhone) isn't run.
+      - No real push notification and no email delivery; those use in-memory providers.
+      - Visual regression and accessibility scans aren't part of the suite.
 - [ ] **15. Observability.** Sentry (web + api), structured logs shipped somewhere, uptime checks.
 - [ ] **16. Security pass.** CSP headers on the web app, rate limits on auth/chat/upload, file
       type sniffing and virus scan on uploads, account deletion/export (DPDP Act compliance).
