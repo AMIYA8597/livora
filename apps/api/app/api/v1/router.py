@@ -19,6 +19,7 @@ from app.modules.verification.router import router as verification_router
 from app.modules.moderation.router import router as moderation_router
 from app.modules.administration.router import router as administration_router
 from app.modules.storage.router import router as storage_router
+from app.modules.billing.router import router as billing_router
 
 api_router = APIRouter()
 
@@ -42,3 +43,4 @@ api_router.include_router(verification_router)
 api_router.include_router(moderation_router)
 api_router.include_router(administration_router)
 api_router.include_router(storage_router)
+api_router.include_router(billing_router)

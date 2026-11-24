@@ -24,6 +24,7 @@ from app.modules.moderation.models import UserBlock
 from app.ml.embeddings import cosine, get_embedder
 from app.ml.models import ContentEmbedding
 from app.ml.ranker import active_ranker, pair_features
+from app.modules.billing.entitlements import ensure_can_like, get_entitlements
 
 # Retrieval stage size: candidates fetched by SQL before exact re-ranking in Python.
 CANDIDATE_POOL_SIZE = 200
@@ -261,6 +262,10 @@ class MatchingService:
         existing_res = await self.db.execute(existing_q)
         interaction = existing_res.scalar_one_or_none()
 
+        # Free tier: a daily cap on new likes (re-liking someone already liked doesn't count).
+        if action in ("like", "super_like") and not (interaction and interaction.action in ("like", "super_like")):
+            await ensure_can_like(self.db, user_id)
+
         # Snapshot what the user saw when they decided: training data for the learned ranker.
         try:
             features = await self.pair_features(user_id, target_user_id)
@@ -336,6 +341,53 @@ class MatchingService:
             mutual_match_id=mutual_id,
             compatibility_score=comp_score,
         )
+
+    async def likes_received(self, user_id: UUID, limit: int = 50) -> Dict[str, object]:
+        """People who liked me and whom I haven't answered yet (not blocked either way).
+
+        Everyone sees how many; Seeker Pro sees who. Only people with public profiles are named:
+        "matched only" and private profiles stay hidden until there is a match.
+        """
+        answered = select(MatchInteraction.target_user_id).where(MatchInteraction.user_id == user_id)
+        blocked = select(UserBlock.blocked_user_id).where(UserBlock.user_id == user_id)
+        blockers = select(UserBlock.user_id).where(UserBlock.blocked_user_id == user_id)
+        base = (
+            select(MatchInteraction)
+            .join(User, User.id == MatchInteraction.user_id)
+            .where(
+                MatchInteraction.target_user_id == user_id,
+                MatchInteraction.action.in_(("like", "super_like")),
+                MatchInteraction.user_id.not_in(answered),
+                MatchInteraction.user_id.not_in(blocked),
+                MatchInteraction.user_id.not_in(blockers),
+                User.is_active.is_(True),
+            )
+        )
+        total = int(await self.db.scalar(select(func.count()).select_from(base.subquery())) or 0)
+        ent = await get_entitlements(self.db, user_id)
+        if not ent.who_liked_me or total == 0:
+            return {"count": total, "locked": not ent.who_liked_me, "people": [], "hidden": total,
+                    "upgrade_available": ent.billing_enabled and not ent.who_liked_me}
+
+        visibility = func.coalesce(UserPrivacySetting.profile_visibility, "public")
+        rows = (await self.db.execute(
+            base.add_columns(User.full_name, Profile.display_name, Profile.avatar_url, Profile.occupation)
+            .outerjoin(Profile, Profile.user_id == MatchInteraction.user_id)
+            .outerjoin(UserPrivacySetting, UserPrivacySetting.user_id == MatchInteraction.user_id)
+            .where(visibility == "public")
+            .order_by(MatchInteraction.created_at.desc())
+            .limit(limit)
+        )).all()
+        people = [
+            {
+                "user_id": it.user_id, "name": display or full_name or "Flatmate member",
+                "avatar_url": avatar, "occupation": occupation,
+                "super_like": it.action == "super_like", "liked_at": it.created_at,
+            }
+            for it, full_name, display, avatar, occupation in rows
+        ]
+        return {"count": total, "locked": False, "people": people, "hidden": max(0, total - len(people)),
+                "upgrade_available": False}
 
     async def get_mutual_matches(self, user_id: UUID) -> List[MutualMatchItemResponse]:
         query = select(MutualMatch).where(

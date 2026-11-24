@@ -110,3 +110,25 @@ class ServiceUnavailableException(AppException):
             detail=detail,
             error_code=error_code,
         )
+
+
+class PaymentRequiredException(AppException):
+    """A paid plan unlocks this. `feature` and `plan` tell the client what to offer."""
+
+    def __init__(self, detail: str, feature: str, plan: str, error_code: str = "UPGRADE_REQUIRED"):
+        super().__init__(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            title="Upgrade Required",
+            detail=detail,
+            error_code=error_code,
+        )
+        self.feature = feature
+        self.plan = plan
+
+    def to_problem_response(self, request: Request) -> JSONResponse:
+        response = super().to_problem_response(request)
+        import json
+
+        body = json.loads(response.body)
+        body.update({"feature": self.feature, "plan": self.plan})
+        return JSONResponse(status_code=self.status_code, content=body, media_type="application/problem+json")

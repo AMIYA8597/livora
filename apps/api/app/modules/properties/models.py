@@ -52,6 +52,8 @@ class Property(Base):
     listing_status: Mapped[str] = mapped_column(String(32), default="published", nullable=False) # draft, pending_verification, published, paused, archived
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     images: Mapped[List[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
+    # Owner Pro: listed first and badged until this time (the end of the owner's paid period).
+    featured_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

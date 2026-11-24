@@ -25,9 +25,14 @@ JOBS = {
         "DELETE FROM outbox_events WHERE status = 'failed' "
         "AND processed_at < now() - make_interval(days => :failed_days)"
     ),
+    # Razorpay subscriptions are kept current by webhooks (an "active" one whose period ended
+    # is usually just awaiting its renewal event); only rows no provider manages, and finished
+    # ones, are closed here. Access never depends on this: it is decided by expires_at.
     "expire_subscriptions": (
-        "UPDATE subscriptions SET status = 'expired' "
-        "WHERE status = 'active' AND expires_at < now()"
+        "UPDATE subscriptions SET status = 'expired', updated_at = now() "
+        "WHERE expires_at < now() AND ("
+        "(provider_subscription_id IS NULL AND status IN ('active', 'cancelled')) "
+        "OR status IN ('cancelled', 'completed', 'halted'))"
     ),
     "expire_unconfirmed_appointments": (
         "UPDATE appointments SET status = 'cancelled', "

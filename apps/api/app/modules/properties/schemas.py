@@ -98,6 +98,7 @@ class PropertyResponse(PropertyBase):
     id: uuid.UUID
     owner_id: uuid.UUID
     listing_status: str
+    is_featured: bool = False
     is_verified: bool
     is_active: bool
     rooms: List[RoomResponse] = []

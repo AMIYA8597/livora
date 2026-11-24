@@ -54,3 +54,12 @@ async def get_my_mutual_matches(
 ):
     service = MatchingService(db)
     return await service.get_mutual_matches(current_user.id)
+
+
+@router.get("/likes-received")
+async def get_likes_received(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """How many people liked you and you haven't answered; who they are with Seeker Pro."""
+    return await MatchingService(db).likes_received(current_user.id)

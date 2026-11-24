@@ -139,6 +139,18 @@ class Settings(BaseSettings):
     # The learned ranker needs this many labelled like/pass interactions before training.
     RANKER_MIN_TRAINING_ROWS: int = 200
 
+    # Payments (Razorpay, INR, auto-renewing subscriptions). Billing is on only when all three
+    # are set; until then free-tier limits are not enforced and paid features are hidden.
+    # Use rzp_test_ keys outside production. The webhook secret is the one entered for the
+    # webhook in the Razorpay dashboard (events: subscription.*), not the API key secret.
+    RAZORPAY_KEY_ID: Optional[str] = None
+    RAZORPAY_KEY_SECRET: Optional[str] = None
+    RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
+    RAZORPAY_TIMEOUT_SECONDS: float = 15.0
+    # Free tier (applies only while billing is on).
+    FREE_DAILY_LIKES: int = 25
+    FREE_ACTIVE_LISTINGS: int = 2
+
     # Celery
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")

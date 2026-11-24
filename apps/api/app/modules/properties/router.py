@@ -17,6 +17,7 @@ from app.modules.properties.schemas import (
     BedResponse,
 )
 from app.modules.properties.service import PropertyService
+from app.modules.billing.service import feature_listing
 
 router = APIRouter(prefix="/properties", tags=["Properties"])
 
@@ -108,6 +109,27 @@ async def update_property_listing_status(
     is_admin = current_user.role in ["admin", "super_admin"]
     service = PropertyService(db)
     return await service.update_listing_status(property_id, current_user.id, data.listing_status, is_admin=is_admin)
+
+@router.post("/{property_id}/feature", response_model=PropertyResponse)
+async def feature_property(
+    property_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner Pro: show this listing first in search until the owner's paid period ends."""
+    await feature_listing(db, current_user.id, property_id, on=True)
+    return await PropertyService(db).get_by_id(property_id, viewer_id=current_user.id)
+
+
+@router.delete("/{property_id}/feature", response_model=PropertyResponse)
+async def unfeature_property(
+    property_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await feature_listing(db, current_user.id, property_id, on=False)
+    return await PropertyService(db).get_by_id(property_id, viewer_id=current_user.id)
+
 
 @router.post("/beds/{bed_id}/assign", response_model=BedResponse)
 async def assign_bed(

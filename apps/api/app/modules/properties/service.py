@@ -3,7 +3,7 @@ from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.shape import to_shape
@@ -14,6 +14,7 @@ from app.ml.indexing import queue_embedding_refresh
 from app.ml.moderation import prescreen
 from app.ml.moderation_jobs import ai_moderation_on, queue_property_moderation
 from app.ml.search import clean_query, rank_properties
+from app.modules.billing.entitlements import ensure_can_publish
 
 VALID_LISTING_STATUSES = {"draft", "pending_verification", "published", "paused", "archived"}
 # Changes to these refresh the listing's search embedding / trigger a safety review.
@@ -111,6 +112,7 @@ class PropertyService:
             "amenities": amenity_keys,
             "rooms": rooms,
             "listing_status": prop.listing_status,
+            "is_featured": bool(prop.featured_until and prop.featured_until > datetime.now(timezone.utc)),
             "is_verified": prop.is_verified,
             "is_active": prop.is_active,
             "created_at": prop.created_at or datetime.now(timezone.utc),
@@ -184,7 +186,9 @@ class PropertyService:
             by_id = {p.id: p for p in rows}
             return [self._format_property_response(by_id[i]) for i in page_ids if i in by_id]
 
-        query = query.order_by(Property.created_at.desc()).limit(limit).offset(offset)
+        # Featured (Owner Pro) listings first, then newest.
+        featured = func.coalesce(Property.featured_until > func.now(), False)
+        query = query.order_by(featured.desc(), Property.created_at.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
         props = result.scalars().all()
         return [self._format_property_response(p) for p in props]
@@ -193,6 +197,7 @@ class PropertyService:
         # Invariant: current occupants cannot exceed max capacity
         if data.current_occupants > data.max_capacity:
             raise BadRequestException("Current occupants cannot exceed maximum capacity")
+        await ensure_can_publish(self.db, owner_id)  # new listings are published at once
 
         wkt_point = f"POINT({data.longitude} {data.latitude})"
         prop = Property(
@@ -295,6 +300,7 @@ class PropertyService:
             status_val = update_dict["listing_status"]
             if status_val not in VALID_LISTING_STATUSES:
                 raise BadRequestException(f"Invalid listing status: {status_val}")
+            await self._check_status_change(prop, status_val, is_admin)
 
         for key, value in update_dict.items():
             if key not in ("amenities",):
@@ -310,6 +316,13 @@ class PropertyService:
             raise NotFoundException("Property not found")
         return res
 
+    async def _check_status_change(self, prop: Property, status_val: str, is_admin: bool) -> None:
+        """Publishing counts against the owner's plan; leaving "published" frees a featured slot."""
+        if status_val == "published" and prop.listing_status != "published" and not is_admin:
+            await ensure_can_publish(self.db, prop.owner_id, prop.id)
+        if status_val != "published":
+            prop.featured_until = None
+
     async def update_listing_status(self, property_id: UUID, user_id: UUID, status_val: str, is_admin: bool = False) -> dict:
         if status_val not in VALID_LISTING_STATUSES:
             raise BadRequestException(f"Invalid listing status: {status_val}")
@@ -323,6 +336,7 @@ class PropertyService:
         if prop.owner_id != user_id and not is_admin:
             raise ForbiddenException("Access denied")
 
+        await self._check_status_change(prop, status_val, is_admin)
         prop.listing_status = status_val
         await self.db.commit()
         res = await self.get_by_id(prop.id)
