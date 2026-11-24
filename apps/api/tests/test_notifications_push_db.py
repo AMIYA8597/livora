@@ -319,3 +319,149 @@ async def test_old_notifications_are_purged(people):
     async with AsyncSessionLocal() as s:
         await s.execute(update(Notification).where(Notification.user_id == people.a).values(is_read=True))
         await s.commit()
+
+
+# --------------------------------------------------------------------------- temporary failures
+
+def test_push_errors_are_classified(monkeypatch):
+    import pywebpush
+    import requests
+
+    def failing_with(exc):
+        def webpush(**_kwargs):
+            raise exc
+        return webpush
+
+    def http(status, headers=None):
+        return pywebpush.WebPushException("x", response=SimpleNamespace(status_code=status, headers=headers or {}))
+
+    info = _sub()
+    for exc, expected in (
+        (http(503, {"Retry-After": "120"}), push_module.PushRetryable),
+        (http(429), push_module.PushRetryable),
+        (requests.Timeout(), push_module.PushRetryable),
+        (requests.ConnectionError(), push_module.PushRetryable),
+        (http(410), push_module.PushGone),
+        (http(404), push_module.PushGone),
+        (http(400), pywebpush.WebPushException),  # permanent: counted, not retried
+        (http(403), pywebpush.WebPushException),
+    ):
+        monkeypatch.setattr(pywebpush, "webpush", failing_with(exc))
+        with pytest.raises(expected) as raised:
+            push_module._send_sync(info, "{}", 60, "normal")
+        if isinstance(raised.value, push_module.PushRetryable) and getattr(exc, "response", None) is not None:
+            assert raised.value.retry_after == (120 if exc.response.status_code == 503 else None)
+
+    assert push_module.retry_delay(1, None) == 30
+    assert push_module.retry_delay(2, None) == 60
+    assert push_module.retry_delay(1, 120) == 120  # the push service's Retry-After wins
+    assert push_module.retry_delay(5, 99_999) == push_module.MAX_RETRY_AFTER_SECONDS
+
+
+@pytest.fixture
+def flaky(monkeypatch):
+    """Push configured; endpoints in `down` fail temporarily, everything else is delivered."""
+    public, private = generate()
+    monkeypatch.setattr(settings, "VAPID_PUBLIC_KEY", public)
+    monkeypatch.setattr(settings, "VAPID_PRIVATE_KEY", private)
+    state = SimpleNamespace(sent=[], down=set(), tries={})
+
+    def sender(info, data, ttl, urgency):
+        state.tries[info["endpoint"]] = state.tries.get(info["endpoint"], 0) + 1
+        if info["endpoint"] in state.down:
+            raise push_module.PushRetryable()
+        state.sent.append(info["endpoint"])
+
+    push_module.set_sender(sender)
+    yield state
+    push_module.set_sender(None)
+
+
+async def _two_browsers(user_id):
+    phone, laptop = _sub(), _sub("updates.push.services.mozilla.com")
+    async with AsyncSessionLocal() as s:
+        for sub in (phone, laptop):
+            s.add(PushSubscription(user_id=user_id, endpoint=sub["endpoint"], **sub["keys"]))
+        await s.commit()
+    return phone["endpoint"], laptop["endpoint"]
+
+
+async def _pending_retries(user_id):
+    async with AsyncSessionLocal() as s:
+        return (await s.execute(select(OutboxEvent).where(
+            OutboxEvent.event_type == push_module.PUSH_EVENT,
+            OutboxEvent.status == "pending",
+            OutboxEvent.payload["user_id"].astext == str(user_id),
+        ))).scalars().all()
+
+
+async def _make_retries_due(user_id):
+    async with AsyncSessionLocal() as s:
+        await s.execute(update(OutboxEvent).where(
+            OutboxEvent.event_type == push_module.PUSH_EVENT,
+            OutboxEvent.status == "pending",
+            OutboxEvent.payload["user_id"].astext == str(user_id),
+        ).values(next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
+        await s.commit()
+
+
+async def test_a_temporary_failure_is_retried_for_that_browser_only(people, flaky):
+    phone, laptop = await _two_browsers(people.a)
+    flaky.down.add(phone)
+    async with AsyncSessionLocal() as s:
+        await NotificationService(s).create_notification(people.a, "Viewing confirmed", "Saturday 11am.",
+                                                         "appointment_status_change", reference_id=uuid4())
+    started = datetime.now(timezone.utc)
+    await dispatch_pending(AsyncSessionLocal)
+    assert flaky.sent == [laptop]
+
+    [retry] = await _pending_retries(people.a)
+    assert retry.payload["attempt"] == 2 and retry.payload["title"] == "Viewing confirmed"
+    async with AsyncSessionLocal() as s:
+        phone_sub = (await s.execute(select(PushSubscription).where(PushSubscription.endpoint == phone))).scalar_one()
+    assert retry.payload["subscription_ids"] == [str(phone_sub.id)]
+    assert retry.next_attempt_at >= started + timedelta(seconds=push_module.RETRY_BASE_SECONDS - 1)
+    assert phone_sub.failure_count == 0  # a temporary failure isn't held against the browser
+
+    # Not due yet: nothing happens. Once due, only the phone gets it.
+    await dispatch_pending(AsyncSessionLocal)
+    assert flaky.sent == [laptop]
+    flaky.down.clear()
+    await _make_retries_due(people.a)
+    await dispatch_pending(AsyncSessionLocal)
+    assert flaky.sent == [laptop, phone]
+    assert await _pending_retries(people.a) == []
+
+
+async def test_retries_stop_after_the_limit_and_count_one_failure(people, flaky):
+    phone, laptop = await _two_browsers(people.a)
+    flaky.down.add(phone)
+    async with AsyncSessionLocal() as s:
+        await NotificationService(s).create_notification(people.a, "New application", "Open it.",
+                                                         "application_received", reference_id=uuid4())
+    for _ in range(push_module.MAX_PUSH_ATTEMPTS + 2):
+        await dispatch_pending(AsyncSessionLocal)
+        await _make_retries_due(people.a)
+    assert flaky.tries[phone] == push_module.MAX_PUSH_ATTEMPTS
+    assert flaky.tries[laptop] == 1
+    assert await _pending_retries(people.a) == []
+    async with AsyncSessionLocal() as s:
+        phone_sub = (await s.execute(select(PushSubscription).where(PushSubscription.endpoint == phone))).scalar_one()
+    assert phone_sub.failure_count == 1
+
+
+async def test_no_retry_once_the_notification_was_read(people, flaky):
+    phone, _ = await _two_browsers(people.a)
+    flaky.down.add(phone)
+    async with AsyncSessionLocal() as s:
+        notif = await NotificationService(s).create_notification(people.a, "Visit reminder", "Tomorrow.",
+                                                                 "viewing_reminder", reference_id=uuid4())
+    await dispatch_pending(AsyncSessionLocal)
+    async with AsyncSessionLocal() as s:
+        await s.execute(update(Notification).where(Notification.id == notif.id).values(is_read=True))
+        await s.commit()
+    flaky.down.clear()
+    await _make_retries_due(people.a)
+    await dispatch_pending(AsyncSessionLocal)
+    assert phone not in flaky.sent
+    assert await _pending_retries(people.a) == []

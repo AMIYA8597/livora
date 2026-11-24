@@ -40,8 +40,15 @@ Gathered from the open items below and every item's "Not covered" notes.
       with the bell opened one socket. A message from the other user updated both the
       conversation list and the bell live, and navigating to `/matches` kept the same socket.
       Tests: `tests/socket_hub.test.ts` (6).
-- [ ] **L4. Push failures aren't retried.** A temporary failure (timeout, 5xx, 429) should be
+- [x] **L4. Push failures aren't retried.** A temporary failure (timeout, 5xx, 429) should be
       retried through the outbox.
+      *Done:* `notifications/push.py` sorts failures into three kinds: gone (404/410, the
+      subscription is deleted), temporary (timeout, network error, 429, 5xx) and permanent (other
+      4xx, counted as before). For temporary failures it queues a new `push.send` outbox event for
+      just those browsers, so browsers that already got it don't get a duplicate. The delay is the
+      service's `Retry-After`, else 30s doubling, capped at 10 minutes. It stops after 4 attempts,
+      after 30 minutes, or once the notification is read. Giving up counts one failure against the
+      browser. Tests: four in `tests/test_notifications_push_db.py`.
 - [ ] **L5. Worker jobs inherit the API role's 15-second statement timeout.** Maintenance and
       ranker training need longer.
 - [ ] **L6. `POST /search/properties` still uses plain text matching.** Use the full-text search
