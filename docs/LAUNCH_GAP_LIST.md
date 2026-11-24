@@ -818,8 +818,71 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
         project.
       - The wording in the existing "Your data rights (DPDP Act 2023)" card is unchanged and
         should be checked by whoever owns the legal text.
-- [ ] **17. SEO and performance.** Metadata/OG for property pages, image optimisation,
+- [x] **17. SEO and performance.** Metadata/OG for property pages, image optimisation,
       Lighthouse of at least 90 on mobile.
+      Done:
+      - **Listing pages are rendered on the server.**
+        - `/properties/[id]` fetches the listing (cached 5 minutes) and sends a title like
+          "Sunlit 3BHK Flat in HSR Layout | Flatmate", a description with the rent and area, a
+          canonical link, Open Graph and Twitter cards using the first photo, and schema.org
+          JSON-LD (Accommodation with a monthly Offer).
+        - A missing listing is `noindex`.
+        - `/properties` sends the first page of results in the HTML, so filtering starts from
+          what is already there.
+      - **Site-wide:**
+        - Every public section (listings, flatmates, PGs, tenants, groups, pricing, help) has its
+          own title, description and canonical link.
+        - Signed-in areas (dashboard, messages, profile, owner, admin, sign-in pages and so on)
+          are `noindex`.
+        - A default 1200×630 link-preview image.
+      - **`robots.txt` and `sitemap.xml` are generated.**
+        - The sitemap holds the public pages plus every published listing (refreshed hourly).
+        - robots.txt blocks everything unless the web app was built with
+          `ENVIRONMENT=production`; then it blocks only the private areas and points to the
+          sitemap. Staging and local builds stay out of search results.
+        - The site origin comes from `NEXT_PUBLIC_APP_URL`.
+      - **Images** go through the Next.js optimizer (AVIF/WebP, resized per screen):
+        - Unsplash, Supabase storage and the API's `/uploads` are allowed; any other host is
+          shown as-is rather than broken.
+        - The first card and the gallery's main photo load first; thumbnails load lazily.
+      - **Layout shift:**
+        - Removed the root loading screen, which flashed before every page and moved the content
+          (CLS 0.49 on `/flatmates`).
+        - `/groups` shows 12 groups at a time with "Show more" (rendering all 50+ blocked the main
+          thread for about 0.9s on a phone).
+      - **Measured** on the production build with Playwright, using Lighthouse's mobile settings
+        (Pixel 7, 4× CPU slowdown, 1.6 Mbps / 150 ms):
+
+        | Page | LCP before | LCP after | TBT before | TBT after | CLS after |
+        |---|---|---|---|---|---|
+        | `/` | 1.56s | 1.15–1.33s | 440ms | 230–515ms | 0 |
+        | `/properties` | 2.87s | 1.34–1.41s | 414ms | 180–295ms | 0 |
+        | listing | 1.46s | 1.03s | 377ms | 193ms | 0 |
+        | `/flatmates` | — | 1.8–2.0s | — | 170–260ms | 0.018 (was 0.49) |
+        | `/groups` | — | 0.8–0.9s | 850–920ms | 330–630ms | 0 |
+
+        TBT varied run to run with the machine's load. All pages are within Lighthouse's "good"
+        range for LCP (under 2.5s) and CLS (under 0.1).
+      - **Tests:**
+        - `apps/web/tests/seo.test.ts` covers metadata, JSON-LD escaping, robots and site rules,
+          image hosts and listing query parsing.
+        - Web unit tests 105/105; e2e 12/12.
+      Not covered:
+      - **Lighthouse itself wasn't run.** Downloading it was blocked in this environment.
+        - Run `npx lighthouse <url> --preset=perf --form-factor=mobile` (or PageSpeed Insights)
+          against staging to get the actual score.
+        - TBT is the risk: 200–500ms here, where Lighthouse wants under 200ms for full marks.
+          Most of it is the shared JavaScript every page loads (React, the auth and Supabase
+          clients, Sentry).
+      - **Production settings:**
+        - Set `NEXT_PUBLIC_APP_URL` to the real domain, and `ENVIRONMENT=production` when
+          building the production web app. Without them, canonical links point to localhost and
+          the site isn't indexed.
+        - `API_INTERNAL_URL` is optional (a private API address for server rendering).
+      - **Freshness:** a changed or unpublished listing can take up to 5 minutes to update in
+        search previews and the page's first HTML.
+      - **Unchanged pages:** `/flatmates`, `/pg` and `/groups` still load their data in the
+        browser. They show sign-in or personal results, so there's little to index.
 - [ ] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a
       worker, emails still go out immediately (the in-request kick), but retries happen only when a
       later request triggers a dispatch, and maintenance never runs. Deploy one worker and exactly
