@@ -126,6 +126,8 @@ async def get_property(
     prop = await service.get_by_id(property_id, viewer_id=viewer_id, is_admin=is_admin)
     if not prop:
         raise NotFoundException("Property not found")
+    from app.modules.messaging.response_time import owner_response
+    prop["owner_response"] = await owner_response(db, prop["owner_id"])
     return prop
 
 @router.put("/{property_id}", response_model=PropertyResponse)

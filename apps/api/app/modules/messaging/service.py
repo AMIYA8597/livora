@@ -19,7 +19,10 @@ from app.modules.messaging.schemas import (
     SendMessageRequest, CreateConversationRequest, EditMessageRequest,
     ConversationPreferenceRequest, AddParticipantRequest
 )
+from app.modules.properties.models import Property
+from app.modules.users.models import User
 from app.modules.messaging.websocket import manager
+from app.modules.messaging.contact_guard import hide_contacts, is_locked, locked_conversations
 from app.modules.moderation.models import UserBlock
 from app.modules.notifications.events import first_name
 from app.modules.notifications.service import NotificationService
@@ -31,6 +34,8 @@ from app.ml.moderation_jobs import ai_moderation_on, queue_message_moderation
 from app.workers.outbox import schedule_dispatch
 
 CHAT_SEND_LIMIT = (30, 60)  # messages per user per minute
+# New "Ask the owner" chats per seeker per day: plenty for real searching, too few to spam owners.
+LISTING_CHATS_PER_DAY = (20, 86400)
 
 logger = logging.getLogger("flatmate.messaging")
 
@@ -51,21 +56,35 @@ def attachment_dict(a: Attachment) -> Dict[str, Any]:
     }
 
 
-def message_dict(m: Message, attachments: Optional[List[Attachment]] = None, include_reply: bool = False) -> Dict[str, Any]:
-    """One message as the API returns it. Deleted messages never expose their text."""
+def _shown_text(content: str, is_deleted: bool, hide_contact: bool) -> tuple:
+    if is_deleted:
+        return DELETED_TEXT, False
+    return hide_contacts(content) if hide_contact else (content, False)
+
+
+def message_dict(
+    m: Message,
+    attachments: Optional[List[Attachment]] = None,
+    include_reply: bool = False,
+    hide_contact: bool = False,
+) -> Dict[str, Any]:
+    """One message as the API returns it. Deleted messages never expose their text.
+    `hide_contact`: a listing chat before a confirmed visit (see contact_guard.py)."""
     reply = getattr(m, "reply_to", None) if include_reply else None
+    content, contact_hidden = _shown_text(m.content, m.is_deleted, hide_contact)
     return {
         "id": m.id,
         "conversation_id": m.conversation_id,
         "sender_id": m.sender_id,
-        "content": DELETED_TEXT if m.is_deleted else m.content,
+        "content": content,
+        "contact_hidden": contact_hidden,
         "message_type": m.message_type,
         "idempotency_key": m.idempotency_key,
         "reply_to_message_id": m.reply_to_message_id,
         "reply_to": {
             "id": reply.id,
             "sender_id": reply.sender_id,
-            "content": DELETED_TEXT if reply.is_deleted else reply.content,
+            "content": _shown_text(reply.content, reply.is_deleted, hide_contact)[0],
         } if reply else None,
         "is_edited": m.is_edited,
         "edited_at": m.edited_at,
@@ -177,6 +196,7 @@ class MessagingService:
             .order_by(Message.conversation_id, Message.is_deleted.asc(), Message.sent_at.desc(), Message.id.desc())
         )
         last_by_conv = {m.conversation_id: m for m in (await self.db.execute(last_q)).scalars().all()}
+        locked = await locked_conversations(self.db, conv_ids)
 
         # Unread = messages from others, not deleted, sent after the user's read cursor.
         cursor = (
@@ -203,11 +223,12 @@ class MessagingService:
         for c in convs:
             p_details = [_participant_dict(p) for p in c.participants if p.is_active]
             last_msg = last_by_conv.get(c.id)
+            last = message_dict(last_msg, last_msg.attachments, hide_contact=c.id in locked) if last_msg else None
             pref = next((p for p in c.preferences if p.user_id == user_id), None)
 
             if sq:
                 matches_title = c.title and sq in c.title.lower()
-                matches_msg = last_msg and not last_msg.is_deleted and sq in last_msg.content.lower()
+                matches_msg = last is not None and not last["is_deleted"] and sq in last["content"].lower()
                 matches_name = any(
                     d["user"] and sq in (d["user"]["full_name"] or "").lower()
                     for d in p_details if d["user_id"] != user_id
@@ -227,7 +248,8 @@ class MessagingService:
                 "context_metadata": c.context_metadata or {},
                 "participants": [d["user_id"] for d in p_details],
                 "participant_details": p_details,
-                "last_message": message_dict(last_msg, last_msg.attachments) if last_msg else None,
+                "last_message": last,
+                "contacts_locked": c.id in locked,
                 "unread_count": int(unread_by_conv.get(c.id, 0)),
                 "preferences": {
                     "conversation_id": c.id,
@@ -289,6 +311,7 @@ class MessagingService:
             "participants": [p["user_id"] for p in p_details],
             "participant_details": p_details,
             "read_cursors": read_cursors,
+            "contacts_locked": conv.type == "property_inquiry" and await is_locked(self.db, conv.id),
             "preferences": {
                 "conversation_id": conv.id,
                 "is_muted": pref.is_muted if pref else False,
@@ -299,12 +322,77 @@ class MessagingService:
             "last_message_at": conv.last_message_at,
         }
 
+    async def _listing_for_chat(self, property_id: Optional[UUID]) -> Property:
+        """A live listing whose owner's account is open, or 404."""
+        prop = None
+        if property_id is not None:
+            prop = (await self.db.execute(
+                select(Property)
+                .join(User, User.id == Property.owner_id)
+                .where(
+                    Property.id == property_id,
+                    Property.is_active.is_(True),
+                    User.is_active.is_(True),
+                    User.deleted_at.is_(None),
+                )
+            )).scalar_one_or_none()
+        if prop is None:
+            raise NotFoundException("This listing isn't available any more.")
+        return prop
+
+    async def _find_listing_chat(self, property_id: UUID, user_a: UUID, user_b: UUID) -> Optional[Conversation]:
+        return (await self.db.execute(
+            select(Conversation)
+            .join(ConversationParticipant)
+            .where(
+                Conversation.type == "property_inquiry",
+                Conversation.property_id == property_id,
+                Conversation.status == "active",
+                ConversationParticipant.user_id.in_([user_a, user_b]),
+            )
+            .group_by(Conversation.id)
+            .having(func.count(ConversationParticipant.user_id) == 2)
+        )).scalars().first()
+
+    async def start_listing_chat(
+        self, seeker_id: UUID, property_id: UUID, content: str = "",
+    ) -> tuple:
+        """"Ask the owner": the chat between this person and the listing's owner, about that
+        listing (created the first time), plus the first message when there is one.
+        Returns (conversation, created, message or None)."""
+        prop = await self._listing_for_chat(property_id)
+        if prop.owner_id == seeker_id:
+            raise BadRequestException("This is your own listing.")
+        conv = await self._find_listing_chat(prop.id, seeker_id, prop.owner_id)
+        created = conv is None
+        if created:
+            await rate_limit.hit(
+                f"listing_chat:user:{seeker_id}", *LISTING_CHATS_PER_DAY,
+                message="You've contacted a lot of owners today. Try again tomorrow, or reply in your open chats.",
+            )
+            conv = await self.create_conversation(seeker_id, CreateConversationRequest(
+                participant_user_ids=[prop.owner_id],
+                type="property_inquiry",
+                property_id=prop.id,
+                title=prop.title,
+            ))
+        msg = None
+        if content:
+            msg = await self.send_message(seeker_id, SendMessageRequest(conversation_id=conv.id, content=content))
+        return conv, created, msg
+
     async def create_conversation(self, creator_id: UUID, req: CreateConversationRequest) -> Conversation:
         """
         Create a new conversation or return existing matching conversation to enforce uniqueness.
         Enforces blocking checks and business context rules.
         """
         target_uids = list(set([creator_id] + req.participant_user_ids))
+
+        # A listing chat is between the listing's owner and one other person, about a live listing.
+        if req.type == "property_inquiry":
+            prop = await self._listing_for_chat(req.property_id)
+            if len(target_uids) != 2 or prop.owner_id not in target_uids:
+                raise BadRequestException("A listing chat is between the listing's owner and one other person.")
 
         # 1. Moderation & Safety check: Cannot start conversation if blocked
         for other_id in req.participant_user_ids:
@@ -597,7 +685,8 @@ class MessagingService:
 
         # 8. Real-time broadcast to participants, including any attachments.
         attachments = await self.attachments_for(msg.id)
-        event_payload = jsonable({**message_dict(msg, attachments), "status": "sent"})
+        hide = conv.type == "property_inquiry" and await is_locked(self.db, conv.id)
+        event_payload = jsonable({**message_dict(msg, attachments, hide_contact=hide), "status": "sent"})
         await manager.broadcast_to_users(
             event_type="message.created",
             data=event_payload,
@@ -671,13 +760,16 @@ class MessagingService:
             ConversationParticipant.is_active.is_(True)
         )
         recipients = list((await self.db.execute(parts_q)).scalars().all())
+        shown, contact_hidden = _shown_text(
+            msg.content, False, await is_locked(self.db, msg.conversation_id))
 
         await manager.broadcast_to_users(
             event_type="message.updated",
             data={
                 "id": str(msg.id),
                 "conversation_id": str(msg.conversation_id),
-                "content": msg.content,
+                "content": shown,
+                "contact_hidden": contact_hidden,
                 "is_edited": True,
                 "edited_at": msg.edited_at.isoformat(),
                 "safety_warning": (msg.metadata_ or {}).get("safety_warning"),

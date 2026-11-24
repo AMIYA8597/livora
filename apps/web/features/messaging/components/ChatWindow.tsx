@@ -27,6 +27,10 @@ export interface MessageItem {
   attachments?: AttachmentDTO[];
   /** Shown under messages from others that moderation flagged (scam patterns, abuse). */
   safetyWarning?: string | null;
+  /** A phone number or email in it is hidden until the owner confirms a visit. */
+  contactHidden?: boolean;
+  /** Written by the app (e.g. "Visit confirmed"), shown as a notice, not a bubble. */
+  isSystem?: boolean;
 }
 
 export interface ChatWindowProps {
@@ -34,6 +38,8 @@ export interface ChatWindowProps {
   recipientName: string;
   recipientSubtitle?: string;
   isRecipientVerified?: boolean;
+  /** A listing chat before a confirmed visit: explain why numbers and emails are hidden. */
+  contactsLocked?: boolean;
   isGroup?: boolean;
   participantCount?: number;
   messages: MessageItem[];
@@ -59,6 +65,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   recipientName,
   recipientSubtitle = "Direct Message",
   isRecipientVerified = false,
+  contactsLocked = false,
   isGroup = false,
   participantCount = 2,
   messages,
@@ -235,6 +242,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       </div>
 
+      {contactsLocked && (
+        <div role="note" className="bg-pale-green/40 border-b border-brand-200 px-4 py-2 flex items-start gap-2 text-xs text-forest">
+          <ShieldCheck className="w-4 h-4 shrink-0 mt-px" aria-hidden="true" />
+          <span>Phone numbers and emails stay hidden in this chat until the owner confirms a visit. Ask anything here; never pay before you&apos;ve seen the place.</span>
+        </div>
+      )}
+
       {/* Dynamic Safety Warning Banner */}
       {warning && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between text-xs text-amber-800">
@@ -252,6 +266,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/30">
         {messages.map((msg) => {
           const isDeleted = msg.isDeleted;
+          if (msg.isSystem) {
+            return (
+              <div key={msg.id} role="note" className="flex justify-center">
+                <span className="inline-flex items-center gap-1.5 max-w-[85%] text-center rounded-full bg-pale-green/50 border border-brand-200 px-3 py-1.5 text-xs font-medium text-forest">
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  {msg.content}
+                </span>
+              </div>
+            );
+          }
           return (
             <div
               key={msg.id}
@@ -281,7 +305,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               {/* Main Message Bubble */}
               <div
                 onClick={() => !isDeleted && setActionsFor((cur) => (cur === msg.id ? null : msg.id))}
-                className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-2xs relative break-words ${
+                className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-2xs relative break-words whitespace-pre-line ${
                   msg.isSelf
                     ? "bg-indigo-600 text-white rounded-tr-none"
                     : "bg-white text-slate-900 border border-slate-200/80 rounded-tl-none"
@@ -322,6 +346,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   </div>
                 )}
               </div>
+
+              {msg.contactHidden && !isDeleted && (
+                <span className="max-w-[75%] mt-1 px-1 text-[11px] text-slate-500">
+                  Contact details hidden until the owner confirms a visit.
+                </span>
+              )}
 
               {msg.safetyWarning && (
                 <div

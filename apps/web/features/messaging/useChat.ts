@@ -185,12 +185,17 @@ export function useChat(
       if (msg.conversation_id === openId && msg.sender_id !== myId && isVisible()) {
         socketRef.current?.markRead(msg.conversation_id, msg.id);
       }
+      // A system note (e.g. "Visit confirmed") can change what the chat shows: reload it, so
+      // contact details hidden until now appear in the earlier messages too.
+      if (msg.message_type === "system" && msg.conversation_id === openId) setSyncNonce((n) => n + 1);
     },
     onMessageUpdated: (data) => {
       patchActive(data.conversation_id, (s) => ({
         ...s,
         messages: s.messages.map((m) => (m.id === data.id
-          ? withSafetyWarning({ ...m, content: data.content, is_edited: true, edited_at: data.edited_at }, data.safety_warning)
+          ? withSafetyWarning({
+              ...m, content: data.content, is_edited: true, edited_at: data.edited_at, contact_hidden: data.contact_hidden,
+            }, data.safety_warning)
           : m)),
       }));
     },
@@ -303,10 +308,15 @@ export function useChat(
 
   const edit = useCallback(async (messageId: string, content: string) => {
     if (!activeConvId) return;
-    await apiClient(`/messaging/messages/${messageId}`, { method: "PATCH", body: JSON.stringify({ content }) });
+    // Show the server's copy: in a listing chat it may have hidden a phone number or email.
+    const saved = await apiClient<{ content: string; contact_hidden?: boolean }>(
+      `/messaging/messages/${messageId}`, { method: "PATCH", body: JSON.stringify({ content }) },
+    );
     patchActive(activeConvId, (s) => ({
       ...s,
-      messages: s.messages.map((m) => (m.id === messageId ? { ...m, content, is_edited: true } : m)),
+      messages: s.messages.map((m) => (m.id === messageId
+        ? { ...m, content: saved?.content ?? content, contact_hidden: saved?.contact_hidden, is_edited: true }
+        : m)),
     }));
   }, [activeConvId, patchActive]);
 

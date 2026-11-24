@@ -2,6 +2,7 @@
 Property Viewing Appointments Service
 Manages scheduling, conflict prevention, status state machine, and cancellations.
 """
+import logging
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
@@ -12,6 +13,8 @@ from app.modules.appointments.models import Appointment
 from app.modules.properties.models import Property
 from app.modules.appointments.schemas import AppointmentCreate, AppointmentStatusUpdate
 from app.core.exceptions import NotFoundException, ForbiddenException, ConflictException, BadRequestException
+
+logger = logging.getLogger("flatmate.appointments")
 
 ACTIVE_APPOINTMENT_STATUSES = {"pending", "confirmed"}
 VALID_APPOINTMENT_STATUSES = {"pending", "confirmed", "completed", "cancelled", "rescheduled"}
@@ -106,6 +109,11 @@ class AppointmentService:
 
         if data.status == "confirmed" and not is_host and not is_admin:
             raise ForbiddenException("Only the host can confirm a viewing appointment")
+        # Completed means it happened, which needs the host's confirmation first (a confirmed
+        # visit also unlocks contact details in the listing chat).
+        if data.status == "completed" and appt.status not in ("confirmed", "completed"):
+            raise BadRequestException("Only a confirmed visit can be marked as completed")
+        was_confirmed = appt.status in ("confirmed", "completed")
 
         appt.status = data.status
         if data.cancellation_reason:
@@ -114,6 +122,15 @@ class AppointmentService:
 
         await self.db.commit()
         await self.db.refresh(appt)
+        if appt.status in ("confirmed", "completed") and not was_confirmed:
+            # The visit is saved; unlocking the listing chat must not fail the confirmation.
+            from app.modules.messaging.contact_guard import share_contacts_after_visit
+            try:
+                await share_contacts_after_visit(self.db, appt.property_id, appt.host_id, appt.applicant_id)
+            except Exception:  # noqa: BLE001
+                logger.warning("Couldn't unlock the listing chat after a visit was confirmed", exc_info=True)
+                await self.db.rollback()
+            await self.db.refresh(appt)
         prop = await self.db.get(Property, appt.property_id)
         if prop:
             await notification_events.appointment_status_changed(self.db, appt, prop, user_id)

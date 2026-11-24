@@ -19,9 +19,11 @@ from app.modules.messaging.schemas import (
     ConversationResponse, SendMessageRequest, CreateConversationRequest,
     EditMessageRequest, MarkReadRequest,
     ConversationPreferenceRequest, ConversationPreferenceResponse,
-    AddParticipantRequest, AttachmentResponse
+    AddParticipantRequest, AttachmentResponse,
+    StartListingChatRequest, StartListingChatResponse,
 )
 from app.modules.messaging.service import MessagingService, message_dict
+from app.modules.messaging.contact_guard import hide_contacts, is_locked
 from app.modules.messaging.websocket import manager, shares_conversation
 from app.modules.storage.service import StorageService, read_upload
 from app.core.rate_limit import RateLimiter
@@ -54,6 +56,20 @@ async def create_conversation(
     conv = await service.create_conversation(current_user.id, req)
     return {"conversation_id": conv.id}
 
+@router.post(
+    "/listing-chats", response_model=StartListingChatResponse,
+    dependencies=[Depends(RateLimiter(max_requests=30, window_seconds=3600, key_prefix="listing_chat"))],
+)
+async def start_listing_chat(
+    req: StartListingChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """"Ask the owner" from a listing. Phone numbers and emails in this chat stay hidden until the
+    owner confirms a visit (contact_guard.py)."""
+    conv, created, msg = await MessagingService(db).start_listing_chat(current_user.id, req.property_id, req.content)
+    return {"conversation_id": conv.id, "created": created, "message_id": msg.id if msg else None}
+
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: UUID,
@@ -85,7 +101,8 @@ async def get_messages(
         except Exception:
             pass
 
-    return [message_dict(m, list(m.attachments), include_reply=True) for m in messages]
+    hide = await is_locked(db, conversation_id)
+    return [message_dict(m, list(m.attachments), include_reply=True, hide_contact=hide) for m in messages]
 
 
 @router.post("/messages", status_code=status.HTTP_201_CREATED)
@@ -96,7 +113,7 @@ async def send_message(
 ):
     service = MessagingService(db)
     msg = await service.send_message(current_user.id, req)
-    return message_dict(msg, await service.attachments_for(msg.id))
+    return message_dict(msg, await service.attachments_for(msg.id), hide_contact=await is_locked(db, msg.conversation_id))
 
 @router.post(
     "/conversations/{conversation_id}/suggestions",
@@ -121,10 +138,12 @@ async def edit_message(
 ):
     service = MessagingService(db)
     msg = await service.edit_message(message_id, current_user.id, req)
+    shown, contact_hidden = hide_contacts(msg.content) if await is_locked(db, msg.conversation_id) else (msg.content, False)
     return {
         "id": msg.id,
         "conversation_id": msg.conversation_id,
-        "content": msg.content,
+        "content": shown,
+        "contact_hidden": contact_hidden,
         "is_edited": msg.is_edited,
         "edited_at": msg.edited_at,
     }

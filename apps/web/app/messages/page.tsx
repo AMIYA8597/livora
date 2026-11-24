@@ -68,6 +68,8 @@ function MessagesView() {
         attachments: m.attachments,
         // Warnings protect the recipient; the sender isn't shown one about their own message.
         safetyWarning: m.sender_id !== myId && !m.is_deleted ? safetyWarning(m) : null,
+        contactHidden: m.contact_hidden,
+        isSystem: m.message_type === "system",
       })),
     [chat.active.messages, chat.active.cursors, details, myId],
   );
@@ -128,6 +130,7 @@ function MessagesView() {
                 recipientName={conversationTitle(details, myId)}
                 recipientSubtitle={subtitle}
                 isRecipientVerified={Boolean(other?.user?.is_verified)}
+                contactsLocked={Boolean(details.contacts_locked)}
                 isGroup={isGroup}
                 participantCount={details.participant_details?.length ?? 2}
                 messages={items}

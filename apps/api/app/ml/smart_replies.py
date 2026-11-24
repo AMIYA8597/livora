@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.ml.llm import LLMUnavailable, llm_configured, structured_call
 from app.ml.moderation import prescreen
+from app.modules.messaging.contact_guard import hide_contacts
 from app.modules.messaging.models import Conversation, ConversationParticipant, Message
 from app.modules.profiles.models import Profile
 from app.modules.properties.models import Property
@@ -121,11 +122,13 @@ async def suggest_for_conversation(db: AsyncSession, conversation_id: UUID, user
     if conv is None:
         raise NotFoundException("Conversation not found")
 
-    history = list(reversed((await db.execute(
+    # Contact details never go to the model: suggestions don't need them, and in a listing
+    # chat they may not have been revealed yet (app/modules/messaging/contact_guard.py).
+    history = [(sender, hide_contacts(content)[0]) for sender, content in reversed((await db.execute(
         select(Message.sender_id, Message.content)
         .where(Message.conversation_id == conversation_id, Message.is_deleted.is_(False))
         .order_by(Message.sent_at.desc()).limit(HISTORY)
-    )).all()))
+    )).all())]
     if not history:
         mode: Mode = "icebreaker"
     elif history[-1][0] == user_id:

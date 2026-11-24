@@ -11,7 +11,7 @@ export type { SocketStatus };
 
 export interface SocketCallbacks {
   onMessageCreated?: (msg: MessageDTO) => void;
-  onMessageUpdated?: (data: { id: string; conversation_id: string; content: string; is_edited: boolean; edited_at: string; safety_warning?: string | null }) => void;
+  onMessageUpdated?: (data: { id: string; conversation_id: string; content: string; is_edited: boolean; edited_at: string; safety_warning?: string | null; contact_hidden?: boolean }) => void;
   /** Moderation finished for a message: show, change or remove its safety warning. */
   onMessageModerated?: (data: { id: string; conversation_id: string; safety_warning?: string | null }) => void;
   onMessageDeleted?: (data: { id: string; conversation_id: string; is_deleted: boolean; deleted_at: string }) => void;

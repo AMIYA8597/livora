@@ -119,6 +119,9 @@ async def market():
         pids = list(ids.values())
         await s.execute(delete(ModerationReport).where(ModerationReport.target_id.in_(pids)))
         await s.execute(delete(OutboxEvent).where(OutboxEvent.payload["property_id"].astext.in_([str(p) for p in pids])))
+        # Listing creation also queues embedding refreshes, keyed by entity_id: left behind, they
+        # crowd other tests' events out of the outbox dispatcher's batch.
+        await s.execute(delete(OutboxEvent).where(OutboxEvent.payload["entity_id"].astext.in_([str(p) for p in pids])))
         await s.execute(delete(Property).where(Property.id.in_(pids)))
         await s.execute(delete(User).where(User.id.in_([seeker, verified_owner, other_owner, reporter])))
         await s.commit()

@@ -224,7 +224,9 @@ async def test_message_edit_authorization():
     # Author editing succeeds
     mock_parts_res = MagicMock()
     mock_parts_res.scalars.return_value.all.return_value = [author_id]
-    mock_db.execute.side_effect = [mock_msg_res, mock_parts_res]
+    mock_lock_res = MagicMock()  # contact_guard: not a locked listing chat
+    mock_lock_res.all.return_value = []
+    mock_db.execute.side_effect = [mock_msg_res, mock_parts_res, mock_lock_res]
 
     edited = await service.edit_message(msg_id, author_id, EditMessageRequest(content="Updated content"))
     assert edited.content == "Updated content"

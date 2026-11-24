@@ -263,6 +263,7 @@ async def owner_response_rates(db: AsyncSession, owner_ids: Sequence[UUID]) -> D
             FROM conversation_participants cp
             JOIN messages m ON m.conversation_id = cp.conversation_id
                            AND m.sender_id <> cp.user_id AND NOT m.is_deleted
+                           AND m.message_type <> 'system'
             WHERE cp.user_id = ANY(:owners) AND m.sent_at > now() - make_interval(days => :days)
             GROUP BY cp.user_id, m.conversation_id
         )
@@ -270,6 +271,7 @@ async def owner_response_rates(db: AsyncSession, owner_ids: Sequence[UUID]) -> D
                count(*) FILTER (WHERE EXISTS (
                    SELECT 1 FROM messages r
                    WHERE r.conversation_id = f.conversation_id AND r.sender_id = f.owner_id
+                     AND r.message_type <> 'system'
                      AND r.sent_at > f.asked_at AND r.sent_at <= f.asked_at + interval '24 hours'
                )) AS answered
         FROM firsts f GROUP BY f.owner_id

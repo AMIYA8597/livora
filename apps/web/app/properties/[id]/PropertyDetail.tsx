@@ -6,7 +6,6 @@ import { useParams, useRouter } from "next/navigation";
 import type { PropertyDTO } from "@flatmate/contracts";
 import { Button, ErrorState, ImageGallery, Skeleton } from "@flatmate/ui";
 import { ArrowLeft, Flag, Heart } from "lucide-react";
-import { apiClient } from "@/lib/api-client";
 import { loginHref } from "@/lib/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { sendListingSignal } from "@/lib/listing-signals";
@@ -20,10 +19,12 @@ import { RoomsList } from "@/features/properties/components/RoomsList";
 import { BookingCard } from "@/features/properties/components/BookingCard";
 import { ApplyModal } from "@/features/properties/components/ApplyModal";
 import { VisitModal } from "@/features/properties/components/VisitModal";
+import { AskOwnerModal } from "@/features/properties/components/AskOwnerModal";
 
 type ActiveModal =
   | { kind: "apply"; roomId: string | null; rent: number; nonce: number }
   | { kind: "visit"; nonce: number }
+  | { kind: "ask"; nonce: number }
   | { kind: "report" }
   | null;
 
@@ -71,8 +72,6 @@ export function PropertyDetail({ initialProperty }: { initialProperty?: Property
   }, [viewedId, isAuthenticated]);
 
   const [modal, setModal] = useState<ActiveModal>(null);
-  const [isStartingChat, setIsStartingChat] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
 
   /** Sign-in comes before the form, not after the user has filled it in. */
   const requireAuth = (open: () => void) => {
@@ -81,7 +80,6 @@ export function PropertyDetail({ initialProperty }: { initialProperty?: Property
       router.push(loginHref(`/properties/${propertyId}`));
       return;
     }
-    setActionError(null);
     open();
   };
 
@@ -114,24 +112,7 @@ export function PropertyDetail({ initialProperty }: { initialProperty?: Property
   const openApply = (roomId: string | null, rent: number) =>
     requireAuth(() => setModal({ kind: "apply", roomId, rent, nonce: Date.now() }));
 
-  const messageHost = () =>
-    requireAuth(async () => {
-      setIsStartingChat(true);
-      try {
-        const res = await apiClient<{ conversation_id: string }>("/messaging/conversations", {
-          method: "POST",
-          body: JSON.stringify({
-            participant_user_ids: [property.owner_id],
-            type: "direct",
-            property_id: property.id,
-          }),
-        });
-        router.push(`/messages?conversationId=${encodeURIComponent(res.conversation_id)}`);
-      } catch (err) {
-        setActionError(err instanceof Error ? err.message : "Couldn't start a conversation with the host");
-        setIsStartingChat(false);
-      }
-    });
+  const askOwner = () => requireAuth(() => setModal({ kind: "ask", nonce: Date.now() }));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 sm:space-y-8">
@@ -171,7 +152,6 @@ export function PropertyDetail({ initialProperty }: { initialProperty?: Property
         </div>
       </div>
 
-      {actionError && <InlineNotice tone="error">{actionError}</InlineNotice>}
 
       <ImageGallery
         images={property.images || []}
@@ -203,10 +183,9 @@ export function PropertyDetail({ initialProperty }: { initialProperty?: Property
           <BookingCard
             property={property}
             isOwnListing={isOwnListing}
-            isStartingChat={isStartingChat}
             onApply={() => openApply(null, property.monthly_rent)}
             onSchedule={() => requireAuth(() => setModal({ kind: "visit", nonce: Date.now() }))}
-            onMessage={messageHost}
+            onMessage={askOwner}
           />
         </div>
       </div>
@@ -230,6 +209,15 @@ export function PropertyDetail({ initialProperty }: { initialProperty?: Property
           propertyId={property.id}
           hostId={property.owner_id}
           roomId={null}
+        />
+      )}
+      {modal?.kind === "ask" && (
+        <AskOwnerModal
+          key={modal.nonce}
+          isOpen
+          onClose={() => setModal(null)}
+          propertyId={property.id}
+          listingTitle={property.title}
         />
       )}
       {modal?.kind === "report" && (

@@ -94,6 +94,14 @@ class PropertyUpdate(BaseModel):
     current_occupants: Optional[int] = None
     listing_status: Optional[str] = None
 
+class OwnerResponseTime(BaseModel):
+    """How quickly the owner answers chats (last 90 days, shown from 3 chats)."""
+    label: str
+    reply_rate: float
+    median_reply_minutes: Optional[int] = None
+    chats: int
+
+
 class PropertyResponse(PropertyBase):
     id: uuid.UUID
     owner_id: uuid.UUID
@@ -103,6 +111,8 @@ class PropertyResponse(PropertyBase):
     distance_km: Optional[float] = None
     # Only in the recommended order: up to two plain reasons, e.g. "Within your budget".
     match_reasons: List[str] = []
+    # Only on a single listing: the owner's reply badge, once they have enough chats.
+    owner_response: Optional[OwnerResponseTime] = None
     is_verified: bool
     is_active: bool
     rooms: List[RoomResponse] = []

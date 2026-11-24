@@ -53,6 +53,8 @@ export interface PropertyDTO {
   distance_km?: number | null;
   /** Only in the recommended order: up to two plain reasons, e.g. "Within your budget". */
   match_reasons?: string[];
+  /** Only on a single listing: how quickly the owner answers chats (shown from 3 chats). */
+  owner_response?: OwnerResponseTimeDTO | null;
   address?: string;
   address_display?: string;
   address_exact?: string;
@@ -160,4 +162,14 @@ export interface ListingStatusUpdate {
 
 export interface AssignOccupantRequest {
   occupant_id: string;
+}
+
+export interface OwnerResponseTimeDTO {
+  /** e.g. "Usually replies within an hour" or "Often slow to reply". */
+  label: string;
+  /** Share of chats answered within a week, 0-1. */
+  reply_rate: number;
+  median_reply_minutes?: number | null;
+  /** Chats counted (last 90 days). */
+  chats: number;
 }

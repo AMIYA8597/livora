@@ -237,9 +237,37 @@ committed on your OK.
       The hosted schema file includes 018.
       *Also fixed:* the heart on browse cards never saved anything (an optional-call
       `onSaveToggle?.(id, saved.toggle(id))` skipped the toggle when no callback was passed).
-- [ ] **P4. Ask-before-applying chat.** A "Ask the owner" chat from a listing (with quick
+- [x] **P4. Ask-before-applying chat.** A "Ask the owner" chat from a listing (with quick
       questions such as deposit, food, visitors), owner response-time badge, and contact details
       kept inside chat until a visit is confirmed.
+      *Done:* `POST /messaging/listing-chats` opens the chat about a listing with its owner and
+      sends the first question. It is only for a live listing whose owner's account is open, and
+      never for your own. The same person and listing reuse one chat, and a seeker can open at
+      most 20 new owner chats a day. The generic create endpoint now also refuses a "listing
+      chat" that doesn't include the listing's owner. On the listing page, "Ask the owner" opens
+      quick-question chips (deposit, bills, food and kitchen, visitors, move-in, lock-in) plus
+      free text. The chips are in `@flatmate/contracts` (`LISTING_QUICK_QUESTIONS`), so the
+      mobile apps get the same list.
+      *Contact details:* in listing chats, phone numbers and emails are hidden from both people
+      (`app/modules/messaging/contact_guard.py`) until the owner confirms a visit. They are
+      hidden when read, not when stored, so earlier messages show them once a visit is
+      confirmed. This covers history, send responses, realtime events, edits, the inbox preview
+      and search, and the smart-reply context; moderation still sees the full text. Confirming
+      posts a "Visit confirmed" note in the chat, the open chat reloads, and a later
+      cancellation doesn't hide them again. A visit can now be marked completed only after it
+      was confirmed, so a seeker can't unlock contacts alone. The chat shows a banner while
+      details are hidden and a note under affected messages.
+      *Response badge:* `GET /properties/{id}` has `owner_response`, e.g. "Usually replies
+      within an hour". It is based on the owner's one-to-one chats over the last 90 days (first
+      reply within 7 days) and shown from 3 chats; under half answered shows "Often slow to
+      reply". System notes don't count as replies, here or in the P3 reply-rate feature.
+      *Also fixed:* chat bubbles now keep line breaks, and editing a message shows the server's
+      copy.
+- [ ] **P4b. "Allow direct messages" is not enforced.** (Found during P4.) The Privacy
+      switch is saved (`user_privacy_settings.allow_direct_messages`), but nothing checks it:
+      anyone can start a direct chat with someone who turned it off. Enforce it when a
+      `direct` chat is created (listing chats and chats from a match, application or group
+      stay allowed), and say so on the switch.
 - [ ] **P5. Architecture write-up.** One document with each layer's job (web, API routers,
       services, models, workers, ML, storage), how a request flows, and the rules each layer keeps,
       so new code (and the mobile apps) follow it.

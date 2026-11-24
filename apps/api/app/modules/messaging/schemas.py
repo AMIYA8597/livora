@@ -100,6 +100,8 @@ class MessageResponse(MessageBase):
     is_read: bool = False
     sent_at: datetime
     attachments: List[AttachmentResponse] = Field(default_factory=list)
+    # Phone numbers or emails in the text were hidden: a listing chat before a confirmed visit.
+    contact_hidden: bool = False
     model_config = ConfigDict(from_attributes=True)
 
 class ConversationPreferenceResponse(BaseModel):
@@ -128,6 +130,8 @@ class ConversationResponse(BaseModel):
     participant_details: List[ConversationParticipantResponse] = Field(default_factory=list)
     last_message: Optional[MessageResponse] = None
     unread_count: int = 0
+    # A listing chat before the owner confirmed a visit: phone numbers and emails are hidden.
+    contacts_locked: bool = False
     preferences: Optional[ConversationPreferenceResponse] = None
     created_at: datetime
     last_message_at: datetime
@@ -142,6 +146,22 @@ class CreateConversationRequest(BaseModel):
     group_id: Optional[uuid.UUID] = None
     flatmate_match_id: Optional[uuid.UUID] = None
     context_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+class StartListingChatRequest(BaseModel):
+    """"Ask the owner" from a listing: opens (or reopens) the chat with the listing's owner,
+    optionally with the first question (quick questions are composed into the text by the app)."""
+    property_id: uuid.UUID
+    content: str = Field(default="", max_length=2000)
+
+    @field_validator("content")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.strip()
+
+class StartListingChatResponse(BaseModel):
+    conversation_id: uuid.UUID
+    created: bool
+    message_id: Optional[uuid.UUID] = None
 
 class MarkReadRequest(BaseModel):
     last_read_message_id: Optional[uuid.UUID] = None

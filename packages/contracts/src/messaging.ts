@@ -79,10 +79,37 @@ export interface MessageDTO {
   sent_at: string;
   attachments?: AttachmentDTO[];
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  /** A phone number or email in the text was hidden: a listing chat before the owner confirmed a visit. */
+  contact_hidden?: boolean;
 }
+
+/** POST /messaging/listing-chats ("Ask the owner"). */
+export interface StartListingChatResponse {
+  conversation_id: string;
+  /** False when this person already had a chat about this listing (it was reused). */
+  created: boolean;
+  message_id?: string | null;
+}
+
+/**
+ * Quick questions on "Ask the owner". The app puts the chosen ones into the first message, so the
+ * owner reads plain text and the same list works on web and mobile.
+ */
+export const LISTING_QUICK_QUESTIONS = [
+  { key: 'deposit', label: 'Deposit', text: 'How much is the deposit, and is it fully refundable?' },
+  { key: 'bills', label: 'Bills', text: 'Are electricity, water and wifi included in the rent?' },
+  { key: 'food', label: 'Food & kitchen', text: 'Is food provided, or can I use the kitchen?' },
+  { key: 'visitors', label: 'Visitors', text: 'Are visitors allowed, and is there a curfew?' },
+  { key: 'move_in', label: 'Move-in', text: 'When is the earliest I could move in?' },
+  { key: 'lock_in', label: 'Lock-in', text: 'Is there a lock-in period or notice period?' },
+] as const;
+
+export type ListingQuickQuestionKey = (typeof LISTING_QUICK_QUESTIONS)[number]['key'];
 
 export interface ConversationDTO {
   id: string;
+  /** A listing chat before the owner confirmed a visit: phone numbers and emails are hidden. */
+  contacts_locked?: boolean;
   type: ConversationType;
   title?: string | null;
   property_id?: string | null;
