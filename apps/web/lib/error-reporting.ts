@@ -1,3 +1,4 @@
+import { browserErrors } from "./deferred-errors";
 import { sentryOptions } from "./sentry-scrub";
 
 /** Error tracking settings from the build's public env; null means it's off. */
@@ -14,10 +15,10 @@ export function webSentryOptions() {
 export const errorTrackingEnabled = () => !!process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 /**
- * Report an error caught by an error boundary. The SDK is loaded on demand, so builds without a DSN
- * ship none of it.
+ * Report an error caught by an error boundary. It is sent once the SDK has started (shortly after
+ * the page loads; see instrumentation-client.ts), so builds without a DSN ship none of it.
  */
 export function reportError(error: unknown): void {
   if (!errorTrackingEnabled()) return;
-  void import("@sentry/nextjs").then((Sentry) => Sentry.captureException(error)).catch(() => undefined);
+  browserErrors.capture(error);
 }

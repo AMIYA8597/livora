@@ -7,6 +7,9 @@ test("error tracking is off without a DSN", () => {
   const on = sentryOptions({ dsn: "https://k@o0.ingest.sentry.io/1", tracesSampleRate: "7" });
   assert.ok(on);
   assert.equal(on.sendDefaultPii, false);
+  // Otherwise Sentry 11 streams spans and skips beforeSendTransaction (the scrubber).
+  assert.equal(on.traceLifecycle, "static");
+  assert.equal(on.beforeSendTransaction, scrubEvent);
   assert.equal(on.tracesSampleRate, 0);
   assert.equal(sentryOptions({ dsn: "x", tracesSampleRate: "0.2" })?.tracesSampleRate, 0.2);
 });

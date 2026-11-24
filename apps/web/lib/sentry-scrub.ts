@@ -78,6 +78,9 @@ export function sentryOptions(env: {
     release: env.release || undefined,
     tracesSampleRate: Number.isFinite(rate) && rate >= 0 && rate <= 1 ? rate : 0,
     sendDefaultPii: false,
+    // Sentry 11 streams spans by default, and then ignores beforeSendTransaction, so traces would
+    // go out unscrubbed. "static" sends them as transactions, through scrubEvent.
+    traceLifecycle: "static" as const,
     beforeSend: scrubEvent,
     beforeSendTransaction: scrubEvent,
     beforeBreadcrumb<B>(crumb: B): B {

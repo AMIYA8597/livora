@@ -111,8 +111,43 @@ Gathered from the open items below and every item's "Not covered" notes.
       Launch, filter chains, an escaped /ObjStm after a big image, a zip bomb, encrypted
       files, an ordinary compressed PDF, and a pypdf-written file with and without JavaScript
       (that last one only runs where pypdf is installed).
-- [ ] **L11. Main-thread blocking time is 200–500ms on phones.** Load Sentry and the Supabase
+- [x] **L11. Main-thread blocking time is 200–500ms on phones.** Load Sentry and the Supabase
       client after the page is interactive.
+      *Done:*
+      - **Sentry** was the biggest script on every page: 481 KB, fetched at start-up.
+        - `import("@sentry/nextjs")` kept every export (session replay and feedback
+          included). `lib/sentry-browser.ts` now imports only `init`, `captureException` and
+          `captureRouterTransitionStart`, which brings it down to 174 KB.
+        - It is now fetched only when the first error happens, like Sentry's own lazy
+          loader. Errors before then are queued (`lib/deferred-errors.ts`, up to 20) and sent
+          once it's up; error boundaries use the same queue. With
+          `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` above 0 it loads once the page is idle
+          instead, since tracing needs it running. Breadcrumbs from before the first error
+          are not kept.
+        - Also fixed: Sentry 11 streams spans by default and then skips
+          `beforeSendTransaction`, so traces would have gone out unscrubbed. The options now
+          set `traceLifecycle: "static"`.
+      - **Supabase:** no Supabase client code reaches the browser. The "supabase" strings in
+        the bundle are an image host and Sentry's own integration. The only Supabase code
+        that runs is the server proxy (`proxy.ts`), which costs server time, not phone time.
+      - **Measured** on a production build with a stand-in DSN (Pixel 7, 4× CPU, slow 4G;
+        median of 3; TBT here counts long tasks up to 4s after load):
+
+        | Page | KB before | KB after | TBT before | TBT after |
+        |---|---|---|---|---|
+        | `/` | 382 | 225 | 891ms | 540ms |
+        | `/properties` | 420 | 263 | 604ms | 389ms |
+        | `/groups` | 386 | 229 | 962ms | 455ms |
+        | `/login` | 395 | 238 | 586ms | 218ms |
+
+        Each page saves about 155 KB and roughly 180ms of Sentry start-up. What remains is
+        React and Next.js hydration (one 270–420ms task) plus each page's own rendering. The
+        numbers swing between runs with this machine's load. Lighthouse on staging (E7) is
+        still the real score.
+      - **Checked in the browser:** Sentry isn't loaded on a normal visit. A thrown error
+        loads it and the event is sent. The client runs with `traceLifecycle: "static"` and
+        without replay or feedback. Tests: `tests/deferred_errors.test.ts` and
+        `tests/sentry-scrub.test.ts`.
 - [ ] **L12. Restoring a backup into hosted Supabase:** skip default-privilege entries for roles
       the restoring user can't act for.
 
@@ -1026,8 +1061,9 @@ Gathered from the open items below and every item's "Not covered" notes.
         - Run `npx lighthouse <url> --preset=perf --form-factor=mobile` (or PageSpeed Insights)
           against staging to get the actual score.
         - TBT is the risk: 200–500ms here, where Lighthouse wants under 200ms for full marks.
-          Most of it is the shared JavaScript every page loads (React, the auth and Supabase
-          clients, Sentry).
+          Most of it is the shared JavaScript every page loads. Sentry was taken out of page
+          start-up in L11, and no Supabase client code reaches the browser; React and Next.js
+          hydration remain.
       - **Production settings:**
         - Set `NEXT_PUBLIC_APP_URL` to the real domain, and `ENVIRONMENT=production` when
           building the production web app. Without them, canonical links point to localhost and
