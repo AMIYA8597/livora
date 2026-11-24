@@ -116,21 +116,94 @@ jobs:
           docker push "$IMAGE_TAG"
           docker push "$LATEST_TAG"
 
+      # The API and the worker run the same image with the same configuration, so they can't drift.
       # Runtime uses the least-privilege login (scripts/create_app_db_user.sql); the owner URL in the
       # GitHub secret STAGING_DATABASE_URL is used only by the migration job above.
+      #
+      # Redis is one Secret Manager secret, STAGING_REDIS_URL (rediss:// for a managed Redis over
+      # TLS). The API uses it for shared rate limits, its cache and chat across instances; the
+      # worker uses it as its queue. Until the secret exists, the API runs without Redis and the
+      # worker isn't deployed. A Redis on a private network (Memorystore) also needs the
+      # environment variables STAGING_VPC_NETWORK and STAGING_VPC_SUBNET (Direct VPC egress).
+      - name: Resolve runtime configuration
+        id: runtime
+        env:
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          VPC_NETWORK: ${{ vars.STAGING_VPC_NETWORK }}
+          VPC_SUBNET: ${{ vars.STAGING_VPC_SUBNET }}
+        run: |
+          ENV_VARS="ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging,APP_RELEASE=${{ github.sha }},GOOGLE_CLOUD_PROJECT=$PROJECT,TRUSTED_PROXY_HOPS=1"
+          SECRETS="DATABASE_URL=STAGING_APP_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
+          if gcloud secrets describe STAGING_REDIS_URL --project "$PROJECT" >/dev/null 2>&1; then
+            SECRETS="$SECRETS,REDIS_URL=STAGING_REDIS_URL:latest,CELERY_BROKER_URL=STAGING_REDIS_URL:latest,CELERY_RESULT_BACKEND=STAGING_REDIS_URL:latest"
+            echo "redis=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "redis=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Staging worker not deployed::Create the Secret Manager secret STAGING_REDIS_URL (a managed Redis URL) to deploy the worker and beat. Until then failed emails are retried only when a later request dispatches, rate limits are per instance, and maintenance (including account erasure) doesn't run."
+          fi
+          NETWORK_FLAGS=""
+          if [ -n "$VPC_NETWORK" ] && [ -n "$VPC_SUBNET" ]; then
+            NETWORK_FLAGS="--network=$VPC_NETWORK --subnet=$VPC_SUBNET --vpc-egress=private-ranges-only"
+          fi
+          {
+            echo "image=asia-south1-docker.pkg.dev/$PROJECT/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
+            echo "env_vars=$ENV_VARS"
+            echo "secrets=$SECRETS"
+            echo "network_flags=$NETWORK_FLAGS"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Deploy to Cloud Run Staging
         id: deploy
+        env:
+          IMAGE: ${{ steps.runtime.outputs.image }}
+          ENV_VARS: ${{ steps.runtime.outputs.env_vars }}
+          SECRETS: ${{ steps.runtime.outputs.secrets }}
+          NETWORK_FLAGS: ${{ steps.runtime.outputs.network_flags }}
         run: |
-          IMAGE_TAG="asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/flatmate-api:${{ github.sha }}"
+          # shellcheck disable=SC2086 # NETWORK_FLAGS holds several flags
           gcloud run deploy flatmate-api-staging \
-            --image "$IMAGE_TAG" \
+            --image "$IMAGE" \
             --region asia-south1 \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars "ENVIRONMENT=staging,DEBUG=False,PROJECT_NAME=Flatmate Platform Staging,APP_RELEASE=${{ github.sha }},GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }},TRUSTED_PROXY_HOPS=1" \
-            --set-secrets "DATABASE_URL=STAGING_APP_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest,SUPABASE_JWT_SECRET=STAGING_SUPABASE_JWT_SECRET:latest"
+            --set-env-vars "$ENV_VARS" \
+            --set-secrets "$SECRETS" \
+            $NETWORK_FLAGS
           URL=$(gcloud run services describe flatmate-api-staging --region asia-south1 --format 'value(status.url)')
           echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      # One instance running the Celery worker with the beat scheduler inside it
+      # (python -m app.workers.run): outbox retries every 15 seconds, hourly maintenance including
+      # account erasure, and the weekly ranker retrain. CPU stays allocated with no requests
+      # coming in, and exactly one instance means exactly one beat. The deploy succeeds only once
+      # the worker has reached Redis and is taking tasks (the startup probe on /health).
+      - name: Deploy worker and beat to Cloud Run Staging
+        if: steps.runtime.outputs.redis == 'true'
+        env:
+          IMAGE: ${{ steps.runtime.outputs.image }}
+          ENV_VARS: ${{ steps.runtime.outputs.env_vars }}
+          SECRETS: ${{ steps.runtime.outputs.secrets }}
+          NETWORK_FLAGS: ${{ steps.runtime.outputs.network_flags }}
+        run: |
+          # shellcheck disable=SC2086 # NETWORK_FLAGS holds several flags
+          gcloud run deploy flatmate-worker-staging \
+            --image "$IMAGE" \
+            --region asia-south1 \
+            --platform managed \
+            --command python \
+            --args=-m,app.workers.run \
+            --no-allow-unauthenticated \
+            --ingress internal \
+            --min-instances 1 \
+            --max-instances 1 \
+            --no-cpu-throttling \
+            --cpu 1 \
+            --memory 1Gi \
+            --startup-probe "httpGet.path=/health,periodSeconds=5,timeoutSeconds=3,failureThreshold=24" \
+            --liveness-probe "httpGet.path=/health,periodSeconds=30,timeoutSeconds=5,failureThreshold=3" \
+            --set-env-vars "$ENV_VARS,WORKER_CONCURRENCY=2" \
+            --set-secrets "$SECRETS" \
+            $NETWORK_FLAGS
 
   build-and-deploy-frontend:
     name: Build & Deploy Frontend to Vercel (Staging)

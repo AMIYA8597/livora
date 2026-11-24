@@ -71,3 +71,58 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+---
+# Background jobs: the Celery worker with the beat scheduler inside it (app.workers.run).
+# Exactly one replica, replaced with Recreate, so there is never more than one beat.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flatmate-worker
+  labels:
+    app: flatmate-worker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: flatmate-worker
+  template:
+    metadata:
+      labels:
+        app: flatmate-worker
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: ghcr.io/flatmate/flatmate-api:latest
+          command: ["python", "-m", "app.workers.run"]
+          env:
+            - name: PORT
+              value: "8080"
+          envFrom:
+            - configMapRef:
+                name: flatmate-config
+            - secretRef:
+                name: flatmate-secrets
+          ports:
+            - containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
