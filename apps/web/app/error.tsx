@@ -3,11 +3,13 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { ErrorState } from "@flatmate/ui";
+import { reportError } from "@/lib/error-reporting";
 
 /** Catches render/runtime errors in any route below the root layout; navbar and footer stay. */
 export default function RouteError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error("Route error", error.digest ?? "", error.message);
+    reportError(error);
   }, [error]);
 
   return (
