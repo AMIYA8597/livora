@@ -55,6 +55,8 @@ class UserPrivacySetting(Base):
     show_exact_location: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     allow_direct_messages: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     profile_visibility: Mapped[str] = mapped_column(String(32), default="public", nullable=False) # public, matched_only, private
+    # Rank listings using what this person viewed, saved and applied to (migration 018).
+    personalized_ranking: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="privacy_settings")

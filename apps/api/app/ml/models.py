@@ -1,9 +1,9 @@
 """Tables owned by the ML platform (migration 009)."""
 import uuid
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,4 +40,25 @@ class MLModel(Base):
     metrics: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     training_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class ListingInteraction(Base):
+    """What a signed-in person was shown (impression, with the ranking features at that moment)
+    and did (view, save, unsave) with listings (migration 018). Kept 180 days."""
+
+    __tablename__ = "listing_interactions"
+    __table_args__ = (
+        Index("ix_listing_interactions_user_time", "user_id", "created_at"),
+        Index("ix_listing_interactions_property", "property_id"),
+        Index("ix_listing_interactions_time", "created_at"),
+        CheckConstraint("action IN ('impression', 'view', 'save', 'unsave')", name="ck_listing_interactions_action"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    property_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)  # impression, view, save, unsave
+    position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    features: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

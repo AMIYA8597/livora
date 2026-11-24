@@ -51,6 +51,8 @@ export interface PropertyDTO {
   fuzzed_coordinates?: FuzzedCoordinatesDTO;
   /** Only in near-me searches: km from the searcher to the listing's shown position. */
   distance_km?: number | null;
+  /** Only in the recommended order: up to two plain reasons, e.g. "Within your budget". */
+  match_reasons?: string[];
   address?: string;
   address_display?: string;
   address_exact?: string;

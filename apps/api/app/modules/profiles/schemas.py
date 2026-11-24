@@ -63,6 +63,7 @@ class PrivacySettingsUpdate(BaseModel):
     show_exact_location: Optional[bool] = None
     allow_direct_messages: Optional[bool] = None
     profile_visibility: Optional[str] = Field(default=None, description="public, matched_only, private")
+    personalized_ranking: Optional[bool] = Field(default=None, description="Use my activity to rank listings for me")
 
 class PrivacySettingsResponse(BaseModel):
     id: uuid.UUID
@@ -71,5 +72,6 @@ class PrivacySettingsResponse(BaseModel):
     show_exact_location: bool
     allow_direct_messages: bool
     profile_visibility: str
+    personalized_ranking: bool = True
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)

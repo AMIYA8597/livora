@@ -13,6 +13,7 @@ from app.core.exceptions import NotFoundException, ForbiddenException, BadReques
 from app.ml.indexing import queue_embedding_refresh
 from app.ml.moderation import prescreen
 from app.ml.moderation_jobs import ai_moderation_on, queue_property_moderation
+from app.ml.listing_ranking import CANDIDATE_LIMIT, load_viewer, rank_listings, record_impressions
 from app.ml.search import clean_query, rank_properties
 from app.modules.billing.entitlements import ensure_can_publish
 from app.modules.locations.geocoding import precision_for_new_listing, queue_listing_geocode
@@ -30,6 +31,9 @@ def queue_listing_review(db: AsyncSession, prop: Property) -> None:
     listings the rule pre-screen flags (they still get an automatic report)."""
     if ai_moderation_on() or prescreen(prop.title + " " + prop.description).level == "high":
         queue_property_moderation(db, prop.id)
+
+LIST_SORTS = ("recommended", "nearest", "newest", "price_asc", "price_desc")
+
 
 class PropertyService:
     def __init__(self, db: AsyncSession):
@@ -151,9 +155,19 @@ class PropertyService:
         furnishing_status: Optional[str] = None,
         near: Optional[tuple] = None,
         radius_km: float = 10.0,
+        sort: Optional[str] = None,
+        viewer_id: Optional[UUID] = None,
     ) -> List[dict]:
-        """`near` is a (lat, lng) point: only listings within `radius_km` of it, nearest first
-        (or by relevance when there is free text), each with its distance."""
+        """`near` is a (lat, lng) point: only listings within `radius_km` of it, each with its
+        distance. `sort`:
+          recommended - ranked for this viewer (app/ml/listing_ranking.py), with reasons
+          nearest     - by distance (needs `near`)
+          newest      - featured first, then newest; with free text, by relevance
+          price_asc / price_desc
+        Unset: nearest with `near`, else newest (the order before sorting existed)."""
+        sort = sort or ("nearest" if near is not None else "newest")
+        if sort not in LIST_SORTS:
+            raise BadRequestException(f"Unknown sort '{sort}'. Use one of: {', '.join(LIST_SORTS)}.")
         conditions = [Property.is_active.is_(True), Property.listing_status == "published"]
         distance = None
         if near is not None:
@@ -188,24 +202,55 @@ class PropertyService:
             .where(*conditions)
         )
 
+        ranked_ids: Optional[List[UUID]] = None
         text_query = clean_query(q)
         if text_query:
             # Hybrid full-text + embedding search over the filtered set (app/ml/search.py).
             eligible = select(Property.id).where(*conditions)
-            ranking = await rank_properties(self.db, text_query, eligible)
-            page_ids = ranking.ids[offset:offset + limit]
+            ranked_ids = (await rank_properties(self.db, text_query, eligible)).ids
+            if not ranked_ids:
+                return []
+
+        if sort == "recommended":
+            if ranked_ids is not None:
+                candidates_q = query.where(Property.id.in_(ranked_ids[:CANDIDATE_LIMIT]))
+            else:
+                first = distance if distance is not None else Property.created_at.desc()
+                candidates_q = query.order_by(first, Property.id).limit(CANDIDATE_LIMIT)
+            candidates = (await self.db.execute(candidates_q)).scalars().all()
+            viewer = await load_viewer(self.db, viewer_id)
+            ranked = await rank_listings(
+                self.db, candidates, viewer, near=near, radius_km=radius_km,
+                text_ranks={pid: i for i, pid in enumerate(ranked_ids)} if ranked_ids is not None else None,
+            )
+            page = ranked[offset:offset + limit]
+            if await record_impressions(self.db, viewer, page, offset):
+                await self.db.commit()
+            return [
+                self._with_distance({**self._format_property_response(r.prop), "match_reasons": r.reasons}, near)
+                for r in page
+            ]
+
+        if ranked_ids is not None and sort == "newest":  # free text: best match first
+            page_ids = ranked_ids[offset:offset + limit]
             if not page_ids:
                 return []
             rows = (await self.db.execute(query.where(Property.id.in_(page_ids)))).scalars().all()
             by_id = {p.id: p for p in rows}
             return [self._with_distance(self._format_property_response(by_id[i]), near) for i in page_ids if i in by_id]
+        if ranked_ids is not None:
+            query = query.where(Property.id.in_(ranked_ids))
 
-        if distance is not None:
+        if sort == "nearest" and distance is not None:
             query = query.order_by(distance, Property.id)
+        elif sort == "price_asc":
+            query = query.order_by(Property.monthly_rent.asc(), Property.id)
+        elif sort == "price_desc":
+            query = query.order_by(Property.monthly_rent.desc(), Property.id)
         else:
             # Featured (Owner Pro) listings first, then newest.
             featured = func.coalesce(Property.featured_until > func.now(), False)
-            query = query.order_by(featured.desc(), Property.created_at.desc())
+            query = query.order_by(featured.desc(), Property.created_at.desc(), Property.id)
         result = await self.db.execute(query.limit(limit).offset(offset))
         props = result.scalars().all()
         return [self._with_distance(self._format_property_response(p), near) for p in props]

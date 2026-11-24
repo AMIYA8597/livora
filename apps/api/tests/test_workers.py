@@ -257,9 +257,9 @@ def test_celery_tasks_and_schedule_registered():
     from app.workers import tasks  # noqa: F401 - registers tasks
     from app.workers.celery_app import celery_app
 
-    assert {"outbox.dispatch", "maintenance.run", "ml.train_ranker"} <= set(celery_app.tasks.keys())
+    assert {"outbox.dispatch", "maintenance.run", "ml.train_ranker", "ml.train_listing_ranker"} <= set(celery_app.tasks.keys())
     scheduled = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
-    assert scheduled == {"outbox.dispatch", "maintenance.run", "ml.train_ranker"}
+    assert scheduled == {"outbox.dispatch", "maintenance.run", "ml.train_ranker", "ml.train_listing_ranker"}
     assert celery_app.conf.task_acks_late is True
 
 

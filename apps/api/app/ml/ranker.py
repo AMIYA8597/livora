@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 from sqlalchemy import func, select, update
@@ -135,7 +135,12 @@ class TrainReport:
     reason: str = ""
 
 
-def evaluate_split(examples: Sequence[Example]) -> Dict[str, Any]:
+def _overall(features: Dict[str, float]) -> float:
+    return features.get("overall", 0.0)
+
+
+def evaluate_split(examples: Sequence[Example], names: Sequence[str] = FEATURES,
+                   baseline: Callable[[Dict[str, float]], float] = _overall) -> Dict[str, Any]:
     """Fit on the oldest 80%, evaluate on the newest 20%, against the heuristic baseline."""
     ordered = sorted(examples, key=lambda e: e.created_at)
     cut = int(len(ordered) * (1 - HOLDOUT_FRACTION))
@@ -143,28 +148,30 @@ def evaluate_split(examples: Sequence[Example]) -> Dict[str, Any]:
     y_train = np.asarray([e.label for e in train], dtype=float)
     if len(train) == 0 or len(test) == 0 or y_train.min() == y_train.max():
         return {"error": "not enough labelled data of both kinds"}
-    model = fit_logistic(to_matrix([e.features for e in train]), y_train)
+    model = fit_logistic(to_matrix([e.features for e in train], names), y_train, names=names)
     y_test = [e.label for e in test]
     groups = [e.user_id for e in test]
-    learned = model.predict(to_matrix([e.features for e in test])).tolist()
-    baseline = [e.features.get("overall", 0.0) for e in test]
+    learned = model.predict(to_matrix([e.features for e in test], names)).tolist()
+    base_scores = [baseline(e.features) for e in test]
     return {
         "train_rows": len(train), "test_rows": len(test),
         "positive_rate": float(np.mean([e.label for e in ordered])),
         "learned": {"auc": roc_auc(y_test, learned), "log_loss": log_loss(y_test, learned),
                     **grouped_ranking_metrics(groups, y_test, learned)},
-        "baseline": {"auc": roc_auc(y_test, baseline),
-                     **grouped_ranking_metrics(groups, y_test, baseline)},
+        "baseline": {"auc": roc_auc(y_test, base_scores),
+                     **grouped_ranking_metrics(groups, y_test, base_scores)},
     }
 
 
 async def train_and_register(db: AsyncSession, examples: Sequence[Example], min_rows: int,
-                             dry_run: bool = False) -> TrainReport:
+                             dry_run: bool = False, model_name: str = MODEL_NAME,
+                             names: Sequence[str] = FEATURES,
+                             baseline: Callable[[Dict[str, float]], float] = _overall) -> TrainReport:
     report = TrainReport(rows=len(examples))
     if len(examples) < min_rows:
         report.reason = f"needs at least {min_rows} labelled interactions, have {len(examples)}"
         return report
-    metrics = evaluate_split(examples)
+    metrics = evaluate_split(examples, names, baseline)
     report.metrics = metrics
     if "error" in metrics:
         report.reason = metrics["error"]
@@ -180,17 +187,17 @@ async def train_and_register(db: AsyncSession, examples: Sequence[Example], min_
 
     # Validated on the split; the stored model is refit on all data.
     y_all = np.asarray([e.label for e in examples], dtype=float)
-    model = fit_logistic(to_matrix([e.features for e in examples]), y_all)
+    model = fit_logistic(to_matrix([e.features for e in examples], names), y_all, names=names)
     version = int((await db.execute(
-        select(func.coalesce(func.max(MLModel.version), 0)).where(MLModel.name == MODEL_NAME)
+        select(func.coalesce(func.max(MLModel.version), 0)).where(MLModel.name == model_name)
     )).scalar_one()) + 1
     if beats:
-        await db.execute(update(MLModel).where(MLModel.name == MODEL_NAME, MLModel.is_active.is_(True))
+        await db.execute(update(MLModel).where(MLModel.name == model_name, MLModel.is_active.is_(True))
                          .values(is_active=False))
-    db.add(MLModel(name=MODEL_NAME, version=version, params=model.to_params(),
+    db.add(MLModel(name=model_name, version=version, params=model.to_params(),
                    metrics=_jsonable(metrics), training_rows=len(examples), is_active=beats))
     await db.commit()
-    _cache.clear()
+    _cache.pop(model_name, None)
     report.activated, report.version = beats, version
     return report
 
@@ -205,16 +212,17 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-_cache: Dict[str, Any] = {}
+_cache: Dict[str, Dict[str, Any]] = {}  # model name -> {"model", "expires"}
 
 
-async def active_ranker(db: AsyncSession) -> Optional[LogisticRanker]:
-    """The active model, cached per process for CACHE_SECONDS."""
+async def active_ranker(db: AsyncSession, model_name: str = MODEL_NAME) -> Optional[LogisticRanker]:
+    """The active model with this name, cached per process for CACHE_SECONDS."""
     now = time.monotonic()
-    if _cache.get("expires", 0) > now:
-        return _cache.get("model")
+    entry = _cache.get(model_name)
+    if entry and entry["expires"] > now:
+        return entry["model"]
     row = (await db.execute(
-        select(MLModel).where(MLModel.name == MODEL_NAME, MLModel.is_active.is_(True))
+        select(MLModel).where(MLModel.name == model_name, MLModel.is_active.is_(True))
     )).scalar_one_or_none()
     model = None
     if row is not None:
@@ -222,5 +230,5 @@ async def active_ranker(db: AsyncSession) -> Optional[LogisticRanker]:
             model = LogisticRanker.from_params(row.params)
         except (KeyError, ValueError, TypeError):
             logger.error("Active ranker %s has invalid parameters; using the heuristic", row.version)
-    _cache.update({"model": model, "expires": now + CACHE_SECONDS})
+    _cache[model_name] = {"model": model, "expires": now + CACHE_SECONDS}
     return model

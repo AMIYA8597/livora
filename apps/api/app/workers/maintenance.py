@@ -40,6 +40,10 @@ JOBS = {
         "DELETE FROM notifications WHERE (is_read AND created_at < now() - interval '90 days') "
         "OR created_at < now() - interval '365 days'"
     ),
+    # Ranking signals (what people were shown, opened and saved) are only useful while recent.
+    "purge_old_listing_interactions": (
+        "DELETE FROM listing_interactions WHERE created_at < now() - interval '180 days'"
+    ),
     "expire_unconfirmed_appointments": (
         "UPDATE appointments SET status = 'cancelled', "
         "cancellation_reason = 'Expired: not confirmed before the visit time', updated_at = now() "

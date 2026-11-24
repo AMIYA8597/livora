@@ -4,6 +4,15 @@
  */
 export const LISTINGS_PAGE_SIZE = 9;
 
+/** Server-side orders (the API's `sort`). "recommended" is ranked for the signed-in person. */
+export const LISTING_SORTS = ["recommended", "nearest", "newest", "price_asc", "price_desc"] as const;
+export type ListingSort = (typeof LISTING_SORTS)[number];
+export const DEFAULT_SORT: ListingSort = "recommended";
+
+export function parseSort(value: string | null | undefined): ListingSort {
+  return (LISTING_SORTS as readonly string[]).includes(value ?? "") ? (value as ListingSort) : DEFAULT_SORT;
+}
+
 export interface AppliedFilters {
   q: string;
   city: string;
@@ -17,7 +26,7 @@ export interface AppliedFilters {
 
 type Get = (key: string) => string | null | undefined;
 
-export function filtersFromSearch(get: Get): { applied: AppliedFilters; page: number; sort: string } {
+export function filtersFromSearch(get: Get): { applied: AppliedFilters; page: number; sort: ListingSort } {
   const v = (k: string) => get(k) || "";
   const page = Number(get("page"));
   return {
@@ -32,12 +41,13 @@ export function filtersFromSearch(get: Get): { applied: AppliedFilters; page: nu
       furnishing: v("furnishing"),
     },
     page: Number.isInteger(page) && page > 0 ? page : 1,
-    sort: v("sort") || "newest",
+    sort: parseSort(get("sort")),
   };
 }
 
-export function listingQueryParams(applied: AppliedFilters, page: number) {
+export function listingQueryParams(applied: AppliedFilters, page: number, sort?: ListingSort) {
   return {
+    sort,
     limit: LISTINGS_PAGE_SIZE,
     offset: (page - 1) * LISTINGS_PAGE_SIZE,
     // Free text is matched by meaning as well as words (hybrid search) and ordered by relevance.

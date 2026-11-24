@@ -16,8 +16,8 @@ export default async function PropertiesPage({ searchParams }: { searchParams: S
     const v = sp[k];
     return Array.isArray(v) ? v[0] : v;
   };
-  const { applied, page } = filtersFromSearch(get);
-  const params = listingQueryParams(applied, page);
+  const { applied, page, sort } = filtersFromSearch(get);
+  const params = listingQueryParams(applied, page, sort);
   const data = await fetchListings(params);
   return <PropertiesBrowser initial={data ? { key: queryKey("/properties", params), data } : undefined} />;
 }

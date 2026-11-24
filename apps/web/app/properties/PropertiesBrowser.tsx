@@ -5,7 +5,10 @@ import { useSearchParams, useRouter } from "next/navigation";
 import type { NearestCityDTO, PropertyDTO } from "@flatmate/contracts";
 import { ApiError } from "@/lib/api-client";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import { type AppliedFilters, filtersFromSearch, LISTINGS_PAGE_SIZE, listingQueryParams } from "@/lib/listing-query";
+import {
+  type AppliedFilters, DEFAULT_SORT, filtersFromSearch, LISTINGS_PAGE_SIZE, listingQueryParams, parseSort, type ListingSort,
+} from "@/lib/listing-query";
+import { useAuth } from "@/hooks/useAuth";
 import { PropertyCard } from "@/components/PropertyCard";
 import { Input, Button, Badge, Skeleton, EmptyState, ErrorState, Pagination, Drawer } from "@flatmate/ui";
 import { formatCurrency } from "@/lib/utils";
@@ -45,7 +48,12 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
   const [category, setCategory] = useState(searchParams.get("category") || "");
   const [configuration, setConfiguration] = useState(searchParams.get("config") || "");
   const [furnishing, setFurnishing] = useState(searchParams.get("furnishing") || "");
-  const [sortBy, setSortBy] = useState(searchParams.get("sort") || "newest");
+  const [sortBy, setSortByState] = useState<ListingSort>(() => parseSort(searchParams.get("sort")));
+  const setSortBy = (next: ListingSort) => {
+    setSortByState(next);
+    setPage(1);
+  };
+  const { user } = useAuth();
   const [page, setPage] = useState(() => filtersFromSearch((k) => searchParams.get(k)).page);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   // "Near me": the position lives in memory only; the URL just says near=1 so a reload asks again.
@@ -66,21 +74,18 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
 
   const propertiesQuery = useApiQuery<PropertyDTO[]>(
     "/properties",
-    { ...listingQueryParams(applied, page), ...nearParams(nearMe.near, radius) },
-    { initial },
+    { ...listingQueryParams(applied, page, sortBy === "nearest" && !nearMe.near ? DEFAULT_SORT : sortBy), ...nearParams(nearMe.near, radius) },
+    // "Recommended" differs per person: signing in refetches instead of keeping the server's
+    // anonymous first page.
+    { initial, variant: user?.id },
   );
   const nearest = useApiQuery<NearestCityDTO>(
     nearMe.near ? "/locations/nearest" : null,
     nearMe.near ? { lat: nearMe.near.lat, lng: nearMe.near.lng } : undefined,
   ).data;
+  // Sorted by the API across all results, not just this page.
   const fetched = propertiesQuery.data ?? [];
-  // In-memory sorting for marketplace ordering
-  const properties =
-    sortBy === "price_asc"
-      ? [...fetched].sort((a, b) => Number(a.monthly_rent) - Number(b.monthly_rent))
-      : sortBy === "price_desc"
-        ? [...fetched].sort((a, b) => Number(b.monthly_rent) - Number(a.monthly_rent))
-        : fetched;
+  const properties = fetched;
   const totalCount =
     fetched.length >= PAGE_SIZE ? (page + 1) * PAGE_SIZE : (page - 1) * PAGE_SIZE + fetched.length;
   const isLoading = propertiesQuery.isLoading;
@@ -100,7 +105,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
       category: applied.category,
       config: applied.configuration,
       furnishing: applied.furnishing,
-      sort: sortBy === "newest" ? "" : sortBy,
+      sort: sortBy === DEFAULT_SORT ? "" : sortBy,
       page: page === 1 ? "" : page,
       near: nearOn ? "1" : "",
     };
@@ -136,6 +141,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
   };
   const stopNearMe = () => {
     nearMe.clear();
+    if (sortBy === "nearest") setSortByState(DEFAULT_SORT);
     setPage(1);
   };
   const widerRadius = RADIUS_CHOICES.find((r) => r > radius);
@@ -150,7 +156,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
     setCategory("");
     setConfiguration("");
     setFurnishing("");
-    setSortBy("newest");
+    setSortByState(DEFAULT_SORT);
     setApplied({ q: "", city: "", locality: "", minRent: "", maxRent: "", category: "", configuration: "", furnishing: "" });
     setPage(1);
   };
@@ -186,12 +192,16 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
         <div className="flex items-center space-x-2">
           <div className="flex items-center space-x-1.5 bg-white border border-warm-200 px-3 py-2 rounded-xl text-xs font-semibold text-charcoal shadow-xs">
             <ArrowUpDown className="w-3.5 h-3.5 text-forest" />
+            <label htmlFor="listing-sort" className="sr-only">Sort listings</label>
             <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
+              id="listing-sort"
+              value={sortBy === "nearest" && !nearMe.near ? DEFAULT_SORT : sortBy}
+              onChange={(e) => setSortBy(parseSort(e.target.value))}
               className="bg-transparent focus:outline-none cursor-pointer"
             >
-              <option value="newest">{applied.q ? "Best match" : nearMe.near ? "Nearest first" : "Newest First"}</option>
+              <option value="recommended">{user ? "Recommended for you" : "Recommended"}</option>
+              {nearMe.near && <option value="nearest">Nearest first</option>}
+              <option value="newest">{applied.q ? "Best match" : "Newest first"}</option>
               <option value="price_asc">Rent: Low to High</option>
               <option value="price_desc">Rent: High to Low</option>
             </select>

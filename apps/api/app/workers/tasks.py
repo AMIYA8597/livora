@@ -74,6 +74,20 @@ def maintenance() -> Dict[str, int]:
     return run_with_session_factory(run_maintenance, settings.WORKER_STATEMENT_TIMEOUT_SECONDS)
 
 
+@celery_app.task(name="ml.train_listing_ranker", ignore_result=True)
+def train_listing_ranker() -> Dict[str, Any]:
+    """Weekly: retrain the listing ranker; it activates only if it beats the weighted score."""
+    from app.ml.training import train_listing_ranker as run_training
+
+    async def job(session_factory: async_sessionmaker[AsyncSession]) -> Dict[str, Any]:
+        async with session_factory() as db:
+            report = await run_training(db)
+        return {"rows": report.rows, "activated": report.activated, "version": report.version,
+                "reason": report.reason}
+
+    return run_with_session_factory(job, settings.WORKER_STATEMENT_TIMEOUT_SECONDS)
+
+
 @celery_app.task(name="ml.train_ranker", ignore_result=True)
 def train_ranker() -> Dict[str, Any]:
     """Weekly: retrain the like/pass ranker; it activates only if it beats the heuristic."""

@@ -3,6 +3,7 @@ Operational ML commands.
 
     python -m app.ml.cli backfill-embeddings [--type property|profile|all]
     python -m app.ml.cli train-ranker [--dry-run] [--min-rows N]
+    python -m app.ml.cli train-listing-ranker [--dry-run] [--min-rows N]
     python -m app.ml.cli evaluate-moderation [--llm] [--file PATH]
 
 `train-ranker` also runs weekly in Celery beat (task `ml.train_ranker`). `evaluate-moderation
@@ -34,12 +35,13 @@ async def _backfill(entity: str) -> None:
         print(f"{entity_type}: {result} (model {embedder.model_id})")
 
 
-async def _train(dry_run: bool, min_rows: int | None) -> None:
+async def _train(dry_run: bool, min_rows: int | None, listings: bool = False) -> None:
     from app.core.database import AsyncSessionLocal
-    from app.ml.training import train_ranker
+    from app.ml.training import train_listing_ranker, train_ranker
 
     async with AsyncSessionLocal() as db:
-        report = await train_ranker(db, dry_run=dry_run, min_rows=min_rows)
+        run = train_listing_ranker if listings else train_ranker
+        report = await run(db, dry_run=dry_run, min_rows=min_rows)
     print(json.dumps({"rows": report.rows, "activated": report.activated, "version": report.version,
                       "reason": report.reason, "metrics": report.metrics}, indent=2, default=str))
 
@@ -100,6 +102,9 @@ def main() -> None:
     t = sub.add_parser("train-ranker")
     t.add_argument("--dry-run", action="store_true")
     t.add_argument("--min-rows", type=int)
+    lt = sub.add_parser("train-listing-ranker")
+    lt.add_argument("--dry-run", action="store_true")
+    lt.add_argument("--min-rows", type=int)
     e = sub.add_parser("evaluate-moderation")
     e.add_argument("--llm", action="store_true", help="Also run Claude on every example (paid API calls)")
     e.add_argument("--file", type=Path, default=DEFAULT_EVAL)
@@ -109,6 +114,8 @@ def main() -> None:
         asyncio.run(_backfill(args.type))
     elif args.command == "train-ranker":
         asyncio.run(_train(args.dry_run, args.min_rows))
+    elif args.command == "train-listing-ranker":
+        asyncio.run(_train(args.dry_run, args.min_rows, listings=True))
     else:
         asyncio.run(_evaluate(args.file, args.llm))
 

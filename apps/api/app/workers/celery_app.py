@@ -57,6 +57,8 @@ celery_app.conf.update(
         "maintenance-hourly": {"task": "maintenance.run", "schedule": crontab(minute=7)},
         # Mondays 03:30 UTC: retrain the recommendation ranker from the past week's likes/passes.
         "ml-train-ranker-weekly": {"task": "ml.train_ranker", "schedule": crontab(minute=30, hour=3, day_of_week=1)},
+        # Mondays 04:00 UTC: retrain the listing ranker from what people were shown and opened.
+        "ml-train-listing-ranker-weekly": {"task": "ml.train_listing_ranker", "schedule": crontab(minute=0, hour=4, day_of_week=1)},
     },
 )
 

@@ -209,10 +209,34 @@ committed on your OK.
       Nominatim operators). Tested with a faked network, plus one real run that placed a Leh
       listing in Changspa. The wizard tells owners how the placement works. The hosted schema
       file includes 017.
-- [ ] **P3. Room-finding ranking.** Rank listings per person: relevance, distance, budget fit,
+- [x] **P3. Room-finding ranking.** Rank listings per person: relevance, distance, budget fit,
       move-in date, verified owner, photo/description quality, freshness, owner response rate,
       and what the person saved, viewed or applied to; spam and duplicate listings pushed down.
       Starts as a weighted score, then learns from real behaviour like the flatmate ranker does.
+      *Done:* `GET /properties?sort=` takes recommended (the browse default), nearest, newest,
+      price_asc or price_desc. Price order is now done by the API across every page, not
+      per page in the browser. "Recommended" builds 24 explainable features for up to 300
+      filtered candidates (`app/ml/listing_ranking.py`): text match, distance, budget fit
+      (the cheapest way in against the seeker's stated budget), move-in fit, verified
+      owner/listing, photos, description, amenities, freshness, the owner's reply rate (reply
+      within 24 h over 90 days), and taste. Taste means similarity to listings the person
+      applied to, saved or opened in the last 180 days. Listings they already applied to sink.
+      Duplicates (same owner with the same address, set-up and rent, or photos reused from an
+      earlier listing) sink hard, and listings with an open report sink hardest. Featured
+      listings stay pinned first, as the owner page promises, unless reported or duplicate.
+      Each card shows up to two plain reasons ("Within your budget", "Verified owner").
+      Signed-in people's impressions (with the features and position), opens, saves and
+      unsaves go to `listing_interactions` (migration 018). Views are deduped for 30 min and
+      impressions for 6 h. Rows are kept 180 days, exported with the account and erased with
+      it. A "Personalised listings" switch in Privacy turns recording and taste off; stated
+      budget and move-in still count.
+      A weekly job (Mon 04:00 UTC, also `python -m app.ml.cli train-listing-ranker`) labels
+      each impression by whether a view, save or application followed within 3 days. It trains
+      a logistic ranker and switches to it only once there are `RANKER_MIN_TRAINING_ROWS` rows
+      and it beats the weighted score on held-out AUC. Until then the weighted score is used.
+      The hosted schema file includes 018.
+      *Also fixed:* the heart on browse cards never saved anything (an optional-call
+      `onSaveToggle?.(id, saved.toggle(id))` skipped the toggle when no callback was passed).
 - [ ] **P4. Ask-before-applying chat.** A "Ask the owner" chat from a listing (with quick
       questions such as deposit, food, visitors), owner response-time badge, and contact details
       kept inside chat until a visit is confirmed.

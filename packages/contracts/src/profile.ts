@@ -121,6 +121,8 @@ export interface PrivacySettingsDTO {
   show_exact_location: boolean;
   allow_direct_messages: boolean;
   profile_visibility: 'public' | 'matched_only' | 'private' | string;
+  /** Rank listings using what this person opened, saved and applied to. */
+  personalized_ranking?: boolean;
   updated_at: string;
 }
 
@@ -129,4 +131,5 @@ export interface PrivacySettingsUpdateInput {
   show_exact_location?: boolean;
   allow_direct_messages?: boolean;
   profile_visibility?: 'public' | 'matched_only' | 'private' | string;
+  personalized_ranking?: boolean;
 }

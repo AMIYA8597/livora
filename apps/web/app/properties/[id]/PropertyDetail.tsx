@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import type { PropertyDTO } from "@flatmate/contracts";
@@ -9,6 +9,7 @@ import { ArrowLeft, Flag, Heart } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { loginHref } from "@/lib/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { sendListingSignal } from "@/lib/listing-signals";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { useSavedProperties } from "@/hooks/useSavedProperties";
 import { ListingImage } from "@/components/ListingImage";
@@ -62,6 +63,12 @@ export function PropertyDetail({ initialProperty }: { initialProperty?: Property
   const property = initialProperty ?? query.data;
   const { error, refetch } = query;
   const isLoading = !initialProperty && query.isLoading;
+
+  // Opening a listing is a signal for the signed-in person's recommendations (deduped by the API).
+  const viewedId = property?.id;
+  useEffect(() => {
+    if (viewedId && isAuthenticated) sendListingSignal(viewedId, "view");
+  }, [viewedId, isAuthenticated]);
 
   const [modal, setModal] = useState<ActiveModal>(null);
   const [isStartingChat, setIsStartingChat] = useState(false);

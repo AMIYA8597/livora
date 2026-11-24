@@ -28,6 +28,7 @@ function Toggle({ id, title, description, checked, onChange }: {
 export function PrivacySettingsForm({ initial, onSaved }: PrivacySettingsFormProps) {
   const [phonePublic, setPhonePublic] = useState(initial?.show_phone_publicly ?? false);
   const [allowDirectMessages, setAllowDirectMessages] = useState(initial?.allow_direct_messages ?? true);
+  const [personalized, setPersonalized] = useState(initial?.personalized_ranking ?? true);
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -38,7 +39,11 @@ export function PrivacySettingsForm({ initial, onSaved }: PrivacySettingsFormPro
     try {
       const updated = await apiClient<PrivacySettingsDTO>("/profiles/me/privacy", {
         method: "PUT",
-        body: JSON.stringify({ show_phone_publicly: phonePublic, allow_direct_messages: allowDirectMessages }),
+        body: JSON.stringify({
+          show_phone_publicly: phonePublic,
+          allow_direct_messages: allowDirectMessages,
+          personalized_ranking: personalized,
+        }),
       });
       onSaved?.(updated);
       setNotice({ tone: "success", text: "Privacy settings saved." });
@@ -61,6 +66,13 @@ export function PrivacySettingsForm({ initial, onSaved }: PrivacySettingsFormPro
       <form onSubmit={handleSubmit} className="space-y-4">
         <Toggle id="pv-phone" title="Show mobile number" description="Let other verified users see your phone number." checked={phonePublic} onChange={setPhonePublic} />
         <Toggle id="pv-dm" title="Allow direct messages" description="Let seekers and hosts start a chat with you." checked={allowDirectMessages} onChange={setAllowDirectMessages} />
+        <Toggle
+          id="pv-ranking"
+          title="Personalised listings"
+          description="Use the listings you open, save and apply to, to show the best matches first. Turn off to stop recording this; your budget and move-in date still count."
+          checked={personalized}
+          onChange={setPersonalized}
+        />
         <Button type="submit" variant="primary" isLoading={isSaving} className="w-full sm:w-auto">
           Save privacy settings
         </Button>

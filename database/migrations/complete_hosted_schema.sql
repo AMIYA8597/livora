@@ -1825,6 +1825,36 @@ ALTER TABLE properties ADD CONSTRAINT ck_properties_location_precision CHECK (lo
 
 UPDATE alembic_version SET version_num='017_listing_location_precision' WHERE alembic_version.version_num = '016_india_locations';
 
+-- Running upgrade 017_listing_location_precision -> 018_listing_ranking
+
+CREATE TABLE IF NOT EXISTS listing_interactions (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+            action VARCHAR(16) NOT NULL,
+            position INTEGER,
+            features JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_listing_interactions_action') THEN
+                ALTER TABLE listing_interactions ADD CONSTRAINT ck_listing_interactions_action
+                    CHECK (action IN ('impression', 'view', 'save', 'unsave'));
+            END IF;
+        END $$;
+
+CREATE INDEX IF NOT EXISTS ix_listing_interactions_user_time ON listing_interactions (user_id, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_listing_interactions_property ON listing_interactions (property_id);
+
+CREATE INDEX IF NOT EXISTS ix_listing_interactions_time ON listing_interactions (created_at);
+
+ALTER TABLE user_privacy_settings ADD COLUMN IF NOT EXISTS personalized_ranking BOOLEAN NOT NULL DEFAULT true;
+
+UPDATE alembic_version SET version_num='018_listing_ranking' WHERE alembic_version.version_num = '017_listing_location_precision';
+
 DO $$
 DECLARE
     r record;

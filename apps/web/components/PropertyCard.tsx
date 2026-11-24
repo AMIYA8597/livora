@@ -30,7 +30,10 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
   const toggleSave = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    onSaveToggle?.(property.id, saved.toggle(property.id));
+    // Toggle first: `onSaveToggle?.(id, saved.toggle(id))` would skip the toggle when no
+    // callback is passed (an optional call does not evaluate its arguments).
+    const nowSaved = saved.toggle(property.id);
+    onSaveToggle?.(property.id, nowSaved);
   };
 
   const thumbnail = property.images?.[0];
@@ -118,6 +121,15 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
         {/* Card Body */}
         <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
           <div>
+            {property.match_reasons && property.match_reasons.length > 0 && (
+              <ul className="flex flex-wrap gap-1 mb-1.5" aria-label="Why this is recommended">
+                {property.match_reasons.slice(0, 2).map((reason) => (
+                  <li key={reason} className="text-[10px] font-semibold text-forest bg-pale-green/40 border border-brand-200 px-1.5 py-0.5 rounded-md">
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="flex items-center justify-between text-xs text-charcoal-muted mb-1">
               <div className="flex items-center space-x-1 truncate max-w-[70%]">
                 <MapPin className="w-3.5 h-3.5 text-forest shrink-0" />

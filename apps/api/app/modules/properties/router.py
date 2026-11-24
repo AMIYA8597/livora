@@ -1,10 +1,13 @@
 from typing import List, Optional
 from uuid import UUID
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Query, Header, status
+from fastapi import APIRouter, Depends, Query, Header, Response, status
+from pydantic import BaseModel, Field
+from typing import Literal
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.dependencies import require_roles, get_current_user
+from app.core.dependencies import require_roles, get_current_user, get_optional_user
 from app.core.security import decode_token
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.users.models import User
@@ -33,9 +36,11 @@ async def list_properties(
     q: Optional[str] = Query(None, max_length=300, description="Free text, e.g. 'quiet furnished room near Indiranagar metro'. Results are ordered by relevance."),
     locality: Optional[str] = Query(None, max_length=100, description="Locality name contained in the listing's public address"),
     furnishing_status: Optional[str] = Query(None, description="fully_furnished, semi_furnished, unfurnished"),
+    viewer: Optional[User] = Depends(get_optional_user),
     near_lat: Optional[float] = Query(None, ge=-90, le=90, description="With near_lng: only listings near this point, nearest first"),
     near_lng: Optional[float] = Query(None, ge=-180, le=180),
     radius_km: float = Query(10, ge=1, le=100, description="How far from near_lat/near_lng"),
+    sort: Optional[str] = Query(None, description="recommended (for the signed-in viewer, with match_reasons), nearest, newest, price_asc, price_desc. Default: nearest with near_lat/near_lng, else newest"),
     limit: int = Query(20, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -46,6 +51,8 @@ async def list_properties(
     return await service.list_properties(
         near=(near_lat, near_lng) if near_lat is not None else None,
         radius_km=radius_km,
+        sort=sort,
+        viewer_id=viewer.id if viewer else None,
         q=q,
         locality=locality,
         furnishing_status=furnishing_status,
@@ -58,6 +65,32 @@ async def list_properties(
         limit=limit,
         offset=offset
     )
+
+class ListingInteractionIn(BaseModel):
+    action: Literal["view", "save", "unsave"]
+    position: Optional[int] = Field(default=None, ge=0, le=10000, description="Where it was shown in the results")
+
+
+@router.post("/{property_id}/interactions", status_code=status.HTTP_204_NO_CONTENT)
+async def record_listing_interaction(
+    property_id: UUID,
+    data: ListingInteractionIn,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The signed-in person opened, saved or unsaved a listing: used to rank listings for them
+    (and, anonymised into features, to train the ranker). Nothing is recorded when they turned
+    personalised ranking off in their privacy settings."""
+    from app.ml.listing_ranking import record_action
+    from app.modules.properties.models import Property
+
+    exists = (await db.execute(select(Property.id).where(
+        Property.id == property_id, Property.is_active.is_(True)))).scalar_one_or_none()
+    if exists is None:
+        raise NotFoundException("Property not found")
+    await record_action(db, current_user.id, property_id, data.action, data.position)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @router.post("", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @router.post("/", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED)

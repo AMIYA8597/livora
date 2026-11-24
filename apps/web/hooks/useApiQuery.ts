@@ -35,6 +35,12 @@ export interface UseApiQueryOptions<T = unknown> {
    * the first fetch. Any later change of endpoint/params, or a refetch, goes to the API.
    */
   initial?: { key: string; data: T };
+  /**
+   * Who the answer is for, when the same request gives different answers to different people
+   * (e.g. the signed-in user's id for personalised results). Changing it refetches; while it is
+   * set at first render, `initial` (fetched anonymously by the server) is not used.
+   */
+  variant?: string;
 }
 
 export { queryKey };
@@ -55,15 +61,16 @@ export function useApiQuery<T>(
   const allowNotFound = options?.allowNotFound ?? false;
   const key = endpoint === null ? null : queryKey(endpoint, params);
   const [nonce, setNonce] = useState(0);
-  const seeded = options?.initial && key !== null && options.initial.key === key ? options.initial : null;
+  const variant = options?.variant ?? "";
+  const seeded = options?.initial && !variant && key !== null && options.initial.key === key ? options.initial : null;
   const [result, setResult] = useState<QueryResult<T>>(() =>
     seeded
-      ? { key: seeded.key, fetchKey: `${seeded.key}#0`, data: seeded.data, error: null }
+      ? { key: seeded.key, fetchKey: `${seeded.key}#0#`, data: seeded.data, error: null }
       : { key: null, fetchKey: null, data: undefined, error: null },
   );
   // The fetch the server already did for us; skipped once.
-  const skipFetch = useRef<string | null>(seeded ? `${seeded.key}#0` : null);
-  const fetchKey = key === null ? null : `${key}#${nonce}`;
+  const skipFetch = useRef<string | null>(seeded ? `${seeded.key}#0#` : null);
+  const fetchKey = key === null ? null : `${key}#${nonce}#${variant}`;
 
   useEffect(() => {
     if (key === null || fetchKey === null) return;
