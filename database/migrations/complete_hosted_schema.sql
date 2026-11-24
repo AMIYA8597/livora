@@ -1571,6 +1571,88 @@ CREATE INDEX IF NOT EXISTS ix_account_deletion_requests_purge_after
 
 UPDATE alembic_version SET version_num='014_account_deletion' WHERE alembic_version.version_num = '013_application_status_history';
 
+-- Running upgrade 014_account_deletion -> 015_canonical_lifestyle_traits
+
+UPDATE lifestyle_profiles SET diet_preference = (CASE diet_preference WHEN 'vegetarian' THEN 'pure_veg' WHEN 'veg_and_egg' THEN 'eggetarian' WHEN 'omnivore' THEN 'non_veg' WHEN 'pescatarian' THEN 'non_veg' WHEN 'halal' THEN 'non_veg' WHEN 'kosher' THEN 'non_veg' ELSE diet_preference END) WHERE diet_preference IN ('vegetarian', 'veg_and_egg', 'omnivore', 'pescatarian', 'halal', 'kosher');
+
+UPDATE lifestyle_profiles SET pet_preference = (CASE pet_preference WHEN 'has_cat' THEN 'loves_pets' WHEN 'has_dog' THEN 'loves_pets' ELSE pet_preference END) WHERE pet_preference IN ('has_cat', 'has_dog');
+
+UPDATE lifestyle_profiles SET smoking = (CASE smoking WHEN 'allowed' THEN 'permitted' WHEN 'regular' THEN 'permitted' WHEN 'balcony_only' THEN 'outside_only' ELSE smoking END) WHERE smoking IN ('allowed', 'regular', 'balcony_only');
+
+UPDATE lifestyle_profiles SET social_battery = (CASE social_battery WHEN 'moderate' THEN 'balanced' ELSE social_battery END) WHERE social_battery IN ('moderate');
+
+UPDATE lifestyle_profiles SET work_arrangement = (CASE work_arrangement WHEN 'office' THEN 'on_site' ELSE work_arrangement END) WHERE work_arrangement IN ('office');
+
+UPDATE profiles
+               SET lifestyle_traits = (lifestyle_traits - 'diet')
+                   || CASE WHEN lifestyle_traits ? 'diet_preference' THEN '{}'::jsonb
+                           ELSE jsonb_build_object('diet_preference', lifestyle_traits->'diet') END
+             WHERE lifestyle_traits ? 'diet';
+
+UPDATE profiles
+               SET lifestyle_traits = (lifestyle_traits - 'pets')
+                   || CASE WHEN lifestyle_traits ? 'pet_preference' THEN '{}'::jsonb
+                           ELSE jsonb_build_object('pet_preference', lifestyle_traits->'pets') END
+             WHERE lifestyle_traits ? 'pets';
+
+UPDATE profiles
+               SET lifestyle_traits = jsonb_set(lifestyle_traits, '{diet_preference}',
+                   to_jsonb((CASE (lifestyle_traits->>'diet_preference') WHEN 'vegetarian' THEN 'pure_veg' WHEN 'veg_and_egg' THEN 'eggetarian' WHEN 'omnivore' THEN 'non_veg' WHEN 'pescatarian' THEN 'non_veg' WHEN 'halal' THEN 'non_veg' WHEN 'kosher' THEN 'non_veg' ELSE NULL END)::text))
+             WHERE lifestyle_traits->>'diet_preference' IN ('vegetarian', 'veg_and_egg', 'omnivore', 'pescatarian', 'halal', 'kosher');
+
+UPDATE profiles
+               SET lifestyle_traits = jsonb_set(lifestyle_traits, '{pet_preference}',
+                   to_jsonb((CASE (lifestyle_traits->>'pet_preference') WHEN 'has_cat' THEN 'loves_pets' WHEN 'has_dog' THEN 'loves_pets' ELSE NULL END)::text))
+             WHERE lifestyle_traits->>'pet_preference' IN ('has_cat', 'has_dog');
+
+UPDATE profiles
+               SET lifestyle_traits = jsonb_set(lifestyle_traits, '{smoking}',
+                   to_jsonb((CASE (lifestyle_traits->>'smoking') WHEN 'allowed' THEN 'permitted' WHEN 'regular' THEN 'permitted' WHEN 'balcony_only' THEN 'outside_only' ELSE NULL END)::text))
+             WHERE lifestyle_traits->>'smoking' IN ('allowed', 'regular', 'balcony_only');
+
+UPDATE profiles
+               SET lifestyle_traits = jsonb_set(lifestyle_traits, '{social_battery}',
+                   to_jsonb((CASE (lifestyle_traits->>'social_battery') WHEN 'moderate' THEN 'balanced' ELSE NULL END)::text))
+             WHERE lifestyle_traits->>'social_battery' IN ('moderate');
+
+UPDATE profiles
+               SET lifestyle_traits = jsonb_set(lifestyle_traits, '{work_arrangement}',
+                   to_jsonb((CASE (lifestyle_traits->>'work_arrangement') WHEN 'office' THEN 'on_site' ELSE NULL END)::text))
+             WHERE lifestyle_traits->>'work_arrangement' IN ('office');
+
+UPDATE profiles p
+           SET lifestyle_traits = COALESCE(p.lifestyle_traits, '{}'::jsonb)
+                                  || jsonb_strip_nulls(jsonb_build_object('sleep_schedule', lp.sleep_schedule, 'work_arrangement', lp.work_arrangement, 'cleanliness_level', lp.cleanliness_level, 'chore_philosophy', lp.chore_philosophy, 'noise_tolerance', lp.noise_tolerance, 'instrument_or_music', lp.instrument_or_music, 'lighting_preference', lp.lighting_preference, 'guests_policy', lp.guests_policy, 'social_battery', lp.social_battery, 'diet_preference', lp.diet_preference, 'non_veg_cooking_allowed', lp.non_veg_cooking_allowed, 'cooks_at_home', lp.cooks_at_home, 'smoking', lp.smoking, 'drinking', lp.drinking, 'pet_preference', lp.pet_preference))
+          FROM lifestyle_profiles lp
+         WHERE lp.user_id = p.user_id;
+
+UPDATE profiles
+           SET lifestyle_vector = (
+        SELECT CASE WHEN n > 0 THEN array_agg(x / n ORDER BY i) ELSE array_agg(x ORDER BY i) END
+          FROM (SELECT i, x, sqrt(sum(x * x) OVER ()) AS n
+                  FROM (SELECT i, (
+        CASE
+            WHEN i < 8  THEN (CASE (lifestyle_traits->>'sleep_schedule') WHEN 'early_bird' THEN 1.0 WHEN 'flexible' THEN 0.5 WHEN 'rotational' THEN 0.3 WHEN 'night_owl' THEN 0.0 ELSE 0.5 END) * cos(i)
+            WHEN i < 16 THEN (CASE WHEN lifestyle_traits ? 'cleanliness_level' THEN (CASE WHEN (lifestyle_traits->>'cleanliness_level') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (lifestyle_traits->>'cleanliness_level')::float8 / 5.0 ELSE 0.6 END) ELSE 0.6 END) * sin(i)
+            WHEN i < 24 THEN (CASE (lifestyle_traits->>'social_battery') WHEN 'introverted' THEN 0.2 WHEN 'balanced' THEN 0.7 WHEN 'extroverted' THEN 1.0 ELSE 0.5 END) * cos(i)
+            WHEN i < 32 THEN (CASE (lifestyle_traits->>'work_arrangement') WHEN 'remote' THEN 0.1 WHEN 'hybrid' THEN 0.5 WHEN 'on_site' THEN 0.9 WHEN 'shift_work' THEN 0.7 ELSE 0.5 END) * sin(i)
+            WHEN i < 40 THEN (CASE (lifestyle_traits->>'diet_preference') WHEN 'vegan' THEN 1.0 WHEN 'jain' THEN 0.9 WHEN 'pure_veg' THEN 0.8 WHEN 'eggetarian' THEN 0.65 WHEN 'non_veg' THEN 0.4 ELSE 0.5 END) * cos(i)
+            WHEN i < 48 THEN (CASE (lifestyle_traits->>'smoking') WHEN 'never' THEN 0.0 WHEN 'outside_only' THEN 0.5 WHEN 'permitted' THEN 1.0 ELSE 0.0 END) * sin(i)
+            ELSE (CASE (lifestyle_traits->>'pet_preference') WHEN 'no_pets' THEN 0.0 WHEN 'allergic' THEN 0.0 WHEN 'cats_ok' THEN 0.4 WHEN 'dogs_ok' THEN 0.6 WHEN 'cats_and_dogs_ok' THEN 0.8 WHEN 'loves_pets' THEN 1.0 ELSE 0.5 END) * cos(i * 0.5)
+        END)::float8 AS x FROM generate_series(0, 63) AS i) raw) v
+         GROUP BY n
+    )
+         WHERE lifestyle_traits IS NOT NULL AND lifestyle_traits <> '{}'::jsonb;
+
+INSERT INTO outbox_events (id, event_type, payload, status, retry_count, created_at, next_attempt_at)
+        SELECT gen_random_uuid(), 'embedding.refresh',
+               jsonb_build_object('entity_type', 'profile', 'entity_id', user_id::text),
+               'pending', 0, now(), now()
+          FROM profiles
+         WHERE lifestyle_traits IS NOT NULL AND lifestyle_traits <> '{}'::jsonb;
+
+UPDATE alembic_version SET version_num='015_canonical_lifestyle_traits' WHERE alembic_version.version_num = '014_account_deletion';
+
 DO $$
 DECLARE
     r record;

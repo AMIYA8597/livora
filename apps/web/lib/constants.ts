@@ -23,11 +23,3 @@ export const SLEEP_SCHEDULE_OPTIONS = [
   { value: "flexible", label: "Flexible / Varies" },
 ];
 
-export const DIET_OPTIONS = [
-  { value: "omnivore", label: "Omnivore" },
-  { value: "vegetarian", label: "Vegetarian" },
-  { value: "vegan", label: "Vegan" },
-  { value: "pescatarian", label: "Pescatarian" },
-  { value: "halal", label: "Halal" },
-  { value: "kosher", label: "Kosher" },
-];

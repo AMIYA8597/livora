@@ -36,8 +36,8 @@ from app.core.database import AsyncSessionLocal  # noqa: E402
 from app.core.security import get_password_hash  # noqa: E402
 from app.modules.locations.models import City, Country, Locality, State  # noqa: E402
 from app.modules.profiles.models import Profile  # noqa: E402
+from app.modules.lifestyle.traits import canonical_traits, lifestyle_vector  # noqa: E402
 from app.modules.profiles.schemas import LifestyleTraitsSchema  # noqa: E402
-from app.modules.profiles.service import compute_lifestyle_vector  # noqa: E402
 from app.modules.properties.models import Property, PropertyAmenity  # noqa: E402
 from app.modules.users.models import User, UserPrivacySetting, UserRole  # noqa: E402
 from app.modules.verification.models import Verification  # noqa: E402
@@ -170,12 +170,13 @@ async def seed(allow_remote: bool = False) -> dict:
 
         for key, name, occupation, (bmin, bmax), locs, traits in SEEKERS:
             uid = await add_user(key, name, "seeker")
-            trait_model = LifestyleTraitsSchema(**traits)
+            trait_values = canonical_traits(LifestyleTraitsSchema(**traits).model_dump())
             await s.merge(Profile(
                 id=sid(f"profile:{key}"), user_id=uid, display_name=name, occupation=occupation,
                 bio=f"{occupation} looking for a compatible flatmate.", budget_min=bmin, budget_max=bmax,
                 move_in_date=today + timedelta(days=30), preferred_locations=locs,
-                lifestyle_traits=trait_model.model_dump(), lifestyle_vector=compute_lifestyle_vector(trait_model),
+                lifestyle_traits=trait_values,
+                lifestyle_vector=lifestyle_vector(trait_values, settings.VECTOR_EMBEDDING_DIM),
             ))
         for key, name in [("admin", "Platform Admin"), *OWNERS]:
             await s.merge(Profile(id=sid(f"profile:{key}"), user_id=sid(f"user:{key}"), display_name=name,

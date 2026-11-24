@@ -14,6 +14,7 @@ Every vector is stored with `provider.model_id`, and search only compares vector
 model id, so switching providers can never mix incompatible vector spaces.
 """
 from __future__ import annotations
+from app.modules.lifestyle.traits import canonical_traits
 
 import hashlib
 import logging
@@ -174,12 +175,17 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 _TRAIT_WORDS = {
     "sleep_schedule": {"early_bird": "early riser", "night_owl": "night owl, stays up late",
-                       "flexible": "flexible sleep schedule"},
-    "smoking": {"never": "non-smoker", "outside_only": "smokes outside only", "allowed": "smoker"},
-    "diet": {"omnivore": "eats everything", "vegetarian": "vegetarian", "vegan": "vegan",
-             "pescatarian": "pescatarian", "halal": "halal food", "kosher": "kosher food"},
-    "pets": {"loves_pets": "loves pets", "has_cat": "has a cat", "has_dog": "has a dog",
-             "cats_ok": "fine with cats", "dogs_ok": "fine with dogs", "no_pets": "no pets"},
+                       "flexible": "flexible sleep schedule", "rotational": "rotational shifts"},
+    "smoking": {"never": "non-smoker", "outside_only": "smokes outside only", "permitted": "smoker"},
+    "drinking": {"teetotaler": "doesn't drink", "socially": "drinks socially", "regular": "drinks regularly"},
+    "diet_preference": {"pure_veg": "pure vegetarian", "jain": "jain vegetarian",
+                        "eggetarian": "eggetarian", "non_veg": "eats non-veg", "vegan": "vegan"},
+    "cooks_at_home": {"daily": "cooks daily", "hires_cook": "has a cook", "orders_online": "orders food in"},
+    "pet_preference": {"loves_pets": "loves pets", "cats_and_dogs_ok": "fine with cats and dogs",
+                       "cats_ok": "fine with cats", "dogs_ok": "fine with dogs", "no_pets": "no pets",
+                       "allergic": "allergic to pets"},
+    "noise_tolerance": {"quiet_library": "likes a quiet home", "lively": "likes a lively home"},
+    "guests_policy": {"rarely": "rarely has guests", "open_house": "often has guests over"},
     "work_arrangement": {"remote": "works from home", "hybrid": "hybrid work",
                          "on_site": "works at the office", "shift_work": "shift work"},
     "social_battery": {"introverted": "introvert, quiet", "moderate": "moderately social",
@@ -193,7 +199,7 @@ def profile_text(profile) -> str:
         parts.append(profile.bio)
     if profile.occupation:
         parts.append(f"Works as {profile.occupation}.")
-    traits = profile.lifestyle_traits or {}
+    traits = canonical_traits(profile.lifestyle_traits)
     for key, words in _TRAIT_WORDS.items():
         value = traits.get(key)
         if isinstance(value, str) and value in words:

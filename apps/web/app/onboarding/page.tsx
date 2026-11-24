@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
+import { DIET_OPTIONS, GUEST_OPTIONS, SMOKING_OPTIONS, VEG_KITCHEN_DIETS } from "@/features/profile/lifestyle-options";
 import { Card, Button, Input, Badge } from "@flatmate/ui";
 import {
   Sparkles,
@@ -43,7 +44,7 @@ export default function OnboardingPage() {
   const [sleepTime, setSleepTime] = useState("23:00");
   const [cleanliness, setCleanliness] = useState(4);
   const [workArrangement, setWorkArrangement] = useState("hybrid");
-  const [diet, setDiet] = useState("omnivore");
+  const [diet, setDiet] = useState("non_veg");
   const [smoking, setSmoking] = useState("never");
   const [drinking, setDrinking] = useState("socially");
   const [socialBattery, setSocialBattery] = useState("balanced");
@@ -100,7 +101,7 @@ export default function OnboardingPage() {
           guests_policy: guestsPolicy,
           social_battery: socialBattery,
           diet_preference: diet,
-          non_veg_cooking_allowed: diet !== "pure_veg",
+          non_veg_cooking_allowed: !VEG_KITCHEN_DIETS.includes(diet),
           cooks_at_home: "daily",
           smoking,
           drinking,
@@ -272,9 +273,9 @@ export default function OnboardingPage() {
                   onChange={(e) => setDiet(e.target.value)}
                   className="w-full text-sm border border-slate-300 rounded-xl p-2.5 bg-white"
                 >
-                  <option value="pure_veg">Pure Vegetarian</option>
-                  <option value="veg_and_egg">Vegetarian + Eggs</option>
-                  <option value="omnivore">Non-Vegetarian</option>
+                  {DIET_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
 
@@ -285,9 +286,9 @@ export default function OnboardingPage() {
                   onChange={(e) => setSmoking(e.target.value)}
                   className="w-full text-sm border border-slate-300 rounded-xl p-2.5 bg-white"
                 >
-                  <option value="never">Non-Smoker (Never)</option>
-                  <option value="balcony_only">Social / Balcony Only</option>
-                  <option value="regular">Regular Smoker</option>
+                  {SMOKING_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -313,9 +314,9 @@ export default function OnboardingPage() {
                   onChange={(e) => setGuestsPolicy(e.target.value)}
                   className="w-full text-sm border border-slate-300 rounded-xl p-2.5 bg-white"
                 >
-                  <option value="rarely">Rarely / No Overnight Guests</option>
-                  <option value="occasional_weekends">Occasional Weekends with Notice</option>
-                  <option value="open">Open / Friends Welcome</option>
+                  {GUEST_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
             </div>

@@ -2,6 +2,7 @@
 Search & Discovery Service
 Implements PostGIS spatial radius discovery, coordinate fuzzing, and flatmate search.
 """
+from app.modules.lifestyle.traits import canonical_traits, canonical_value
 from typing import Any, List, Optional
 from uuid import UUID
 from datetime import date
@@ -159,7 +160,7 @@ class SearchService:
 
         results: List[FlatmateSearchResultItem] = []
         for profile, user in rows:
-            traits = profile.lifestyle_traits or {}
+            traits = canonical_traits(profile.lifestyle_traits)
 
             # Locality filtering against preferred_locations list
             if filters.locality:
@@ -168,11 +169,11 @@ class SearchService:
                     continue
 
             # Lifestyle filters
-            if filters.sleep_schedule and traits.get("sleep_schedule") != filters.sleep_schedule:
+            if filters.sleep_schedule and traits.get("sleep_schedule") != canonical_value("sleep_schedule", filters.sleep_schedule):
                 continue
-            if filters.diet_preference and traits.get("diet") != filters.diet_preference:
+            if filters.diet_preference and traits.get("diet_preference") != canonical_value("diet_preference", filters.diet_preference):
                 continue
-            if filters.smoking and traits.get("smoking") != filters.smoking:
+            if filters.smoking and traits.get("smoking") != canonical_value("smoking", filters.smoking):
                 continue
 
             results.append(FlatmateSearchResultItem(

@@ -40,7 +40,7 @@ class LifestyleProfile(Base):
     social_battery: Mapped[str] = mapped_column(String(32), default="balanced", nullable=False) # introverted, balanced, extroverted
 
     # 7. Dietary & Cooking Habits (Crucial in Indian flatshares)
-    diet_preference: Mapped[str] = mapped_column(String(32), default="omnivore", nullable=False) # pure_veg, eggetarian, non_veg, vegan, jain
+    diet_preference: Mapped[str] = mapped_column(String(32), default="non_veg", nullable=False) # pure_veg, jain, eggetarian, non_veg, vegan
     non_veg_cooking_allowed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     cooks_at_home: Mapped[str] = mapped_column(String(32), default="sometimes", nullable=False) # daily, sometimes, hires_cook, orders_online
 

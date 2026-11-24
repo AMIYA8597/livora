@@ -33,6 +33,9 @@ export const DIET_OPTIONS: Option[] = [
   { value: "vegan", label: "Vegan" },
 ];
 
+/** Diets whose kitchen defaults to no non-veg cooking. */
+export const VEG_KITCHEN_DIETS: readonly string[] = ["pure_veg", "jain", "vegan"];
+
 export const SMOKING_OPTIONS: Option[] = [
   { value: "never", label: "Non-smoker" },
   { value: "outside_only", label: "Smokes outside only" },
@@ -99,6 +102,12 @@ export const DEALBREAKER_RULES: { value: string; label: string; expected: string
   { value: "pure_veg_kitchen_only", label: "Pure vegetarian kitchen only", expected: "pure_veg" },
   { value: "no_pets_allowed", label: "No pets in the home", expected: "no_pets" },
 ];
+
+/** The label for a stored answer; values from before the form existed fall back to readable text. */
+export function optionLabel(options: Option[], value: string | null | undefined): string | null {
+  if (!value) return null;
+  return options.find((o) => o.value === value)?.label ?? value.replace(/_/g, " ");
+}
 
 export function dealbreakerLabel(ruleKey: string): string {
   return DEALBREAKER_RULES.find((r) => r.value === ruleKey)?.label ?? ruleKey.replace(/_/g, " ");

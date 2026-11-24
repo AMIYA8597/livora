@@ -11,6 +11,9 @@ from app.modules.lifestyle.models import LifestyleProfile, UserDealbreaker
 from app.modules.lifestyle.schemas import LifestylePreferencesBase, LifestyleCreateOrUpdate, DealbreakerCreate
 from app.core.exceptions import NotFoundException
 from app.core.config import settings
+from app.ml.indexing import queue_embedding_refresh
+from app.modules.lifestyle.traits import canonical_traits, lifestyle_vector, traits_from_answers
+from app.modules.profiles.models import Profile
 
 def compute_lifestyle_profile_vector(traits: LifestylePreferencesBase) -> list[float]:
     """
@@ -109,11 +112,26 @@ class LifestyleService:
             )
             self.db.add(profile)
 
+        await self._sync_profile_traits(user_id, profile)
         await self.db.commit()
         await self.db.refresh(profile)
         return profile
 
     create_or_update_lifestyle = upsert_lifestyle
+
+    async def _sync_profile_traits(self, user_id: UUID, answers: LifestyleProfile) -> None:
+        """
+        Matching, filters, the ranker, embeddings and smart replies read the profile's copy of
+        the answers; rewrite it (and the matching vector) in the same transaction as the form.
+        """
+        profile = (await self.db.execute(select(Profile).where(Profile.user_id == user_id))).scalar_one_or_none()
+        if profile is None:
+            return
+        # Old quiz keys are dropped; the form's answers win.
+        traits = canonical_traits({**(profile.lifestyle_traits or {}), **traits_from_answers(answers)})
+        profile.lifestyle_traits = traits
+        profile.lifestyle_vector = lifestyle_vector(traits, settings.VECTOR_EMBEDDING_DIM)
+        queue_embedding_refresh(self.db, "profile", user_id)
 
     async def get_dealbreakers(self, user_id: UUID) -> List[UserDealbreaker]:
         query = select(UserDealbreaker).where(UserDealbreaker.user_id == user_id).order_by(UserDealbreaker.created_at)

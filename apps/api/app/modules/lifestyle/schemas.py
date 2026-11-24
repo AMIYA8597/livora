@@ -5,7 +5,9 @@ Lifestyle Taxonomy & Granular Preferences Schemas
 import uuid
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.modules.lifestyle.traits import ALLOWED, checked_value
 
 class LifestylePreferencesBase(BaseModel):
     # 1. Sleep & Daily Schedule
@@ -32,7 +34,7 @@ class LifestylePreferencesBase(BaseModel):
     social_battery: str = Field(default="balanced", description="introverted, balanced, extroverted")
 
     # 7. Dietary & Cooking Habits (India Specific)
-    diet_preference: str = Field(default="omnivore", description="pure_veg, eggetarian, non_veg, vegan, jain")
+    diet_preference: str = Field(default="non_veg", description="pure_veg, jain, eggetarian, non_veg, vegan")
     non_veg_cooking_allowed: bool = Field(default=True, description="Whether non-veg cooking is allowed in the kitchen")
     cooks_at_home: str = Field(default="sometimes", description="daily, sometimes, hires_cook, orders_online")
 
@@ -41,10 +43,16 @@ class LifestylePreferencesBase(BaseModel):
     drinking: str = Field(default="socially", description="teetotaler, socially, regular")
 
     # 9. Pets Policy & Allergies
-    pet_preference: str = Field(default="cats_and_dogs_ok", description="no_pets, loves_pets, cats_ok, dogs_ok, allergic")
+    pet_preference: str = Field(default="cats_and_dogs_ok", description="loves_pets, cats_and_dogs_ok, cats_ok, dogs_ok, no_pets, allergic")
 
     # 10. Notes
     custom_notes: Optional[str] = Field(default=None, description="Free text context on habits or roommate expectations")
+
+    @field_validator(*ALLOWED, check_fields=False)
+    @classmethod
+    def _known_value(cls, value, info):
+        # Old values (vegetarian, omnivore, office, ...) are converted; unknown ones are refused.
+        return checked_value(info.field_name, value)
 
 class LifestyleCreateOrUpdate(LifestylePreferencesBase):
     pass

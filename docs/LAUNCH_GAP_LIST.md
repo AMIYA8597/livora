@@ -3,6 +3,70 @@
 Collected 2026-11-22 from the actual source code (not the phase reports).
 Work these top to bottom. Mark each `[x]` only when code + tests land.
 
+## Remaining before launch (collected 2026-11-24)
+
+Gathered from the open items below and every item's "Not covered" notes.
+
+### Code work, in order
+- [x] **L1. Lifestyle answers don't reach matching.** The web form saves to `lifestyle_profiles`;
+      matching, the diet and sleep filters and the ranker read `profiles.lifestyle_traits`.
+      *Done:* one vocabulary in `app/modules/lifestyle/traits.py` (the form's keys and values).
+      Every form save rewrites the profile copy and the matching vector in the same transaction
+      and queues an embedding refresh. Old values (`vegetarian`, `omnivore`, `office`,
+      `balcony_only`, quiz keys `diet`/`pets`) are converted at the API, and unknown answers get 422.
+      Filters, flatmate search, embeddings text and smart replies read the form keys, and old filter
+      values still work. The onboarding wizard, flatmate filter, card and profile page use the
+      form's options. Migration `015_canonical_lifestyle_traits` (plain SQL, so it is also in
+      `complete_hosted_schema.sql`) converts stored rows, copies saved forms onto profiles and
+      recomputes vectors. Checked on a scratch database: the SQL vectors match the Python ones
+      (max difference 6e-17), profiles without answers are left alone, and down/up works.
+      Tests: `tests/test_lifestyle_traits.py` (10). Not covered: `lifestyle_profiles.preference_vector`
+      keeps its old numbers (nothing reads it).
+- [ ] **L2. Deleted or deactivated accounts keep live chat sockets** until they reconnect.
+      Close them at once.
+- [ ] **L3. Two WebSockets per tab** on `/messages` and `/notifications`, because the bell opens
+      its own. Share one connection.
+- [ ] **L4. Push failures aren't retried.** A temporary failure (timeout, 5xx, 429) should be
+      retried through the outbox.
+- [ ] **L5. Worker jobs inherit the API role's 15-second statement timeout.** Maintenance and
+      ranker training need longer.
+- [ ] **L6. `POST /search/properties` still uses plain text matching.** Use the full-text search
+      the web app already uses.
+- [ ] **L7. Owners and applicants can't see an application's status history**; only staff can.
+- [ ] **L8. Moderators can use the moderation API but can't open the admin console.**
+- [ ] **L9. No way to replay a failed Razorpay webhook** except waiting for Razorpay's retry.
+- [ ] **L10. The PDF upload check reads raw bytes**, so active content inside compressed object
+      streams isn't seen.
+- [ ] **L11. Main-thread blocking time is 200–500ms on phones.** Load Sentry and the Supabase
+      client after the page is interactive.
+- [ ] **L12. Restoring a backup into hosted Supabase:** skip default-privilege entries for roles
+      the restoring user can't act for.
+
+### Needs you (accounts, keys, decisions)
+- [ ] **E1. Rotate the Supabase keys and database password.** They were pasted into a chat. Do
+      it before launch; then update `.env`, Secret Manager and GitHub.
+- [ ] **E2. Apply the hosted schema** (item 1). Postgres ports are blocked from this network
+      (checked again 2026-11-24). Either store `STAGING_DATABASE_URL` in the GitHub `staging`
+      environment and run the migration workflow, or authorize the Supabase MCP connector.
+- [ ] **E3. Google Cloud:**
+  - Secret Manager secrets, a managed Redis and the backup bucket.
+  - The GitHub environments `production` and `production-backups`.
+  - The steps are in `DEPLOYMENT.md` §3 step 5 and §4.
+- [ ] **E4. Domain and Vercel production settings:** `NEXT_PUBLIC_APP_URL`,
+      `ENVIRONMENT=production`, the API URLs.
+- [ ] **E5. Provider keys:**
+  - Resend (with a verified sending domain), Twilio
+  - Production VAPID keys
+  - Sentry DSN and alert rules, `UPTIME_*` variables
+  - Optional: Anthropic and Voyage
+- [ ] **E6. Razorpay:** test keys and webhook, one test subscribe/renew/cancel, then live keys.
+      Decide GST and invoices.
+- [ ] **E7. Run Lighthouse** (mobile) against staging.
+- [ ] **E8. Deploy ClamAV**, then set `VIRUS_SCAN_REQUIRED=true`.
+- [ ] **E9. Legal review** of the DPDP rights card and the privacy page. Decide how long reports
+      about deleted accounts are kept.
+- [ ] **E10. pgvector on this machine** (item 3d), only if you want the vector index locally.
+
 ## P0 — Blocks launch
 
 - [ ] **1. Hosted schema not yet applied.** *(Waiting on owner.)* The Supabase project is

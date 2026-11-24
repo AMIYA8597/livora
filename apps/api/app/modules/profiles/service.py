@@ -1,7 +1,6 @@
 from typing import Optional
 from uuid import UUID
 from datetime import datetime, timezone
-import math
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_
 from app.modules.profiles.models import Profile
@@ -11,62 +10,11 @@ from app.modules.profiles.schemas import ProfileUpdate, LifestyleTraitsSchema, P
 from app.core.exceptions import NotFoundException, ForbiddenException
 from app.core.config import settings
 from app.ml.indexing import queue_embedding_refresh
+from app.modules.lifestyle.traits import canonical_traits, lifestyle_vector
 
 def compute_lifestyle_vector(traits: LifestyleTraitsSchema) -> list:
-    """
-    Encodes lifestyle traits into a normalized 64-dimensional vector
-    suitable for pgvector cosine distance operations (<=>).
-    """
-    dim = settings.VECTOR_EMBEDDING_DIM
-    vec = [0.0] * dim
-
-    # Dimension slices:
-    # 0-7: Sleep schedule
-    sleep_map = {"early_bird": 1.0, "flexible": 0.5, "night_owl": 0.0}
-    val = sleep_map.get(traits.sleep_schedule, 0.5)
-    for i in range(0, 8):
-        vec[i] = val * math.cos(i)
-
-    # 8-15: Cleanliness level (scale 1-5 normalized to 0.2 - 1.0)
-    clean_val = traits.cleanliness_level / 5.0
-    for i in range(8, 16):
-        vec[i] = clean_val * math.sin(i)
-
-    # 16-23: Social battery
-    soc_map = {"introverted": 0.2, "moderate": 0.5, "balanced": 0.7, "extroverted": 1.0}
-    soc_val = soc_map.get(traits.social_battery, 0.5)
-    for i in range(16, 24):
-        vec[i] = soc_val * math.cos(i)
-
-    # 24-31: Work arrangement
-    work_map = {"remote": 0.1, "hybrid": 0.5, "on_site": 0.9}
-    work_val = work_map.get(traits.work_arrangement, 0.5)
-    for i in range(24, 32):
-        vec[i] = work_val * math.sin(i)
-
-    # 32-39: Diet
-    diet_map = {"vegan": 1.0, "vegetarian": 0.8, "pescatarian": 0.6, "omnivore": 0.4}
-    diet_val = diet_map.get(traits.diet, 0.5)
-    for i in range(32, 40):
-        vec[i] = diet_val * math.cos(i)
-
-    # 40-47: Smoking
-    smk_map = {"never": 0.0, "outside_only": 0.5, "allowed": 1.0}
-    smk_val = smk_map.get(traits.smoking, 0.0)
-    for i in range(40, 48):
-        vec[i] = smk_val * math.sin(i)
-
-    # 48-63: Pets and general vibe
-    pet_map = {"no_pets": 0.0, "cats_ok": 0.4, "dogs_ok": 0.6, "loves_pets": 1.0}
-    pet_val = pet_map.get(traits.pets, 0.5)
-    for i in range(48, 64):
-        vec[i] = pet_val * math.cos(i * 0.5)
-
-    # L2 Normalization
-    norm = math.sqrt(sum(x * x for x in vec))
-    if norm > 0:
-        vec = [x / norm for x in vec]
-    return vec
+    """The matching vector for quiz answers (old values converted to the form's vocabulary)."""
+    return lifestyle_vector(traits.model_dump(), settings.VECTOR_EMBEDDING_DIM)
 
 def build_profile_response(
     profile: Profile,
@@ -173,8 +121,10 @@ class ProfileService:
         if not profile:
             raise NotFoundException("Profile not found")
 
-        profile.lifestyle_traits = quiz.model_dump()
-        profile.lifestyle_vector = compute_lifestyle_vector(quiz)
+        # Merged into the existing copy, so answers only the 10-dimension form has are kept.
+        traits = canonical_traits({**(profile.lifestyle_traits or {}), **canonical_traits(quiz.model_dump())})
+        profile.lifestyle_traits = traits
+        profile.lifestyle_vector = lifestyle_vector(traits, settings.VECTOR_EMBEDDING_DIM)
         queue_embedding_refresh(self.db, "profile", user_id)
 
         await self.db.commit()

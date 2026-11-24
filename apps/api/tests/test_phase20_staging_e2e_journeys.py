@@ -102,6 +102,8 @@ async def test_journey_a_seeker_complete_lifecycle(mock_db):
     # 2. Lifestyle & Dealbreakers
     lifestyle_service = LifestyleService(mock_db)
     lifestyle_service.get_by_user_id = AsyncMock(return_value=None)
+    # The profile copy of the answers is covered against a real database in test_lifestyle_traits.py.
+    lifestyle_service._sync_profile_traits = AsyncMock()
     ls_payload = LifestyleCreateOrUpdate(
         sleep_schedule="early_bird",
         work_arrangement="hybrid",

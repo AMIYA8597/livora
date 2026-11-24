@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ProfileDTO } from "@flatmate/contracts";
 import { Card, Avatar, Badge, MatchScoreBadge } from "@flatmate/ui";
 import { formatCurrency } from "@/lib/utils";
+import { DIET_OPTIONS, optionLabel } from "@/features/profile/lifestyle-options";
 import { Briefcase, Moon, Sun, ShieldCheck, MapPin, Heart, X, ThumbsUp } from "lucide-react";
 
 export interface FlatmateCardProps {
@@ -90,9 +91,9 @@ export const FlatmateCard: React.FC<FlatmateCardProps> = ({
                 Clean {traits.cleanliness_level}/5
               </Badge>
             )}
-            {traits.diet && (
-              <Badge variant="warm" size="sm" className="capitalize">
-                {traits.diet}
+            {traits.diet_preference && (
+              <Badge variant="warm" size="sm">
+                {optionLabel(DIET_OPTIONS, traits.diet_preference)}
               </Badge>
             )}
           </div>

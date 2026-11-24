@@ -1,3 +1,4 @@
+from app.modules.lifestyle.traits import canonical_value
 from datetime import date
 from typing import List
 from uuid import UUID
@@ -68,13 +69,13 @@ class FlatmateService:
                 func.array_to_string(Profile.preferred_locations, " ").ilike(f"%{filters.city.strip()}%"),
             ))
         if filters.sleep_schedule:
-            conditions.append(traits["sleep_schedule"].astext == filters.sleep_schedule)
+            conditions.append(traits["sleep_schedule"].astext == canonical_value("sleep_schedule", filters.sleep_schedule))
         if filters.diet:
-            conditions.append(traits["diet"].astext == filters.diet)
+            conditions.append(traits["diet_preference"].astext == canonical_value("diet_preference", filters.diet))
         if filters.smoking:
-            conditions.append(traits["smoking"].astext == filters.smoking)
+            conditions.append(traits["smoking"].astext == canonical_value("smoking", filters.smoking))
         if filters.pets:
-            conditions.append(traits["pets"].astext == filters.pets)
+            conditions.append(traits["pet_preference"].astext == canonical_value("pet_preference", filters.pets))
         if filters.cleanliness_min:
             conditions.append(
                 func.coalesce(traits["cleanliness_level"].astext, "0").cast(Integer) >= filters.cleanliness_min

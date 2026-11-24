@@ -16,6 +16,7 @@ import {
   Utensils, Cigarette, Dog, Sparkles, ArrowLeft, Heart, Bookmark,
   ShieldAlert, Flag, CheckCircle2
 } from "lucide-react";
+import { DIET_OPTIONS, PET_OPTIONS, SMOKING_OPTIONS, optionLabel } from "@/features/profile/lifestyle-options";
 
 export default function SeekerProfileDetailPage() {
   const params = useParams();
@@ -360,8 +361,8 @@ export default function SeekerProfileDetailPage() {
                 <Utensils className="w-5 h-5 text-emerald-500 shrink-0" />
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 uppercase">Diet</span>
-                  <p className="text-xs font-semibold text-slate-800 capitalize">
-                    {traits.diet_preference || traits.diet || "Omnivore"}
+                  <p className="text-xs font-semibold text-slate-800">
+                    {optionLabel(DIET_OPTIONS, traits.diet_preference) ?? "Not answered"}
                   </p>
                 </div>
               </div>
@@ -370,8 +371,8 @@ export default function SeekerProfileDetailPage() {
                 <Cigarette className="w-5 h-5 text-rose-500 shrink-0" />
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 uppercase">Smoking Policy</span>
-                  <p className="text-xs font-semibold text-slate-800 capitalize">
-                    {traits.smoking?.replace(/_/g, " ") || "Never"}
+                  <p className="text-xs font-semibold text-slate-800">
+                    {optionLabel(SMOKING_OPTIONS, traits.smoking) ?? "Not answered"}
                   </p>
                 </div>
               </div>
@@ -380,8 +381,8 @@ export default function SeekerProfileDetailPage() {
                 <Dog className="w-5 h-5 text-purple-500 shrink-0" />
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 uppercase">Pets</span>
-                  <p className="text-xs font-semibold text-slate-800 capitalize">
-                    {traits.pet_preference?.replace(/_/g, " ") || traits.pets?.replace(/_/g, " ") || "Cats OK"}
+                  <p className="text-xs font-semibold text-slate-800">
+                    {optionLabel(PET_OPTIONS, traits.pet_preference) ?? "Not answered"}
                   </p>
                 </div>
               </div>

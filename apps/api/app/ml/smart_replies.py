@@ -10,6 +10,7 @@ built from the listing being discussed or the two people's shared lifestyle trai
 suggestions never ask for or offer money, OTPs or ID documents, or move the chat off Flatmate.
 """
 from __future__ import annotations
+from app.modules.lifestyle.traits import canonical_traits
 
 import logging
 from dataclasses import dataclass
@@ -62,11 +63,12 @@ class Suggestions:
 _TRAIT_LINES = {
     ("sleep_schedule", "early_bird"): "Looks like we're both early risers! What's your usual weekday routine?",
     ("sleep_schedule", "night_owl"): "Fellow night owl here. How late do you usually stay up on weekdays?",
-    ("diet", "vegetarian"): "Nice to see another vegetarian! Do you cook at home much?",
-    ("diet", "vegan"): "Another vegan, great! Do you cook at home much?",
+    ("diet_preference", "pure_veg"): "Nice to see another vegetarian! Do you cook at home much?",
+    ("diet_preference", "jain"): "Another Jain household, lovely! Do you cook at home much?",
+    ("diet_preference", "vegan"): "Another vegan, great! Do you cook at home much?",
     ("work_arrangement", "remote"): "I work from home too. How do you like to set up your workspace?",
     ("smoking", "never"): "Glad we're both non-smokers. What else matters most to you in a flatmate?",
-    ("pets", "loves_pets"): "You love pets too! Do you have one, or are you planning to?",
+    ("pet_preference", "loves_pets"): "You love pets too! Do you have one, or are you planning to?",
 }
 
 
@@ -146,8 +148,8 @@ async def suggest_for_conversation(db: AsyncSession, conversation_id: UUID, user
         )).scalars().all()}
         my_profile = profiles.get(user_id)
         their_profile = profiles.get(other_ids[0]) if other_ids else None
-        mine = (my_profile.lifestyle_traits or {}) if my_profile else {}
-        theirs = (their_profile.lifestyle_traits or {}) if their_profile else {}
+        mine = canonical_traits(my_profile.lifestyle_traits) if my_profile else {}
+        theirs = canonical_traits(their_profile.lifestyle_traits) if their_profile else {}
         shared = [(k, v) for k, v in mine.items() if isinstance(v, str) and theirs.get(k) == v]
 
     if settings.AI_SMART_REPLIES_ENABLED and llm_configured():

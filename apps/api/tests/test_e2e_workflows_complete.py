@@ -101,6 +101,8 @@ async def test_workflow_a_flatmate_seeker_journey():
     # 5: Lifestyle Questionnaire
     lifestyle_service = LifestyleService(mock_db)
     lifestyle_service.get_by_user_id = AsyncMock(return_value=None)
+    # The profile copy of the answers is covered against a real database in test_lifestyle_traits.py.
+    lifestyle_service._sync_profile_traits = AsyncMock()
     ls_payload = LifestyleCreateOrUpdate(
         sleep_schedule="early_bird",
         work_arrangement="hybrid",

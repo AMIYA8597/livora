@@ -9,6 +9,7 @@ import { FlatmateCard } from "@/components/FlatmateCard";
 import { Input, Button, Badge, Skeleton, EmptyState, ErrorState } from "@flatmate/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { TOP_INDIAN_CITIES } from "@/lib/utils";
+import { DIET_OPTIONS } from "@/features/profile/lifestyle-options";
 import { upgradeFrom, type UpgradeHint } from "@/lib/billing-model";
 import { UpgradePrompt } from "@/components/billing/UpgradePrompt";
 import {
@@ -235,11 +236,9 @@ export default function FlatmatesDirectoryPage() {
             className="w-full text-xs font-semibold border border-slate-300 rounded-xl px-3.5 py-2.5 bg-white text-charcoal focus:ring-2 focus:ring-brand-500 cursor-pointer"
           >
             <option value="">Any Diet Preference</option>
-            <option value="vegetarian">Vegetarian</option>
-            <option value="vegan">Vegan</option>
-            <option value="omnivore">Eats everything</option>
-            <option value="pescatarian">Pescatarian</option>
-            <option value="halal">Halal</option>
+            {DIET_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
 
           <div className="flex gap-2">
