@@ -182,7 +182,9 @@ async def test_workflow_a_flatmate_seeker_journey():
     messaging_service = MessagingService(mock_db)
     mock_no_block = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
     mock_no_conv = MagicMock(scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None))))
-    mock_db.execute.side_effect = [mock_no_block, mock_no_conv]
+    # Nobody here turned direct messages off.
+    mock_no_dm_optout = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+    mock_db.execute.side_effect = [mock_no_block, mock_no_conv, mock_no_dm_optout]
     conv_req = CreateConversationRequest(
         type="direct",
         participant_user_ids=[candidate_id],

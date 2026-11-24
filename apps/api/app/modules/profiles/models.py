@@ -4,7 +4,7 @@ from typing import List, Optional
 from sqlalchemy import String, Integer, Text, Date, DateTime, ForeignKey, Float
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class Profile(Base):
     __tablename__ = "profiles"
@@ -28,8 +28,8 @@ class Profile(Base):
     lifestyle_vector: Mapped[list] = mapped_column(ARRAY(Float), default=list, nullable=False)
     lifestyle_traits: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     preferred_locations: Mapped[List[str]] = mapped_column(ARRAY(String), default=list, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # Relationships
     user = relationship("User", back_populates="profile")

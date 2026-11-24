@@ -1,7 +1,7 @@
 """
 "Ask the owner" listing chats against a real database: who can open one, reuse, contact details
 hidden until the owner confirms a visit (and staying visible after), the visit state rule that
-protects that, and the owner's response-time badge.
+protects that, the owner's response-time badge, and the "Allow direct messages" setting.
 """
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -26,7 +26,8 @@ from app.modules.notifications.models import Notification
 from app.modules.properties.models import Property
 from app.modules.properties.schemas import PropertyCreate
 from app.modules.properties.service import PropertyService
-from app.modules.users.models import User
+from app.modules.matching.models import MutualMatch
+from app.modules.users.models import User, UserPrivacySetting
 
 API = settings.API_V1_PREFIX
 PHONE = "98765 43210"
@@ -97,6 +98,8 @@ async def listing():
         await s.execute(delete(OutboxEvent).where(OutboxEvent.payload["property_id"].astext == str(pid)))
         # Listing creation also queues an embedding refresh, keyed by entity_id.
         await s.execute(delete(OutboxEvent).where(OutboxEvent.payload["entity_id"].astext == str(pid)))
+        # Visit updates email these users: unsent, those would reach other tests' mail capture.
+        await s.execute(delete(OutboxEvent).where(OutboxEvent.payload["to"].astext.like(f"{tag}-%")))
         await s.execute(delete(Notification).where(Notification.user_id.in_(users)))
         await s.execute(delete(Conversation).where(Conversation.id.in_(convs)))
         await s.execute(delete(Appointment).where(Appointment.property_id == pid))
@@ -261,3 +264,51 @@ async def test_owner_response_badge(async_client, listing):
 async def _badge(listing):
     async with AsyncSessionLocal() as s:
         return await owner_response(s, listing.owner)
+
+
+# ---------------------------------------------------------------- "Allow direct messages"
+
+async def _start(client, creator, others, type_="direct", **extra):
+    return await client.post(f"{API}/messaging/conversations", headers=auth(creator), json={
+        "participant_user_ids": [str(o) for o in others], "type": type_, **extra})
+
+
+async def _dms(user, allowed):
+    async with AsyncSessionLocal() as s:
+        s.add(UserPrivacySetting(user_id=user, allow_direct_messages=allowed))
+        await s.commit()
+
+
+async def test_people_who_turned_direct_messages_off_cant_be_messaged(async_client, listing):
+    # Chatting before they turned it off: that chat stays usable.
+    before = await _start(async_client, listing.seeker, [listing.other])
+    assert before.status_code == 201
+    await _dms(listing.other, False)
+
+    again = await _start(async_client, listing.seeker, [listing.other])
+    assert again.status_code == 201 and again.json() == before.json()
+
+    # Nobody new can start one, direct or by putting them in a group.
+    assert (await _start(async_client, listing.owner, [listing.other])).status_code == 403
+    group = await _start(async_client, listing.owner, [listing.other, listing.seeker], "group")
+    assert group.status_code == 403 and "direct messages" in group.json()["detail"]
+
+    # A mutual match can.
+    async with AsyncSessionLocal() as s:
+        s.add(MutualMatch(user_one_id=listing.owner, user_two_id=listing.other, compatibility_score=80.0, status="matched"))
+        await s.commit()
+    assert (await _start(async_client, listing.owner, [listing.other])).status_code == 201
+
+
+async def test_owners_cant_use_a_listing_chat_to_reach_seekers(async_client, listing):
+    await _dms(listing.seeker, False)
+    res = await _start(async_client, listing.owner, [listing.seeker], "property_inquiry",
+                       property_id=str(listing.property_id))
+    assert res.status_code == 400
+    # The seeker can still ask the owner.
+    assert (await _ask(async_client, listing.seeker, listing.property_id, "Hi")).status_code == 200
+
+
+async def test_only_checkable_chat_types_can_be_started(async_client, listing):
+    for kind in ("application_linked", "flatmate_match", "owner_tenant", "anything"):
+        assert (await _start(async_client, listing.seeker, [listing.other], kind)).status_code == 422

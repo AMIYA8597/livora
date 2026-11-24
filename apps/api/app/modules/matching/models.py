@@ -8,7 +8,7 @@ from sqlalchemy import String, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from typing import Optional
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class MatchInteraction(Base):
     __tablename__ = "match_interactions"
@@ -19,7 +19,7 @@ class MatchInteraction(Base):
     action: Mapped[str] = mapped_column(String(32), nullable=False) # like, pass, save, super_like
     # Ranking features as they were when the user acted (training data for app/ml/ranker.py).
     features: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "target_user_id", name="uq_user_interaction"),)
 
@@ -36,7 +36,7 @@ class MutualMatch(Base):
     algorithm_version: Mapped[str] = mapped_column(String(32), default="v1.0-india-heuristic", nullable=False)
     score_breakdown: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="matched", nullable=False) # matched, unmatched, blocked
-    matched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    matched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_one_id", "user_two_id", name="uq_mutual_match_pair"),)
 

@@ -75,17 +75,20 @@ export default function SeekerProfileDetailPage() {
       router.push("/login");
       return;
     }
+    setInteractionError(null);
     try {
-      await apiClient<{ conversation_id: string }>("/messaging/conversations", {
+      const res = await apiClient<{ conversation_id: string }>("/messaging/conversations", {
         method: "POST",
         body: JSON.stringify({
           participant_user_ids: [targetUserId],
           type: "direct",
         }),
       });
-      router.push("/messages");
-    } catch {
-      router.push("/messages");
+      router.push(`/messages?conversationId=${encodeURIComponent(res.conversation_id)}`);
+    } catch (err) {
+      // e.g. they don't accept direct messages, or one of you blocked the other: say so here
+      // instead of opening an inbox without the chat.
+      setInteractionError(err instanceof Error ? err.message : "Couldn't start a chat. Please try again.");
     }
   };
 

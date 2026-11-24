@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text, Float
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class LifestyleProfile(Base):
     __tablename__ = "lifestyle_profiles"
@@ -55,8 +55,8 @@ class LifestyleProfile(Base):
     preference_vector: Mapped[list] = mapped_column(ARRAY(Float), default=list, nullable=False)
     custom_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     user = relationship("User")
 
@@ -68,6 +68,6 @@ class UserDealbreaker(Base):
     rule_key: Mapped[str] = mapped_column(String(50), nullable=False) # e.g. "no_smoking_inside", "pure_veg_kitchen_only", "no_opposite_gender_overnight"
     is_strict: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     expected_value: Mapped[str] = mapped_column(String(100), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user = relationship("User")

@@ -65,7 +65,7 @@ export function PrivacySettingsForm({ initial, onSaved }: PrivacySettingsFormPro
       {notice && <InlineNotice tone={notice.tone} className="mb-4">{notice.text}</InlineNotice>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <Toggle id="pv-phone" title="Show mobile number" description="Let other verified users see your phone number." checked={phonePublic} onChange={setPhonePublic} />
-        <Toggle id="pv-dm" title="Allow direct messages" description="Let seekers and hosts start a chat with you." checked={allowDirectMessages} onChange={setAllowDirectMessages} />
+        <Toggle id="pv-dm" title="Allow direct messages" description="Let anyone start a chat with you. When off, only your matches can; owners still answer your questions about their listings, and chats you already have stay open." checked={allowDirectMessages} onChange={setAllowDirectMessages} />
         <Toggle
           id="pv-ranking"
           title="Personalised listings"

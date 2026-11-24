@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class PGBuilding(Base):
     __tablename__ = "pg_buildings"
@@ -31,7 +31,7 @@ class PGBuilding(Base):
     notice_period_days: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     biometric_entry: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     operator = relationship("User", foreign_keys=[operator_id])
     property = relationship("Property")

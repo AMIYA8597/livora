@@ -138,8 +138,11 @@ class ConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class CreateConversationRequest(BaseModel):
-    participant_user_ids: List[uuid.UUID]
-    type: str = "direct"
+    """A chat a person starts. Only the kinds the API can check: `direct` and `group` (each
+    other person must accept direct messages, or be a mutual match) and `property_inquiry` (a
+    listing chat, started by the person asking; see POST /messaging/listing-chats)."""
+    participant_user_ids: List[uuid.UUID] = Field(min_length=1, max_length=20)
+    type: Literal["direct", "group", "property_inquiry"] = "direct"
     title: Optional[str] = None
     property_id: Optional[uuid.UUID] = None
     application_id: Optional[uuid.UUID] = None

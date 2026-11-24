@@ -10,7 +10,7 @@ from sqlalchemy import String, Integer, Numeric, Boolean, Text, Date, DateTime, 
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from geoalchemy2 import Geometry
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class Property(Base):
     __tablename__ = "properties"
@@ -58,8 +58,8 @@ class Property(Base):
     # Owner Pro: listed first and badged until this time (the end of the owner's paid period).
     featured_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         CheckConstraint("current_occupants <= max_capacity", name="chk_prop_capacity_overflow"),
@@ -86,7 +86,7 @@ class Room(Base):
     occupied_beds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     available_from: Mapped[date] = mapped_column(Date, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (
         CheckConstraint("occupied_beds <= max_beds", name="chk_room_bed_capacity"),

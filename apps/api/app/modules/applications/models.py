@@ -5,7 +5,7 @@ from typing import Optional, List
 from sqlalchemy import Boolean, String, Numeric, Text, Date, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class Application(Base):
     __tablename__ = "applications"
@@ -20,8 +20,8 @@ class Application(Base):
     proposed_rent: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     move_in_target: Mapped[date] = mapped_column(Date, nullable=False)
     documents: Mapped[List[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
-    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     # Relationships
     applicant = relationship("User", foreign_keys=[applicant_id])

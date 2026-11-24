@@ -7,7 +7,7 @@ from typing import List, Optional
 from sqlalchemy import String, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class User(Base):
     __tablename__ = "users"
@@ -21,8 +21,8 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     phone_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     # Set when the account has been erased: the row stays as an anonymous tombstone so messages
     # others received and de-identified payment records keep a valid reference.
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -40,7 +40,7 @@ class UserRole(Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False) # e.g. seeker, tenant, owner, pg_operator, broker, admin
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, nullable=False)
-    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_role"),)
 
@@ -57,7 +57,7 @@ class UserPrivacySetting(Base):
     profile_visibility: Mapped[str] = mapped_column(String(32), default="public", nullable=False) # public, matched_only, private
     # Rank listings using what this person viewed, saved and applied to (migration 018).
     personalized_ranking: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="privacy_settings")
 

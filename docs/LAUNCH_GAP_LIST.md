@@ -263,11 +263,24 @@ committed on your OK.
       reply". System notes don't count as replies, here or in the P3 reply-rate feature.
       *Also fixed:* chat bubbles now keep line breaks, and editing a message shows the server's
       copy.
-- [ ] **P4b. "Allow direct messages" is not enforced.** (Found during P4.) The Privacy
+- [x] **P4b. "Allow direct messages" is not enforced.** (Found during P4.) The Privacy
       switch is saved (`user_privacy_settings.allow_direct_messages`), but nothing checks it:
       anyone can start a direct chat with someone who turned it off. Enforce it when a
       `direct` chat is created (listing chats and chats from a match, application or group
       stay allowed), and say so on the switch.
+      *Done:* starting a `direct` or `group` chat now checks each other person's switch;
+      mutual matches can always reach each other. Chats that already exist keep working,
+      since the switch is about who can *start* one. `POST /messaging/conversations` only
+      accepts the kinds it can check (`direct`, `group`, `property_inquiry`; anything else is
+      a 422), so the switch can't be sidestepped with another `type`. Listing chats are
+      started by the person asking, so an owner can't use one to reach seekers who opted out.
+      The flatmate profile's "Chat Directly" button shows the refusal instead of silently
+      opening the inbox, and the switch now says what it does.
+      *Also fixed:* every column defaulting to a naive `datetime.utcnow` (15 model files)
+      now uses an aware `utcnow()` (`app/core/database.py`). asyncpg sends a naive datetime
+      as the machine's local time, so on a machine set to India time those timestamps were
+      stored 5h30 early. Likes made between midnight and 05:30 IST counted as the previous
+      day's, skipping the free daily cap. Containers in UTC hid this.
 - [ ] **P5. Architecture write-up.** One document with each layer's job (web, API routers,
       services, models, workers, ML, storage), how a request flows, and the rules each layer keeps,
       so new code (and the mobile apps) follow it.

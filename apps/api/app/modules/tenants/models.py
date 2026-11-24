@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import String, Numeric, Boolean, Date, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class TenantMembership(Base):
     __tablename__ = "tenant_memberships"
@@ -25,7 +25,7 @@ class TenantMembership(Base):
     status: Mapped[str] = mapped_column(String(32), default="active", nullable=False) # active, notice_period, vacated, terminated
     is_primary_tenant: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     property = relationship("Property")
     room = relationship("Room")
@@ -48,7 +48,7 @@ class ExistingTenantVacancy(Base):
     preferred_gender: Mapped[str] = mapped_column(String(32), default="any", nullable=False) # any, female_only, male_only
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     property = relationship("Property")
     room = relationship("Room")

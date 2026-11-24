@@ -20,7 +20,8 @@ from app.modules.messaging.schemas import (
     ConversationPreferenceRequest, AddParticipantRequest
 )
 from app.modules.properties.models import Property
-from app.modules.users.models import User
+from app.modules.users.models import User, UserPrivacySetting
+from app.modules.matching.models import MutualMatch
 from app.modules.messaging.websocket import manager
 from app.modules.messaging.contact_guard import hide_contacts, is_locked, locked_conversations
 from app.modules.moderation.models import UserBlock
@@ -322,6 +323,31 @@ class MessagingService:
             "last_message_at": conv.last_message_at,
         }
 
+    async def _check_accepts_direct_messages(self, creator_id: UUID, others: List[UUID]) -> None:
+        closed = list((await self.db.execute(
+            select(UserPrivacySetting.user_id).where(
+                UserPrivacySetting.user_id.in_(others),
+                UserPrivacySetting.allow_direct_messages.is_(False),
+            )
+        )).scalars().all())
+        if not closed:
+            return
+        matched = set((await self.db.execute(
+            select(MutualMatch.user_one_id, MutualMatch.user_two_id).where(
+                MutualMatch.status == "matched",
+                or_(
+                    and_(MutualMatch.user_one_id == creator_id, MutualMatch.user_two_id.in_(closed)),
+                    and_(MutualMatch.user_two_id == creator_id, MutualMatch.user_one_id.in_(closed)),
+                ),
+            )
+        )).all())
+        matched_ids = {a if b == creator_id else b for a, b in matched}
+        if any(uid not in matched_ids for uid in closed):
+            raise ForbiddenException(
+                "This person isn't accepting direct messages. You can still like their profile; "
+                "if you match, you can chat."
+            )
+
     async def _listing_for_chat(self, property_id: Optional[UUID]) -> Property:
         """A live listing whose owner's account is open, or 404."""
         prop = None
@@ -393,6 +419,10 @@ class MessagingService:
             prop = await self._listing_for_chat(req.property_id)
             if len(target_uids) != 2 or prop.owner_id not in target_uids:
                 raise BadRequestException("A listing chat is between the listing's owner and one other person.")
+            # Started by the person asking; otherwise an owner could use a "listing chat" to reach
+            # people who turned direct messages off.
+            if prop.owner_id == creator_id:
+                raise BadRequestException("Listing chats are started by the person asking about the listing.")
 
         # 1. Moderation & Safety check: Cannot start conversation if blocked
         for other_id in req.participant_user_ids:
@@ -446,6 +476,12 @@ class MessagingService:
             existing_conv = (await self.db.execute(existing_q)).scalars().first()
             if existing_conv:
                 return existing_conv
+
+        # 2b. Starting a direct or group chat respects each person's "Allow direct messages"
+        # setting; mutual matches can always reach each other. (Existing chats, found above, keep
+        # working: the setting is about who can start one.)
+        if req.type in ("direct", "group"):
+            await self._check_accepts_direct_messages(creator_id, [u for u in target_uids if u != creator_id])
 
         # 3. Create new conversation
         conv = Conversation(

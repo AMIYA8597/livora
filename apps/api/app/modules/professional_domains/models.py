@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class ProfessionalDomain(Base):
     __tablename__ = "professional_domains"
@@ -18,7 +18,7 @@ class ProfessionalDomain(Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     professions: Mapped[List["Profession"]] = relationship("Profession", back_populates="domain", cascade="all, delete-orphan")
 

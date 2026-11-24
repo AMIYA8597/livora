@@ -2,6 +2,7 @@ import logging
 from typing import Any, AsyncGenerator, Dict
 from urllib.parse import urlparse
 from uuid import uuid4
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from app.core.config import settings
@@ -44,6 +45,13 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
+def utcnow() -> datetime:
+    """Timezone-aware now, for column defaults. A naive datetime.utcnow() is sent by asyncpg as
+    the machine's LOCAL time: on a machine set to India time every default timestamp was stored
+    5h30 early (likes made after midnight counted as yesterday's, skipping the daily cap)."""
+    return datetime.now(timezone.utc)
+
 
 class Base(DeclarativeBase):
     pass

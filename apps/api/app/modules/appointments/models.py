@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import String, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+from app.core.database import Base, utcnow
 
 class Appointment(Base):
     __tablename__ = "appointments"
@@ -25,8 +25,8 @@ class Appointment(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cancellation_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     property = relationship("Property")
     host = relationship("User", foreign_keys=[host_id])
