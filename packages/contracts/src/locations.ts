@@ -22,3 +22,9 @@ export interface StateDTO {
   capital: string | null;
   capital_slug: string | null;
 }
+
+/** GET /locations/nearest: the open city closest to a point. */
+export interface NearestCityDTO {
+  city: CityDTO;
+  distance_km: number;
+}

@@ -3,7 +3,7 @@ from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select, text
 from sqlalchemy.orm import selectinload
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.shape import to_shape
@@ -15,7 +15,7 @@ from app.ml.moderation import prescreen
 from app.ml.moderation_jobs import ai_moderation_on, queue_property_moderation
 from app.ml.search import clean_query, rank_properties
 from app.modules.billing.entitlements import ensure_can_publish
-from app.modules.locations.service import LocationService, city_condition
+from app.modules.locations.service import LocationService, city_condition, distance_km
 
 VALID_LISTING_STATUSES = {"draft", "pending_verification", "published", "paused", "archived"}
 # Changes to these refresh the listing's search embedding / trigger a safety review.
@@ -148,10 +148,22 @@ class PropertyService:
         q: Optional[str] = None,
         locality: Optional[str] = None,
         furnishing_status: Optional[str] = None,
+        near: Optional[tuple] = None,
+        radius_km: float = 10.0,
     ) -> List[dict]:
+        """`near` is a (lat, lng) point: only listings within `radius_km` of it, nearest first
+        (or by relevance when there is free text), each with its distance."""
         conditions = [Property.is_active.is_(True), Property.listing_status == "published"]
+        distance = None
+        if near is not None:
+            # PostGIS on (location::geography), which has a GiST index (migration 004). Metres.
+            here = text("ST_SetSRID(ST_MakePoint(:near_lng, :near_lat), 4326)::geography").bindparams(
+                near_lng=float(near[1]), near_lat=float(near[0]))
+            geog = literal_column("properties.location::geography")
+            conditions.append(func.ST_DWithin(geog, here, float(radius_km) * 1000.0))
+            distance = func.ST_Distance(geog, here)
         if locality:
-            conditions.append(Property.address_display.ilike(f"%{locality}%"))
+            conditions.append(Property.address_display.icontains(locality, autoescape=True))
         if furnishing_status:
             conditions.append(Property.furnishing_status == furnishing_status)
         if city:
@@ -185,14 +197,25 @@ class PropertyService:
                 return []
             rows = (await self.db.execute(query.where(Property.id.in_(page_ids)))).scalars().all()
             by_id = {p.id: p for p in rows}
-            return [self._format_property_response(by_id[i]) for i in page_ids if i in by_id]
+            return [self._with_distance(self._format_property_response(by_id[i]), near) for i in page_ids if i in by_id]
 
-        # Featured (Owner Pro) listings first, then newest.
-        featured = func.coalesce(Property.featured_until > func.now(), False)
-        query = query.order_by(featured.desc(), Property.created_at.desc()).limit(limit).offset(offset)
-        result = await self.db.execute(query)
+        if distance is not None:
+            query = query.order_by(distance, Property.id)
+        else:
+            # Featured (Owner Pro) listings first, then newest.
+            featured = func.coalesce(Property.featured_until > func.now(), False)
+            query = query.order_by(featured.desc(), Property.created_at.desc())
+        result = await self.db.execute(query.limit(limit).offset(offset))
         props = result.scalars().all()
-        return [self._format_property_response(p) for p in props]
+        return [self._with_distance(self._format_property_response(p), near) for p in props]
+
+    @staticmethod
+    def _with_distance(item: dict, near: Optional[tuple]) -> dict:
+        """Distance to the position the response shows (approximate for everyone but the owner),
+        so it reveals nothing the map pin doesn't."""
+        if near is not None:
+            item["distance_km"] = round(distance_km(near[0], near[1], item["latitude"], item["longitude"]), 1)
+        return item
 
     async def create(self, owner_id: UUID, data: PropertyCreate) -> dict:
         # Invariant: current occupants cannot exceed max capacity

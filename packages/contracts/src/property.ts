@@ -49,6 +49,8 @@ export interface PropertyDTO {
   latitude: number;
   longitude: number;
   fuzzed_coordinates?: FuzzedCoordinatesDTO;
+  /** Only in near-me searches: km from the searcher to the listing's shown position. */
+  distance_km?: number | null;
   address?: string;
   address_display?: string;
   address_exact?: string;

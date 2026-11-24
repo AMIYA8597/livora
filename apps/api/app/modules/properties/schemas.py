@@ -99,6 +99,8 @@ class PropertyResponse(PropertyBase):
     owner_id: uuid.UUID
     listing_status: str
     is_featured: bool = False
+    # Only when searching near a point: km from it to the listing's shown (approximate) position.
+    distance_km: Optional[float] = None
     is_verified: bool
     is_active: bool
     rooms: List[RoomResponse] = []

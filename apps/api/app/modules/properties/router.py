@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import require_roles, get_current_user
 from app.core.security import decode_token
-from app.core.exceptions import NotFoundException
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.users.models import User
 from app.modules.properties.schemas import (
     PropertyResponse,
@@ -33,12 +33,19 @@ async def list_properties(
     q: Optional[str] = Query(None, max_length=300, description="Free text, e.g. 'quiet furnished room near Indiranagar metro'. Results are ordered by relevance."),
     locality: Optional[str] = Query(None, max_length=100, description="Locality name contained in the listing's public address"),
     furnishing_status: Optional[str] = Query(None, description="fully_furnished, semi_furnished, unfurnished"),
+    near_lat: Optional[float] = Query(None, ge=-90, le=90, description="With near_lng: only listings near this point, nearest first"),
+    near_lng: Optional[float] = Query(None, ge=-180, le=180),
+    radius_km: float = Query(10, ge=1, le=100, description="How far from near_lat/near_lng"),
     limit: int = Query(20, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
+    if (near_lat is None) != (near_lng is None):
+        raise BadRequestException("Send both near_lat and near_lng, or neither.")
     service = PropertyService(db)
     return await service.list_properties(
+        near=(near_lat, near_lng) if near_lat is not None else None,
+        radius_km=radius_km,
         q=q,
         locality=locality,
         furnishing_status=furnishing_status,

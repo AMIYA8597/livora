@@ -184,6 +184,18 @@ committed on your OK.
 - [ ] **P2. Current location and real addresses.** "Near me" from the browser's location (asked,
       never stored), nearest supported city, radius search (PostGIS is ready), and geocoding a
       listing's address instead of using the city centre. *Needs your choice of map provider.*
+      *Done so far (no provider needed):* `GET /properties` takes `near_lat`/`near_lng`/`radius_km`
+      (1-100 km). It filters with PostGIS on the indexed geography, orders nearest first (or by
+      relevance with free text), and gives each listing a `distance_km`. That distance is measured
+      to the approximate position the response shows, so it reveals nothing the map pin doesn't.
+      `GET /locations/nearest` names the closest open city (`private, no-store`). On the web, the
+      browse page and the home search have "Near me". It asks for the position only on a tap,
+      rounds it to about 1 km before sending, and keeps it in memory: not in storage, and the URL
+      holds only `near=1`. The API logs paths only and Sentry drops query strings. There is a
+      distance picker (2-50 km), and cards show "2.5 km away". When nothing is near, the page
+      offers a wider distance, then the nearest city. Blocked, unavailable and timed-out
+      locations each say what to do. *Still open:* turning an owner's address into a map
+      position. Listings still sit at their city centre until a provider is chosen.
 - [ ] **P3. Room-finding ranking.** Rank listings per person: relevance, distance, budget fit,
       move-in date, verified owner, photo/description quality, freshness, owner response rate,
       and what the person saved, viewed or applied to; spam and duplicate listings pushed down.

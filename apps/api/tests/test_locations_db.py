@@ -149,3 +149,55 @@ async def test_groups_save_a_known_city_by_its_official_name_and_keep_others_as_
             await s.execute(delete(Group).where(Group.creator_id == creator))
             await s.execute(delete(User).where(User.id == creator))
             await s.commit()
+
+
+async def test_nearest_city_to_a_point(async_client):
+    res = await async_client.get(f"{API}/locations/nearest", params={"lat": 34.16, "lng": 77.58})
+    assert res.status_code == 200
+    assert res.headers["cache-control"] == "private, no-store"  # a visitor's position is never cached
+    assert res.json()["city"]["name"] == "Leh" and res.json()["distance_km"] < 2
+    # Navi Mumbai isn't a catalogue city: the answer is Mumbai, about 25 km away.
+    res = await async_client.get(f"{API}/locations/nearest", params={"lat": 19.03, "lng": 73.03})
+    body = res.json()
+    assert body["city"]["name"] == "Mumbai" and 15 < body["distance_km"] < 35
+    assert (await async_client.get(f"{API}/locations/nearest", params={"lat": 95, "lng": 77})).status_code == 422
+
+
+async def test_listings_near_a_point_come_nearest_first_with_their_distance(async_client):
+    owners = [uuid4(), uuid4()]
+    tag = uuid4().hex[:8]
+    async with AsyncSessionLocal() as s:
+        for i, o in enumerate(owners):
+            s.add(User(id=o, email=f"near{i}-{tag}@example.com", hashed_password="x", full_name="Nina Owner", role="owner"))
+        await s.commit()
+    try:
+        ids = []
+        for owner, (lat, lng) in zip(owners, [(12.9352, 77.6245), (13.1000, 77.5900)]):  # Koramangala, Yelahanka
+            listing = _listing("Bengaluru", f"Near room {tag}").model_copy(update={"latitude": lat, "longitude": lng})
+            async with AsyncSessionLocal() as s:
+                ids.append(str((await PropertyService(s).create(owner, listing))["id"]))
+        here = {"near_lat": 12.93, "near_lng": 77.62, "limit": 100}
+
+        res = await async_client.get(f"{API}/properties", params={**here, "radius_km": 5})
+        assert res.status_code == 200
+        found = {p["id"]: p for p in res.json()}
+        assert ids[0] in found and ids[1] not in found
+        assert found[ids[0]]["distance_km"] < 2
+
+        res = await async_client.get(f"{API}/properties", params={**here, "radius_km": 30, "city": "Bangalore"})
+        ours = [p for p in res.json() if p["id"] in ids]
+        assert [p["id"] for p in ours] == ids  # nearest first
+        assert 15 < ours[1]["distance_km"] < 25
+        distances = [p["distance_km"] for p in res.json()]
+        assert distances == sorted(distances)
+
+        plain = await async_client.get(f"{API}/properties", params={"city": "Bengaluru", "limit": 100})
+        assert all(p.get("distance_km") is None for p in plain.json())
+        half = await async_client.get(f"{API}/properties", params={"near_lat": 12.93})
+        assert half.status_code == 400
+        assert (await async_client.get(f"{API}/properties", params={**here, "radius_km": 500})).status_code == 422
+    finally:
+        async with AsyncSessionLocal() as s:
+            await s.execute(delete(Property).where(Property.owner_id.in_(owners)))
+            await s.execute(delete(User).where(User.id.in_(owners)))
+            await s.commit()

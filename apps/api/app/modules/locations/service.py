@@ -5,8 +5,9 @@ Listings are saved under the official city name, and searches by any name find t
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,6 +82,26 @@ class LocationService:
                     or any(_key(a) == key for a in city.aliases):
                 return city
         return None
+
+
+def distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance in kilometres (haversine; within 0.5% of PostGIS's spheroid)."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371.0088 * math.asin(min(1.0, math.sqrt(a)))
+
+
+async def nearest_city(db: AsyncSession, lat: float, lng: float) -> Optional[Tuple[CatalogueCity, float]]:
+    """The open catalogue city closest to a point, and how far it is (km)."""
+    best: Optional[Tuple[CatalogueCity, float]] = None
+    for city in await LocationService(db).cities():
+        if city.latitude is None or city.longitude is None:
+            continue
+        d = distance_km(lat, lng, city.latitude, city.longitude)
+        if best is None or d < best[1]:
+            best = (city, d)
+    return best
 
 
 async def city_condition(db: AsyncSession, column, value: str):

@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MapPin, IndianRupee, Home } from "lucide-react";
+import { Search, MapPin, IndianRupee, Home, LocateFixed } from "lucide-react";
 import { Button } from "@flatmate/ui";
 import { CitySelect } from "@/features/locations/CitySelect";
 import { useCities } from "@/hooks/useCities";
@@ -100,6 +100,14 @@ export const SearchBar: React.FC = () => {
 
       {/* Quick City Filter Chips */}
       <div className="flex items-center justify-center flex-wrap gap-1.5 text-xs text-charcoal-muted pt-1">
+        <button
+          type="button"
+          onClick={() => router.push("/properties?near=1")}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-forest text-white hover:bg-forest-light font-semibold transition-colors mr-1"
+        >
+          <LocateFixed className="w-3.5 h-3.5" aria-hidden="true" />
+          Near me
+        </button>
         <span className="font-medium mr-1">Popular:</span>
         {popularCities(cities).map((c) => (
           <button

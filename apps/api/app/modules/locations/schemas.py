@@ -17,6 +17,11 @@ class CityOut(BaseModel):
     aliases: List[str] = []
 
 
+class NearestCityOut(BaseModel):
+    city: CityOut
+    distance_km: float
+
+
 class StateOut(BaseModel):
     code: str
     name: str

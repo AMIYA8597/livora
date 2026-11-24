@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { PropertyDTO } from "@flatmate/contracts";
+import type { NearestCityDTO, PropertyDTO } from "@flatmate/contracts";
 import { ApiError } from "@/lib/api-client";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { type AppliedFilters, filtersFromSearch, LISTINGS_PAGE_SIZE, listingQueryParams } from "@/lib/listing-query";
@@ -12,6 +12,8 @@ import { formatCurrency } from "@/lib/utils";
 import { CityDatalist } from "@/features/locations/CityDatalist";
 import { useCities } from "@/hooks/useCities";
 import { popularCities } from "@/lib/locations";
+import { useNearMe } from "@/hooks/useNearMe";
+import { DEFAULT_RADIUS_KM, nearParams, RADIUS_CHOICES } from "@/lib/near-me";
 import {
   Search,
   MapPin,
@@ -20,6 +22,7 @@ import {
   ArrowUpDown,
   X,
   Filter,
+  LocateFixed,
 } from "lucide-react";
 
 
@@ -45,6 +48,11 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
   const [sortBy, setSortBy] = useState(searchParams.get("sort") || "newest");
   const [page, setPage] = useState(() => filtersFromSearch((k) => searchParams.get(k)).page);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  // "Near me": the position lives in memory only; the URL just says near=1 so a reload asks again.
+  const [cameForNearMe] = useState(() => searchParams.get("near") === "1"); // first load only
+  const nearMe = useNearMe({ askOnMount: cameForNearMe });
+  const [radius, setRadius] = useState(DEFAULT_RADIUS_KM);
+  const nearOn = nearMe.status === "on" || nearMe.status === "asking";
 
   const PAGE_SIZE = LISTINGS_PAGE_SIZE;
 
@@ -56,7 +64,15 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
     setPage(1);
   };
 
-  const propertiesQuery = useApiQuery<PropertyDTO[]>("/properties", listingQueryParams(applied, page), { initial });
+  const propertiesQuery = useApiQuery<PropertyDTO[]>(
+    "/properties",
+    { ...listingQueryParams(applied, page), ...nearParams(nearMe.near, radius) },
+    { initial },
+  );
+  const nearest = useApiQuery<NearestCityDTO>(
+    nearMe.near ? "/locations/nearest" : null,
+    nearMe.near ? { lat: nearMe.near.lat, lng: nearMe.near.lng } : undefined,
+  ).data;
   const fetched = propertiesQuery.data ?? [];
   // In-memory sorting for marketplace ordering
   const properties =
@@ -86,13 +102,14 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
       furnishing: applied.furnishing,
       sort: sortBy === "newest" ? "" : sortBy,
       page: page === 1 ? "" : page,
+      near: nearOn ? "1" : "",
     };
     Object.entries(entries).forEach(([k, v]) => {
       if (v !== "") url.searchParams.set(k, String(v));
       else url.searchParams.delete(k);
     });
     window.history.replaceState(null, "", url.toString());
-  }, [applied, sortBy, page]);
+  }, [applied, sortBy, page, nearOn]);
 
   const handleFilterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +128,20 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
     apply();
   };
 
+  // Near me replaces the city filter: the point already says where.
+  const startNearMe = () => {
+    nearMe.ask();
+    setCity("");
+    apply({ city: "" });
+  };
+  const stopNearMe = () => {
+    nearMe.clear();
+    setPage(1);
+  };
+  const widerRadius = RADIUS_CHOICES.find((r) => r > radius);
+
   const handleReset = () => {
+    nearMe.clear();
     setQ("");
     setCity("");
     setLocality("");
@@ -127,6 +157,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
 
   // Chips show what is applied; removing one clears both the draft and the applied value.
   const activeFilters = [
+    nearMe.near && { label: `Near you: within ${radius} km`, onRemove: stopNearMe },
     applied.q && { label: `Search: “${applied.q}”`, onRemove: () => { setQ(""); apply({ q: "" }); } },
     applied.city && { label: `City: ${applied.city}`, onRemove: () => { setCity(""); apply({ city: "" }); } },
     applied.minRent && { label: `Min: ${formatCurrency(applied.minRent)}`, onRemove: () => { setMinRent(""); apply({ minRent: "" }); } },
@@ -160,7 +191,7 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
               onChange={(e) => setSortBy(e.target.value)}
               className="bg-transparent focus:outline-none cursor-pointer"
             >
-              <option value="newest">{applied.q ? "Best match" : "Newest First"}</option>
+              <option value="newest">{applied.q ? "Best match" : nearMe.near ? "Nearest first" : "Newest First"}</option>
               <option value="price_asc">Rent: Low to High</option>
               <option value="price_desc">Rent: High to Low</option>
             </select>
@@ -195,6 +226,53 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
         </div>
         <Button type="submit" variant="primary" className="min-h-[44px] shrink-0">Search</Button>
       </form>
+
+      {/* Near me: asked only on tap, rounded to ~1 km, never saved */}
+      <div className="flex flex-wrap items-center gap-2 text-sm" aria-live="polite">
+        {nearMe.status === "on" ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 font-semibold text-forest">
+              <LocateFixed className="w-4 h-4" aria-hidden="true" /> Near you, within
+            </span>
+            <label htmlFor="near-radius" className="sr-only">Distance</label>
+            <select
+              id="near-radius"
+              value={radius}
+              onChange={(e) => { setRadius(Number(e.target.value)); setPage(1); }}
+              className="min-h-[36px] px-2 rounded-lg border border-warm-200 bg-white text-sm font-semibold text-charcoal focus:outline-none focus:ring-2 focus:ring-forest/40"
+            >
+              {RADIUS_CHOICES.map((r) => <option key={r} value={r}>{r} km</option>)}
+            </select>
+            {nearest && (
+              <span className="text-charcoal-muted text-xs">
+                Nearest city we cover: <strong className="text-charcoal">{nearest.city.name}</strong>
+                {nearest.distance_km >= 1 ? ` (${Math.round(nearest.distance_km)} km)` : ""}
+              </span>
+            )}
+            <button type="button" onClick={stopNearMe} className="text-xs font-semibold text-charcoal-muted hover:text-charcoal underline">
+              Turn off
+            </button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={startNearMe}
+            disabled={nearMe.status === "asking"}
+            className="inline-flex items-center gap-1.5 min-h-[40px]"
+          >
+            <LocateFixed className="w-4 h-4" aria-hidden="true" />
+            {nearMe.status === "asking" ? "Finding your location…" : "Near me"}
+          </Button>
+        )}
+        {nearMe.status === "error" && nearMe.message && (
+          <span role="alert" className="text-xs text-amber-800">{nearMe.message}</span>
+        )}
+        {nearMe.status === "off" && (
+          <span className="text-xs text-charcoal-muted">Uses your approximate location once. It isn&apos;t saved.</span>
+        )}
+      </div>
 
       {/* Desktop Filter Form */}
       <form
@@ -447,7 +525,23 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
             <Skeleton key={n} variant="card" />
           ))}
         </div>
-      ) : error ? null : properties.length === 0 ? (
+      ) : error ? null : properties.length === 0 && nearMe.near ? (
+        <EmptyState
+          icon={MapPin}
+          title={`Nothing within ${radius} km yet`}
+          description={
+            nearest
+              ? `The nearest city we cover is ${nearest.city.name}${nearest.distance_km >= 1 ? `, about ${Math.round(nearest.distance_km)} km away` : ""}.`
+              : "Try a wider distance, or choose a city."
+          }
+          actionLabel={widerRadius ? `Search within ${widerRadius} km` : nearest ? `Browse ${nearest.city.name}` : "Choose a city"}
+          onAction={() => {
+            if (widerRadius) { setRadius(widerRadius); setPage(1); return; }
+            stopNearMe();
+            if (nearest) { setCity(nearest.city.name); apply({ city: nearest.city.name }); }
+          }}
+        />
+      ) : properties.length === 0 ? (
         <EmptyState
           icon={MapPin}
           title="No properties match your search"

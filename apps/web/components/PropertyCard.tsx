@@ -8,6 +8,7 @@ import { Card, Badge } from "@flatmate/ui";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ListingImage } from "@/components/ListingImage";
 import { MapPin, Bed, Bath, Sparkles, Heart, ShieldCheck, Check, ImageOff, Star } from "lucide-react";
+import { formatDistance } from "@/lib/near-me";
 
 export interface PropertyCardProps {
   property: PropertyDTO;
@@ -34,8 +35,9 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
 
   const thumbnail = property.images?.[0];
 
-  const displayLocation =
-    property.address_display || (property.city ? `${property.city}` : "India");
+  const baseLocation = property.address_display || (property.city ? `${property.city}` : "India");
+  const distance = formatDistance(property.distance_km);
+  const displayLocation = distance ? `${baseLocation} · ${distance}` : baseLocation;
 
   const furnishingLabel =
     property.furnishing_status === "fully_furnished" || (property.furnishing_status as string) === "furnished"
