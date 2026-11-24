@@ -7,11 +7,12 @@ from typing import Any, List, Optional
 from uuid import UUID
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import ColumnElement, select, or_, func, literal_column, text
+from sqlalchemy import ColumnElement, select, func, literal_column, text
 from app.modules.properties.models import Property
 from app.modules.profiles.models import Profile
 from app.modules.users.models import User
 from app.infrastructure.geospatial import fuzz_coordinates
+from app.ml.search import clean_query, rank_properties
 from app.modules.search.schemas import (
     PropertySearchFilter,
     PropertySearchResultItem,
@@ -34,66 +35,66 @@ class SearchService:
         filters: PropertySearchFilter,
         is_authenticated_viewer: bool = False
     ) -> List[PropertySearchResultItem]:
-        # Coordinates come straight from PostGIS; no client-side WKB decoding or default point.
-        query = (
-            select(
-                Property,
-                func.ST_Y(Property.location).label("lat"),
-                func.ST_X(Property.location).label("lng"),
-            )
-            .where(Property.is_active.is_(True))
-            .where(Property.listing_status == "published")
-        )
-
-        # Free-text keyword search
-        if filters.query:
-            term = f"%{filters.query}%"
-            query = query.where(
-                or_(
-                    Property.title.ilike(term),
-                    Property.description.ilike(term),
-                    Property.address_display.ilike(term),
-                    Property.city.ilike(term),
-                )
-            )
-
+        conditions: List[ColumnElement[bool]] = [
+            Property.is_active.is_(True),
+            Property.listing_status == "published",
+        ]
         if filters.city:
-            query = query.where(Property.city.ilike(f"%{filters.city}%"))
+            conditions.append(Property.city.ilike(f"%{filters.city}%"))
         if filters.property_category:
-            query = query.where(Property.property_category == filters.property_category)
+            conditions.append(Property.property_category == filters.property_category)
         if filters.configuration:
-            query = query.where(Property.configuration == filters.configuration)
+            conditions.append(Property.configuration == filters.configuration)
         if filters.min_rent is not None:
-            query = query.where(Property.monthly_rent >= filters.min_rent)
+            conditions.append(Property.monthly_rent >= filters.min_rent)
         if filters.max_rent is not None:
-            query = query.where(Property.monthly_rent <= filters.max_rent)
+            conditions.append(Property.monthly_rent <= filters.max_rent)
         if filters.furnishing_status:
-            query = query.where(Property.furnishing_status == filters.furnishing_status)
+            conditions.append(Property.furnishing_status == filters.furnishing_status)
         if filters.pets_allowed is not None:
-            query = query.where(Property.pets_allowed.is_(filters.pets_allowed))
+            conditions.append(Property.pets_allowed.is_(filters.pets_allowed))
         if filters.smoking_allowed is not None:
-            query = query.where(Property.smoking_allowed.is_(filters.smoking_allowed))
+            conditions.append(Property.smoking_allowed.is_(filters.smoking_allowed))
+
+        # Coordinates come straight from PostGIS; no client-side WKB decoding or default point.
+        query = select(
+            Property,
+            func.ST_Y(Property.location).label("lat"),
+            func.ST_X(Property.location).label("lng"),
+        )
 
         center_lat, center_lng = filters.latitude, filters.longitude
         has_center = center_lat is not None and center_lng is not None
+        distance_km = None
         if center_lat is not None and center_lng is not None:
-            # Radius filter and distance ordering run in PostGIS BEFORE pagination, using the
-            # GiST index on (location::geography) from migration 004. Distances are metres.
+            # Radius filter and distance run in PostGIS BEFORE pagination, using the GiST index on
+            # (location::geography) from migration 004. Distances are metres.
             location_geog: ColumnElement[Any] = literal_column("properties.location::geography")
             center_geog = text(
                 "ST_SetSRID(ST_MakePoint(:center_lng, :center_lat), 4326)::geography"
             ).bindparams(center_lng=float(center_lng), center_lat=float(center_lat))
             distance_km = (func.ST_Distance(location_geog, center_geog) / 1000.0).label("distance_km")
-            query = (
-                query.add_columns(distance_km)
-                .where(func.ST_DWithin(location_geog, center_geog, float(filters.radius_km) * 1000.0))
-                .order_by(distance_km, Property.id)
-            )
-        else:
-            query = query.order_by(Property.created_at.desc(), Property.id)
+            conditions.append(func.ST_DWithin(location_geog, center_geog, float(filters.radius_km) * 1000.0))
+            query = query.add_columns(distance_km)
+        query = query.where(*conditions)
 
-        query = query.limit(filters.limit).offset(filters.offset)
-        rows = (await self.db.execute(query)).all()
+        text_query = clean_query(filters.query)
+        if text_query:
+            # The same hybrid search as the listings page (app/ml/search.py): full text on the
+            # weighted search_tsv index (stemming, phrases, -exclusions) fused with embeddings,
+            # over the filtered set. Results come in relevance order; the radius still filters.
+            ranking = await rank_properties(self.db, text_query, select(Property.id).where(*conditions))
+            page_ids = ranking.ids[filters.offset:filters.offset + filters.limit]
+            if not page_ids:
+                return []
+            by_id = {row[0].id: row for row in (await self.db.execute(query.where(Property.id.in_(page_ids)))).all()}
+            rows = [by_id[i] for i in page_ids if i in by_id]
+        else:
+            if distance_km is not None:
+                query = query.order_by(distance_km, Property.id)
+            else:
+                query = query.order_by(Property.created_at.desc(), Property.id)
+            rows = (await self.db.execute(query.limit(filters.limit).offset(filters.offset))).all()
 
         items: List[PropertySearchResultItem] = []
         for row in rows:

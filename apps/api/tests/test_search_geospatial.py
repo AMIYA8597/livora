@@ -167,3 +167,82 @@ async def test_flatmate_discovery_search():
     assert results[0].display_name == "Aakash Nair"
     assert results[0].occupation == "Data Scientist"
     assert "Indiranagar" in results[0].preferred_locations
+
+
+# --- Keyword search uses the full-text index (same hybrid search as the listings page) -------
+
+TEXT_LISTINGS = {
+    # key: (title, description, (lat, lng))
+    "petstudio": ("Pet friendly studio", "Bright corner unit.", POINTS["koramangala"]),
+    "quietflat": ("Quiet flat near park", "The building is pet friendly.", POINTS["koramangala"]),
+    "furnished": ("Fully furnished 2BHK", "Shared terrace.", POINTS["whitefield"]),
+    "farfurnished": ("Furnished room", "Sea view.", POINTS["mumbai"]),
+}
+
+
+@pytest.fixture
+async def text_listings():
+    from geoalchemy2.elements import WKTElement
+    from sqlalchemy import delete
+    from app.core.database import AsyncSessionLocal
+
+    city = f"Texttest-{uuid4().hex[:8]}"
+    ids = {}
+    async with AsyncSessionLocal() as session:
+        owner = User(id=uuid4(), email=f"fts-{uuid4().hex[:8]}@example.test", hashed_password="x", full_name="Text Owner")
+        session.add(owner)
+        await session.flush()
+        for key, (title, description, (lat, lng)) in TEXT_LISTINGS.items():
+            ids[key] = uuid4()
+            session.add(Property(
+                id=ids[key], owner_id=owner.id, title=title, description=description,
+                location=WKTElement(f"POINT({lng} {lat})", srid=4326),
+                address_display=key, address_exact=f"1 {key} street", city=city, postal_code="560001",
+                monthly_rent=Decimal("25000.00"), is_active=True, listing_status="published",
+                available_from=date.today(),
+            ))
+        owner_id = owner.id
+        await session.commit()
+        yield session, city, ids
+        await session.rollback()
+        await session.execute(delete(User).where(User.id == owner_id))
+        await session.commit()
+
+
+async def _text_search(session, city, query, **kw):
+    filters = PropertySearchFilter(query=query, city=city, **kw)
+    return [r.address_display for r in await SearchService(session).search_properties(filters)]
+
+
+async def test_keyword_search_stems_words(text_listings):
+    session, city, _ = text_listings
+    # "furnishing" never appears as a substring; full-text stemming still finds both.
+    assert set(await _text_search(session, city, "furnishing")) == {"furnished", "farfurnished"}
+
+
+async def test_keyword_search_ranks_title_matches_first(text_listings):
+    session, city, _ = text_listings
+    assert await _text_search(session, city, "pet friendly") == ["petstudio", "quietflat"]
+
+
+async def test_keyword_search_honours_exclusions_and_pages_in_rank_order(text_listings):
+    session, city, _ = text_listings
+    assert await _text_search(session, city, "furnished -shared") == ["farfurnished"]
+    assert await _text_search(session, city, "pet friendly", limit=1, offset=1) == ["quietflat"]
+    assert await _text_search(session, city, "pet friendly", limit=1, offset=5) == []
+
+
+async def test_keyword_search_keeps_the_radius_filter_and_distance(text_listings):
+    session, city, _ = text_listings
+    filters = PropertySearchFilter(query="furnished", city=city, latitude=MG_ROAD[0], longitude=MG_ROAD[1],
+                                   radius_km=20.0)
+    results = await SearchService(session).search_properties(filters)
+    assert [r.address_display for r in results] == ["furnished"]  # Mumbai is outside the radius
+    assert 14.0 <= results[0].distance_km <= 17.0
+
+
+async def test_search_endpoint_uses_full_text(async_client, text_listings):
+    _, city, _ = text_listings
+    res = await async_client.post("/api/v1/search/properties", json={"query": "furnishing", "city": city})
+    assert res.status_code == 200, res.text
+    assert {r["address_display"] for r in res.json()} == {"furnished", "farfurnished"}

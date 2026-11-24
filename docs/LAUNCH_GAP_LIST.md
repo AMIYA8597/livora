@@ -58,8 +58,16 @@ Gathered from the open items below and every item's "Not covered" notes.
       API's 15s/30s. The test login now carries the same limits as production, so the whole suite
       runs under them. Tests: `tests/test_worker_timeouts_db.py` (5), including a real
       timeout cancelling a statement.
-- [ ] **L6. `POST /search/properties` still uses plain text matching.** Use the full-text search
+- [x] **L6. `POST /search/properties` still uses plain text matching.** Use the full-text search
       the web app already uses.
+      *Done:* a `query` now runs the same hybrid search as the listings page
+      (`app/ml/search.py`). That is full text on the weighted `search_tsv` GIN index, with
+      stemming, phrases and `-word` exclusions, fused with embeddings, over the filtered set
+      (city, category, rent, furnishing, pets, smoking, radius). Results come in relevance order
+      and are paged over the ranking. The radius still filters and `distance_km` is still
+      returned. Without a query, the order is unchanged (distance, else newest). Tests: five in
+      `tests/test_search_geospatial.py` (stemming, title-first ranking, exclusions, paging,
+      radius, and the endpoint itself).
 - [ ] **L7. Owners and applicants can't see an application's status history**; only staff can.
 - [ ] **L8. Moderators can use the moderation API but can't open the admin console.**
 - [ ] **L9. No way to replay a failed Razorpay webhook** except waiting for Razorpay's retry.
