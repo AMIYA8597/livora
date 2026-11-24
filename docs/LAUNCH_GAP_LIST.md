@@ -37,8 +37,23 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       listings at real coordinates, plus 8 seekers with distinct lifestyles. It refuses
       production, and refuses remote hosts without `--allow-remote`. `test_seed_db.py` guards it.
       The legacy raw SQL migrations were removed (they remain in git history).
-- [ ] **3e. Dev DB holds 278 test-generated users and 60 duplicate listings** from test runs made
+- [x] **3e. Dev DB holds 278 test-generated users and 60 duplicate listings** from test runs made
       before the tests were isolated. They need cleaning up (owner's call: it deletes local data).
+      *(Done, with the owner's go-ahead.)*
+      - **Backed up first:** `flatmate_db` was at schema `008` with 289 users and 71 listings.
+        It was backed up with `scripts/db_backup.py` (44 tables, 2,932 rows) to
+        `.claude/scratch/dev-db-backup/`, which isn't in git. The backup was restored into a
+        scratch database and matched its manifest before anything was dropped.
+      - **Rebuilt:** the database was recreated, migrated to `014_account_deletion` and seeded:
+        - 4 cities, 10 localities
+        - 11 users (admin, 2 owners, 8 seekers), 11 listings
+        - 2 plans
+      - **Checked:**
+        - a second seed run adds nothing;
+        - RLS is on all 51 tables;
+        - PostGIS radius search works.
+      - **To get the old data back:** create an empty database and run
+        `python scripts/db_backup.py restore --dump <file> --target-url <url> --confirm-database <name>`.
 - [ ] **3d. pgvector not installed natively.** *(Blocked: needs Visual Studio Build Tools, a multi-GB install, for a source build; owner to decide.)* Migration 003's vector index is skipped on the
       dev machine (there are no official Windows binaries; it needs a Visual Studio build or the
       Docker image `infrastructure/docker/Dockerfile.postgres`). CI and Supabase have it.
