@@ -22,7 +22,10 @@ export interface GroupWishlistItemDTO {
 
 export interface GroupDTO {
   id: string;
-  creator_id: string;
+  /** Members, creator and wishlist are only returned to the group's members (and staff). */
+  creator_id: string | null;
+  member_count?: number;
+  is_member?: boolean;
   name: string;
   description?: string | null;
   target_budget_total: number;

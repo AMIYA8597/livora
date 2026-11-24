@@ -26,8 +26,8 @@ class GroupService:
             .options(selectinload(Group.members), selectinload(Group.wishlist_items))
         )
         if city:
-            query = query.where(Group.target_city.ilike(f"%{city}%"))
-        result = await self.db.execute(query.order_by(Group.created_at.desc()))
+            query = query.where(Group.target_city.icontains(city, autoescape=True))
+        result = await self.db.execute(query.order_by(Group.created_at.desc()).limit(200))
         return list(result.scalars().all())
 
     async def get_by_id(self, group_id: UUID) -> Optional[Group]:

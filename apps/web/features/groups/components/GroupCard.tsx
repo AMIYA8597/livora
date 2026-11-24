@@ -21,6 +21,7 @@ interface GroupCardProps {
 
 export function GroupCard({ group, currentUserId, busy, onJoin, onLeave, onOpenWishlist, onOpenCompatibility, onInvite }: GroupCardProps) {
   const me = group.members.find((m) => m.user_id === currentUserId);
+  const memberCount = group.member_count ?? group.members.length;
   const isCreator = group.creator_id === currentUserId;
   // The API lets only the creator or a leader add other people.
   const canInvite = isCreator || me?.role === "leader";
@@ -44,7 +45,7 @@ export function GroupCard({ group, currentUserId, busy, onJoin, onLeave, onOpenW
             </div>
           </div>
           <Badge variant="brand" size="sm" className="shrink-0">
-            {group.members.length} {group.members.length === 1 ? "member" : "members"}
+            {memberCount} {memberCount === 1 ? "member" : "members"}
           </Badge>
         </div>
 

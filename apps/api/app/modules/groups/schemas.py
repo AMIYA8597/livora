@@ -34,8 +34,12 @@ class GroupCreate(GroupBase):
     pass
 
 class GroupResponse(GroupBase):
+    """Members, the creator and the wishlist (whose votes are keyed by user) are shown only to
+    the group's members and staff; everyone else sees the count."""
     id: uuid.UUID
-    creator_id: uuid.UUID
+    creator_id: Optional[uuid.UUID] = None
+    member_count: int = 0
+    is_member: bool = False
     members: List[GroupMemberResponse] = []
     wishlist_items: List[GroupWishlistItemResponse] = []
     created_at: datetime
