@@ -1,4 +1,4 @@
-export type UserRole = 'seeker' | 'tenant' | 'owner' | 'pg_operator' | 'broker' | 'admin' | 'super_admin';
+export type UserRole = 'seeker' | 'tenant' | 'owner' | 'pg_operator' | 'broker' | 'moderator' | 'admin' | 'super_admin';
 
 export interface UserDTO {
   id: string;

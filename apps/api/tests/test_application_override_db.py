@@ -190,3 +190,21 @@ async def test_history_is_private_to_the_application(async_client, world):
     res = await async_client.get(f"{API}/applications/{uuid4()}/history", headers=_auth(world.applicant))
     assert res.status_code == 404
     assert (await async_client.get(f"{API}/applications/{world.app}/history")).status_code in (401, 403)
+
+
+async def test_moderator_console_access_matches_the_web_tabs(async_client, world):
+    """The admin console shows moderators the moderation queue and applications only
+    (apps/web/lib/staff-access.ts); the API must agree on both sides of that line."""
+    h = _auth(world.mod, "moderator")
+    for path in ("/moderation/reports", "/admin/applications", f"/admin/applications/{world.app}/history"):
+        assert (await async_client.get(f"{API}{path}", headers=h)).status_code == 200, path
+    for path in ("/admin/stats", "/admin/users"):
+        assert (await async_client.get(f"{API}{path}", headers=h)).status_code == 403, path
+    res = await async_client.patch(f"{API}/admin/users/{world.stranger}/status", headers=h, json={"is_active": False})
+    assert res.status_code == 403
+    res = await async_client.patch(f"{API}/properties/{world.prop}/status", headers=h,
+                                   json={"listing_status": "archived"})
+    assert res.status_code == 403
+    async with AsyncSessionLocal() as s:
+        assert (await s.get(User, world.stranger)).is_active
+        assert (await s.get(Property, world.prop)).listing_status == "published"

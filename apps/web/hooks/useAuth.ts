@@ -12,6 +12,7 @@ import {
   signOut,
   subscribe,
 } from "@/lib/auth-store";
+import { isStaffRoles } from "@/lib/staff-access";
 
 /**
  * The signed-in user, shared by every component (see lib/auth-store.ts).
@@ -45,6 +46,8 @@ export function useAuth() {
     isOwner: hasRole("owner"),
     isSeeker: hasRole("seeker"),
     isAdmin: hasRole("admin") || hasRole("super_admin"),
+    /** Moderators and admins: may open the admin console (see lib/staff-access.ts). */
+    isStaff: isStaffRoles(state.roles),
     isPgOperator: hasRole("pg_operator"),
   };
 }

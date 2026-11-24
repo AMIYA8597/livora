@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { isStaffRoles } from "@/lib/staff-access";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -56,7 +57,8 @@ export const Navbar: React.FC = () => {
   const isOwner = roles.includes("owner") || user?.role === "owner";
   const isTenant = roles.includes("tenant") || user?.role === "tenant";
   const isPG = roles.includes("pg_operator") || user?.role === "pg_operator";
-  const isAdmin = roles.includes("admin") || roles.includes("super_admin") || user?.role === "admin";
+  // Moderators and admins can open the admin console (it shows each role only its own tabs).
+  const isStaff = isStaffRoles(user?.role ? [...roles, user.role] : roles);
 
   return (
     <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-warm-200">
@@ -206,7 +208,7 @@ export const Navbar: React.FC = () => {
                           </Link>
                         )}
 
-                        {isAdmin && (
+                        {isStaff && (
                           <Link
                             href="/admin"
                             onClick={() => setProfileDropdownOpen(false)}
@@ -335,7 +337,7 @@ export const Navbar: React.FC = () => {
                 </Link>
               )}
 
-              {isAdmin && (
+              {isStaff && (
                 <Link
                   href="/admin"
                   onClick={() => setMobileMenuOpen(false)}

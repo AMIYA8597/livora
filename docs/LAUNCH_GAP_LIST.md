@@ -77,7 +77,17 @@ Gathered from the open items below and every item's "Not covered" notes.
       ("Under review by the owner", "Rejected by Flatmate support"). Checked in the browser as the
       applicant. Tests: two in `tests/test_application_override_db.py` and
       `tests/application_timeline.test.ts`.
-- [ ] **L8. Moderators can use the moderation API but can't open the admin console.**
+- [x] **L8. Moderators can use the moderation API but can't open the admin console.**
+      *Done:* `apps/web/lib/staff-access.ts` decides the console tabs from the user's roles,
+      matching the API's role checks: admins get every tab; moderators get the moderation
+      queue and applications; stats, user management and listing approval stay admin-only (the
+      page doesn't even request those for moderators). The menu shows the console link to
+      moderators, and `/admin/moderation` now turns away non-staff instead of failing on a 403.
+      Also fixed in passing: the web expected report status "pending" but the API stores
+      "open", so the queue count stayed at 0 and resolve/dismiss never appeared
+      (`lib/moderation-reports.ts`). `tests/test_application_override_db.py` checks a
+      moderator's 200s and 403s, and the web tests cover both helpers. Checked in the browser
+      as a moderator (two tabs, open reports actionable) and as an owner (access denied).
 - [ ] **L9. No way to replay a failed Razorpay webhook** except waiting for Razorpay's retry.
 - [ ] **L10. The PDF upload check reads raw bytes**, so active content inside compressed object
       streams isn't seen.

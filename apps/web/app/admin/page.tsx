@@ -9,6 +9,8 @@ import { apiClient } from "@/lib/api-client";
 import { Card, Button, Badge, Modal, Input, EmptyState, ErrorState, LoadingIndicator } from "@flatmate/ui";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { ApplicationsPanel } from "@/features/admin/ApplicationsPanel";
+import { consoleTabs, type ConsoleTab } from "@/lib/staff-access";
+import { reportNeedsAction } from "@/lib/moderation-reports";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -70,15 +72,19 @@ interface AdminProperty {
 }
 
 export default function AdminModerationPage() {
-  const { isAuthenticated, isLoading: authLoading, isAdmin, user } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, roles } = useAuth();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"stats" | "moderation" | "properties" | "applications" | "users">("stats");
+  // Moderators get only the tabs their API access allows; admins get all of them.
+  const tabs = isAuthenticated ? consoleTabs(roles) : [];
+  const canView = tabs.length > 0;
+  const has = (tab: ConsoleTab) => tabs.includes(tab);
+  const [chosenTab, setActiveTab] = useState<ConsoleTab | null>(null);
+  const activeTab: ConsoleTab | undefined = chosenTab && has(chosenTab) ? chosenTab : tabs[0];
 
-  const canView = isAuthenticated && (isAdmin || user?.role === "super_admin" || user?.role === "admin");
-  const statsQuery = useApiQuery<AdminStats>(canView ? "/admin/stats" : null);
-  const reportsQuery = useApiQuery<ModerationReport[]>(canView ? "/moderation/reports" : null);
-  const usersQuery = useApiQuery<AdminUser[]>(canView ? "/admin/users" : null);
-  const propertiesQuery = useApiQuery<AdminProperty[]>(canView ? "/properties" : null);
+  const statsQuery = useApiQuery<AdminStats>(has("stats") ? "/admin/stats" : null);
+  const reportsQuery = useApiQuery<ModerationReport[]>(has("moderation") ? "/moderation/reports" : null);
+  const usersQuery = useApiQuery<AdminUser[]>(has("users") ? "/admin/users" : null);
+  const propertiesQuery = useApiQuery<AdminProperty[]>(has("properties") ? "/properties" : null);
   const stats = statsQuery.data ?? null;
   const reports = reportsQuery.data ?? [];
   const users = usersQuery.data ?? [];
@@ -162,7 +168,7 @@ export default function AdminModerationPage() {
           <ShieldAlert className="w-12 h-12 text-rose-600 mx-auto mb-3" />
           <h2 className="text-xl font-bold text-charcoal mb-2">Access Denied</h2>
           <p className="text-xs text-charcoal-muted mb-6">
-            Administrator privileges are required to view platform metrics and the moderation queue.
+            A moderator or administrator account is required to open the admin console.
           </p>
           <Button variant="primary" onClick={() => router.push("/")} className="w-full">
             Return Home
@@ -210,46 +216,46 @@ export default function AdminModerationPage() {
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 space-x-2 overflow-x-auto">
-        <button
+        {has("stats") && <button
           onClick={() => setActiveTab("stats")}
           className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
             activeTab === "stats" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
           }`}
         >
           <Activity className="w-4 h-4" /> System Overview
-        </button>
-        <button
+        </button>}
+        {has("moderation") && <button
           onClick={() => setActiveTab("moderation")}
           className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
             activeTab === "moderation" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
           }`}
         >
-          <AlertTriangle className="w-4 h-4" /> Moderation Queue ({reports.filter((r) => r.status === "pending").length})
-        </button>
-        <button
+          <AlertTriangle className="w-4 h-4" /> Moderation Queue ({reports.filter((r) => reportNeedsAction(r.status)).length})
+        </button>}
+        {has("properties") && <button
           onClick={() => setActiveTab("properties")}
           className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
             activeTab === "properties" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
           }`}
         >
           <Building className="w-4 h-4" /> Property Verification ({properties.length})
-        </button>
-        <button
+        </button>}
+        {has("applications") && <button
           onClick={() => setActiveTab("applications")}
           className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
             activeTab === "applications" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
           }`}
         >
           <FileText className="w-4 h-4" /> Applications
-        </button>
-        <button
+        </button>}
+        {has("users") && <button
           onClick={() => setActiveTab("users")}
           className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
             activeTab === "users" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
           }`}
         >
           <Users className="w-4 h-4" /> User Management ({users.length})
-        </button>
+        </button>}
       </div>
 
       {/* Tab 1: Stats */}
@@ -308,8 +314,8 @@ export default function AdminModerationPage() {
                 <Card key={r.id} className="p-5 border-slate-200/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                   <div>
                     <div className="flex items-center space-x-2 mb-1">
-                      <Badge variant={r.status === "pending" ? "warning" : "default"} className="capitalize">
-                        {r.status}
+                      <Badge variant={reportNeedsAction(r.status) ? "warning" : "default"} className="capitalize">
+                        {r.status.replace(/_/g, " ")}
                       </Badge>
                       <span className="text-xs font-bold text-charcoal uppercase">{r.reason.replace(/_/g, " ")}</span>
                       <span className="text-xs text-charcoal-muted">• Target: {r.target_type} ({r.target_id.slice(0, 8)}...)</span>
@@ -318,7 +324,7 @@ export default function AdminModerationPage() {
                     <span className="text-[11px] text-charcoal-muted mt-1 block">Reported: {formatDate(r.created_at)}</span>
                   </div>
 
-                  {r.status === "pending" && (
+                  {reportNeedsAction(r.status) && (
                     <div className="flex items-center space-x-2 self-end md:self-center">
                       <Button
                         size="sm"
@@ -406,7 +412,7 @@ export default function AdminModerationPage() {
         <ApplicationsPanel
           onDone={(message) => {
             setActionNotice(message);
-            statsQuery.refetch();
+            if (has("stats")) statsQuery.refetch();
             setTimeout(() => setActionNotice(null), 4000);
           }}
         />

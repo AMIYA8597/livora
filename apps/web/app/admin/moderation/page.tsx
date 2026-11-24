@@ -7,6 +7,7 @@ import { useApiQuery } from "@/hooks/useApiQuery";
 import { apiClient } from "@/lib/api-client";
 import { Card, Button, Badge, Modal, Input, ErrorState } from "@flatmate/ui";
 import { formatDate } from "@/lib/utils";
+import { REPORT_STATUSES, reportNeedsAction, type ReportStatus } from "@/lib/moderation-reports";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -30,13 +31,14 @@ interface ModerationReport {
   target_id: string;
   reason: string;
   description?: string;
-  status: "pending" | "under_investigation" | "resolved" | "dismissed";
+  status: ReportStatus;
   created_at: string;
 }
 
 export default function AdminModerationQueuePage() {
-  const { isAuthenticated, isLoading: authLoading, isAdmin, user } = useAuth();
-  const reportsQuery = useApiQuery<ModerationReport[]>(isAuthenticated ? "/moderation/reports" : null);
+  const { isAuthenticated, isLoading: authLoading, isStaff } = useAuth();
+  const canView = isAuthenticated && isStaff;
+  const reportsQuery = useApiQuery<ModerationReport[]>(canView ? "/moderation/reports" : null);
   const reports = reportsQuery.data ?? [];
   const setReports = reportsQuery.setData;
   const isLoading = authLoading || reportsQuery.isLoading;
@@ -79,6 +81,23 @@ export default function AdminModerationQueuePage() {
       ? reports
       : reports.filter((r) => r.status === statusFilter);
 
+  if (!authLoading && !canView) {
+    return (
+      <div className="max-w-md mx-auto py-20 px-4 text-center">
+        <Card className="p-8">
+          <ShieldAlert className="w-12 h-12 text-rose-600 mx-auto mb-3" />
+          <h2 className="text-xl font-bold text-charcoal mb-2">Access Denied</h2>
+          <p className="text-xs text-charcoal-muted mb-6">
+            A moderator or administrator account is required to open the moderation queue.
+          </p>
+          <Link href="/">
+            <Button variant="primary" className="w-full">Return Home</Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
       {/* Header */}
@@ -115,7 +134,7 @@ export default function AdminModerationQueuePage() {
       <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
         <Filter className="w-4 h-4 text-slate-400" />
         <span className="font-semibold text-slate-700">Filter Status:</span>
-        {["all", "pending", "under_investigation", "resolved", "dismissed"].map((s) => (
+        {["all", ...REPORT_STATUSES].map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
@@ -162,7 +181,7 @@ export default function AdminModerationQueuePage() {
                 <div className="flex items-center space-x-2">
                   <Badge
                     variant={
-                      report.status === "pending"
+                      reportNeedsAction(report.status)
                         ? "warning"
                         : report.status === "resolved"
                         ? "success"
@@ -170,7 +189,7 @@ export default function AdminModerationQueuePage() {
                     }
                     size="sm"
                   >
-                    {report.status.toUpperCase()}
+                    {report.status.replace(/_/g, " ").toUpperCase()}
                   </Badge>
 
                   <span className="text-xs font-bold text-slate-700 uppercase bg-slate-100 px-2 py-0.5 rounded">
