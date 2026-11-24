@@ -943,5 +943,78 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       - **Deploy overlap:** a rolling deploy can briefly run two beats. Every scheduled job is
         safe to overlap (rows are claimed with `SKIP LOCKED`), so the worst case is an extra
         sweep.
-- [ ] **18. Production deploy pipeline.** The staging workflow exists, but production promotion,
+- [x] **18. Production deploy pipeline.** The staging workflow exists, but production promotion,
       backups and a tested restore do not.
+      Decided:
+      - Production gets an exact staging build, promoted by hand.
+      - Backups are kept 30 days.
+      Done:
+      - **Production Deployment workflow** (`.github/workflows/production-deploy.yml`, run by
+        hand with a commit SHA):
+        - **Gate job:** the commit must be on `main`, and a staging run must have deployed it
+          with a passing readiness check. This runs before anyone is asked to approve.
+        - **Release job** (GitHub `production` environment, so required reviewers apply), in
+          order:
+          - It checks that every production secret is present.
+          - It finds the image staging built for that commit. Nothing is rebuilt.
+          - It takes a verified backup, then runs migrations.
+          - It deploys the API and checks `/health/ready` reports the new release.
+          - It deploys the worker, then the web app on Vercel (`--prod`).
+        - The run summary gives the exact rollback commands for the previous revisions.
+      - **One deploy path for staging and production** (`.github/actions/deploy-cloud-run`):
+        - `scripts/deploy_runtime.py` builds the configuration.
+        - Every known secret that exists in Secret Manager (`<ENV>_<NAME>`) is passed. A missing
+          `APP_DATABASE_URL` or `SECRET_KEY` stops the deploy; production also requires Redis.
+        - Plain settings come from the `RUNTIME_ENV` variable, written to a YAML file so values
+          can contain commas. Secret names are refused there.
+        - Before this, staging received only three secrets, so emails, SMS and storage couldn't
+          work there.
+      - **Daily verified backups** (`.github/workflows/db-backup.yml`, 03:00 IST;
+        `scripts/db_backup.py`):
+        - The dump and a manifest come from one database snapshot. The manifest holds the
+          Alembic revision, every table's row count, RLS tables and policy count, the extensions
+          and roles the schema needs, and the SHA-256.
+        - Each backup is restored into a throwaway PostGIS + pgvector container and must match
+          its manifest before it's uploaded to Cloud Storage. A failure fails the run.
+        - Retention is 30 days, by a bucket lifecycle rule
+          (`infrastructure/backup/gcs-lifecycle.json`).
+        - The writer accounts can only create objects, so they can't read, replace or delete
+          backups.
+        - The nightly job uses its own `production-backups` environment, so it never waits for a
+          reviewer.
+      - **Restore** (`db_backup.py restore`):
+        - It only restores into an empty database whose name you confirm, never over live data.
+        - It creates the needed extensions (in their own schema, as on Supabase) and roles, and
+          restores in one transaction.
+        - It fails unless revision, row counts and RLS all match.
+        - `DEPLOYMENT.md` §4.4 is the disaster-recovery runbook.
+      - **Fixes:**
+        - The manual migration workflow used the staging secret name for production; it now
+          uses `PRODUCTION_DATABASE_URL`.
+        - CI now installs the PostgreSQL 17 client, so the restore test runs there.
+      - **Tested locally:**
+        - The test database (51 tables, 9,985 rows) was backed up and restored into a scratch
+          database and matched its manifest, RLS on all 51 tables included.
+        - Restoring into a non-empty database, or one whose name doesn't match, is refused.
+        - A truncated dump is caught by its checksum.
+        - A Supabase-style layout restores. Extensions live in an `extensions` schema; an
+          installed but unused extension is left out of the manifest, and the ones found through
+          column defaults and index operator classes are kept.
+        - Tests: `apps/api/tests/test_db_backup.py` (5) and `test_deploy_runtime.py` (4).
+      Not covered:
+      - **Nothing has run on GitHub or GCP.** Before the first production release, set up what
+        `DEPLOYMENT.md` §4.1 and §4.3 list: Secret Manager secrets, the GitHub `production` and
+        `production-backups` environments, the bucket, the Vercel production settings. Then run
+        **Database Backup** by hand once.
+      - **The workflows are only checked as valid YAML.** actionlint was blocked here.
+      - **Restoring into a hosted Supabase database wasn't tried.** There the restoring user
+        isn't a superuser, and default-privilege entries for Supabase's own roles may need
+        skipping.
+      - **Point-in-time recovery:**
+        - Backups are daily plus one before each release, so up to a day of writes can be lost.
+        - For less, enable Supabase's point-in-time recovery (paid add-on).
+      - **Uploaded files** (Supabase Storage) aren't in these backups.
+      - **No automatic rollback.** Rollback is a command from the run summary, and migrations
+        must stay compatible with the previous release (add first, remove later).
+      - **One GCP project assumed.** Production is assumed to share staging's Artifact
+        Registry; for a separate project, set `RELEASE_IMAGE_REPOSITORY` and grant read access.
