@@ -6,3 +6,4 @@ export { VerificationForm } from "./VerificationForm";
 export { PhoneVerification } from "./PhoneVerification";
 export { BlockedUsersCard } from "./BlockedUsersCard";
 export { AccountSecurityPanel } from "./AccountSecurityPanel";
+export { DataControlsCard } from "./DataControlsCard";

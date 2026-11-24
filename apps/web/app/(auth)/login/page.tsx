@@ -1,16 +1,31 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { Suspense, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient } from "@/lib/api-client";
 import { safeNextPath } from "@/lib/navigation";
 import { TokenResponse } from "@flatmate/contracts";
 import { Button, Input, Card } from "@flatmate/ui";
 import { Home, Lock, Mail } from "lucide-react";
+import { InlineNotice } from "@/components/states/InlineNotice";
+import { deletedNoticeDate } from "@/lib/account-data-model";
 
 const DEMO_LOGIN_ENABLED = process.env.NEXT_PUBLIC_DEMO_LOGIN === "true";
+
+/** After someone deletes their account they land here; tell them how to change their mind. */
+function DeletionScheduledNotice() {
+  const date = deletedNoticeDate(useSearchParams().get("deleted"));
+  if (!date) return null;
+  return (
+    <div className="mb-4">
+      <InlineNotice tone="success">
+        Your account will be deleted on {date}. Until then it&apos;s hidden; sign in before that date to keep it.
+      </InlineNotice>
+    </div>
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,6 +34,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [restoredNext, setRestoredNext] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,7 +57,12 @@ export default function LoginPage() {
         res.roles
       );
       // Back to the page that sent the user here, if it is a safe same-site path.
-      router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")));
+      const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
+      if (res.account_restored) {
+        setRestoredNext(next); // say so before moving on
+        return;
+      }
+      router.replace(next);
     } catch (err: any) {
       setError(err.message || "Failed to log in. Please check your credentials.");
     } finally {
@@ -61,6 +82,23 @@ export default function LoginPage() {
             Log in to manage your flatmate matches, messages, and applications.
           </p>
         </div>
+
+        {!restoredNext && (
+          <Suspense fallback={null}>
+            <DeletionScheduledNotice />
+          </Suspense>
+        )}
+
+        {restoredNext && (
+          <div className="mb-4 space-y-3">
+            <InlineNotice tone="success">
+              Welcome back. Your account deletion was cancelled and your profile and listings are visible again.
+            </InlineNotice>
+            <Button className="w-full min-h-[44px]" onClick={() => router.replace(restoredNext)}>
+              Continue
+            </Button>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-xs">

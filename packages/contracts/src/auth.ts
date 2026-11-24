@@ -34,6 +34,8 @@ export interface TokenResponse {
   expires_in: number;
   user: UserDTO;
   roles?: string[];
+  /** True when this sign-in cancelled a pending account deletion. */
+  account_restored?: boolean;
 }
 
 export interface RegisterRequest {

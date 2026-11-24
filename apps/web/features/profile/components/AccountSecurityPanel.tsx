@@ -8,6 +8,7 @@ import { apiClient } from "@/lib/api-client";
 import { InlineNotice } from "@/components/states/InlineNotice";
 import { PhoneVerification } from "./PhoneVerification";
 import { BlockedUsersCard } from "./BlockedUsersCard";
+import { DataControlsCard } from "./DataControlsCard";
 
 interface AccountSecurityPanelProps {
   user: UserDTO | null;
@@ -93,6 +94,8 @@ export function AccountSecurityPanel({ user, onUserChanged, onNotice }: AccountS
 
       <BlockedUsersCard />
 
+      <DataControlsCard />
+
       <Card className="p-6 border-forest/20 bg-forest-pale/20">
         <div className="flex items-center gap-2 mb-2">
           <Shield className="w-5 h-5 text-forest" />
@@ -103,7 +106,7 @@ export function AccountSecurityPanel({ user, onUserChanged, onNotice }: AccountS
           data, its correction, or its erasure.
         </p>
         <div className="mt-3 pt-3 border-t border-forest/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-          <span className="text-charcoal-muted">To deactivate your account or delete your data:</span>
+          <span className="text-charcoal-muted">To correct your data, or for any other request about it:</span>
           <a
             href="mailto:privacy@flatmate.platform?subject=DPDP%20Data%20Erasure%20Request"
             className="font-bold text-forest hover:underline min-h-[44px] inline-flex items-center"

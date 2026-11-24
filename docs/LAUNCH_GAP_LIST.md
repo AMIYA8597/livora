@@ -754,9 +754,70 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
         streams needs ClamAV (or re-rendering the PDF) to catch.
       - Scripts still allow `'unsafe-inline'` (Next.js inline bootstrap). Nonces would make every
         page dynamic.
-- [ ] **16b. Account deletion and data export (DPDP Act).** Let people download their data and
-      delete their account from settings: what's removed, what's anonymised (e.g. messages in
-      other people's chats) and any retention period need a decision before building.
+- [x] **16b. Account deletion and data export.** Decisions:
+      - a 30-day grace period
+      - messages kept as "Deleted user"
+      - payments kept de-identified
+      - listings deleted, with applicants notified
+      Done:
+      - **Export:** `GET /users/me/export` (5 per hour) returns the person's own records from
+        every linked table as JSON. It leaves out password and code hashes, push keys and
+        endpoints, internal search/ML columns, and other people's actions about them (who blocked
+        or reported them, or applied to their listing).
+      - **Deletion request:** `POST /users/me/deletion` needs the password (5 per hour).
+        - The account is deactivated at once, so every token stops working and it leaves search
+          and matching.
+        - Published listings are paused, renewing plans are cancelled (it refuses if that fails,
+          so nobody keeps paying), and push subscriptions are removed.
+        - An email gives the deletion date and a sign-in link.
+      - **Cancelling:**
+        - Signing in within 30 days cancels and restores the paused listings; the login page says
+          so.
+        - Staff deactivation locks a pending deletion, so signing in can't undo it. Staff
+          reactivation cancels it.
+      - **Erasure** (`purge_due_accounts`, run by the hourly maintenance job, safe to run
+        concurrently):
+        - Personal records go: profile, lifestyle, verifications, phone codes, roles, privacy
+          settings, notifications, push, likes and matches, blocks, reports they filed, their
+          applications and viewings, tenancies, group memberships and chat settings.
+        - Listings are deleted, and people with open applications or upcoming viewings are
+          notified.
+        - Groups pass to the longest-standing member.
+        - Messages stay, from "Deleted user", and attachments are removed.
+        - Payments and subscriptions stay, linked only to the anonymous tombstone row (no email,
+          name, phone or usable password).
+        - Their files are removed from every bucket.
+      - **Web:**
+        - A "Your data" card on Profile → Account & security has a download button and a
+          deletion dialog that lists what happens and asks for the password.
+        - The login page shows the deletion date, and a "welcome back" message after a restore.
+        - The old "contact our DPO to delete" line now points there only for corrections and
+          other requests.
+      - **Schema:** migration `014_account_deletion` (`users.deleted_at` and
+        `account_deletion_requests`); `complete_hosted_schema.sql` is regenerated.
+      - **Tests:** `apps/api/tests/test_account_privacy_db.py` (6) and
+        `apps/web/tests/account-data.test.ts` (4).
+      - **Checked in the browser** against the production build:
+        - the export's contents
+        - the wrong password refused
+        - deletion signing out with the dated notice
+        - signing back in restoring the account
+        - e2e 12/12
+      Not covered:
+      - Erasure runs only where the worker and beat run (item 18a). Until they're deployed, call
+        `purge_due_accounts` from a scheduled job.
+      - An open chat socket isn't closed at once when someone deletes; it drops at its next
+        reconnect.
+      - Reports filed *about* the deleted person stay, attached to the anonymous row. Decide how
+        long moderation keeps them.
+      - Outbox rows that already hold their email address (queued mail) are purged by the
+        normal outbox retention: 7 days published, 30 days failed.
+      - Backups still contain erased data until they expire. Set a backup retention under
+        item 18.
+      - Storage files are removed by folder prefix. Supabase removal wasn't tried against a real
+        project.
+      - The wording in the existing "Your data rights (DPDP Act 2023)" card is unchanged and
+        should be checked by whoever owns the legal text.
 - [ ] **17. SEO and performance.** Metadata/OG for property pages, image optimisation,
       Lighthouse of at least 90 on mobile.
 - [ ] **18a. Deploy the worker and beat.** The staging workflow deploys only the API. Without a
