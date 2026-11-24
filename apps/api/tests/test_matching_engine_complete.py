@@ -123,6 +123,7 @@ async def test_mutual_match_lifecycle_transactional():
     mock_db = AsyncMock()
     mock_db.add = MagicMock()
     service = MatchingService(mock_db)
+    service.pair_features = AsyncMock(return_value=None)  # profile reads not mocked here
 
     # 1. User A likes User B (Initial interaction, target hasn't liked back yet)
     mock_existing_int = MagicMock()

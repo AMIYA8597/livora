@@ -23,6 +23,9 @@ from app.modules.moderation.models import UserBlock
 from app.modules.notifications.service import NotificationService
 from app.core.config import settings
 from app.core.exceptions import ForbiddenException, NotFoundException, BadRequestException
+from app.ml.moderation import prescreen
+from app.ml.moderation_jobs import ai_moderation_on, queue_message_moderation
+from app.workers.outbox import schedule_dispatch
 
 DELETED_TEXT = "This message was deleted."
 
@@ -489,10 +492,13 @@ class MessagingService:
             if existing_msg:
                 return existing_msg
 
-        # 5. Safety check: Rental advance scam heuristic
-        content_lower = req.content.lower()
-        if "advance" in content_lower and ("token" in content_lower or "rent" in content_lower or "deposit" in content_lower) and "before visit" in content_lower:
-            req.metadata["safety_warning"] = "Suspicious rental advance payment request detected"
+        # 5. Safety pre-screen (rules, inline). High-risk messages carry a warning for the
+        # recipients right away; anything not clear is re-checked by AI moderation in the worker
+        # (app/ml/moderation.py), which can confirm, add or lift the warning.
+        screen = prescreen(req.content)
+        if screen.level == "high" and screen.warning:
+            req.metadata["safety_warning"] = screen.warning
+            req.metadata["moderation"] = {"label": "pending_review", "source": "rules"}
 
         # 6. Validate reply-to if specified
         if req.reply_to_message_id:
@@ -567,8 +573,14 @@ class MessagingService:
             next_attempt_at=now_dt + timedelta(minutes=settings.CHAT_UNREAD_EMAIL_DELAY_MINUTES),
         ))
 
+        needs_review = screen.level == "high" or (screen.level == "review" and ai_moderation_on())
+        if needs_review:
+            queue_message_moderation(self.db, msg.id)
+
         await self.db.commit()
         await self.db.refresh(msg)
+        if needs_review:
+            schedule_dispatch()
 
         # 8. Real-time broadcast to participants, including any attachments.
         attachments = await self.attachments_for(msg.id)
@@ -619,8 +631,22 @@ class MessagingService:
         msg.content = req.content
         msg.is_edited = True
         msg.edited_at = datetime.now(timezone.utc)
+        # An edit can turn a harmless message into a risky one: screen it again.
+        screen = prescreen(req.content)
+        # The old verdict was about the old text. Rules apply at once, as on send; the worker
+        # (when queued) replaces this with its own decision.
+        meta = {k: v for k, v in (msg.metadata_ or {}).items() if k not in ("safety_warning", "moderation")}
+        if screen.level == "high":
+            meta["safety_warning"] = screen.warning
+            meta["moderation"] = {"label": "pending_review", "source": "rules"}
+        msg.metadata_ = meta
+        needs_review = screen.level == "high" or (screen.level == "review" and ai_moderation_on())
+        if needs_review:
+            queue_message_moderation(self.db, msg.id)
         await self.db.commit()
         await self.db.refresh(msg)
+        if needs_review:
+            schedule_dispatch()
 
         # Broadcast message.updated
         parts_q = select(ConversationParticipant.user_id).where(
@@ -637,6 +663,7 @@ class MessagingService:
                 "content": msg.content,
                 "is_edited": True,
                 "edited_at": msg.edited_at.isoformat(),
+                "safety_warning": (msg.metadata_ or {}).get("safety_warning"),
             },
             user_ids=recipients
         )

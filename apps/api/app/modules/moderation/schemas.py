@@ -14,7 +14,9 @@ class ReportCreate(BaseModel):
 
 class ReportResponse(BaseModel):
     id: uuid.UUID
-    reporter_id: uuid.UUID
+    reporter_id: Optional[uuid.UUID] = None  # None for automatic reports
+    source: str = "user"  # user, auto
+    details: Optional[dict] = None
     target_type: str
     target_id: uuid.UUID
     reason: str

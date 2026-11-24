@@ -33,8 +33,8 @@ from app.modules.applications.service import ApplicationService
 from app.modules.applications.schemas import ApplicationCreate, ApplicationStatusUpdate
 from app.modules.appointments.service import AppointmentService
 from app.modules.appointments.schemas import AppointmentCreate, AppointmentStatusUpdate
-from app.infrastructure.external_services.moderation import HeuristicModerationProvider
-from app.infrastructure.external_services.semantic_search import KeywordFallbackSearchProvider
+from app.ml.embeddings import LocalHashingEmbedder, cosine
+from app.ml.moderation import prescreen
 from app.modules.moderation.service import ModerationService
 from app.modules.moderation.schemas import ReportCreate
 from app.modules.verification.service import VerificationService
@@ -170,25 +170,14 @@ async def test_full_marketplace_end_to_end_journey():
     # =========================================================================
     # Step 3: Discovery Search (Keyword & Locality)
     # =========================================================================
-    search_provider = KeywordFallbackSearchProvider()
-    listings_pool = [
-        {
-            "id": created_prop.id,
-            "title": created_prop.title,
-            "description": created_prop.description,
-            "locality": "Koramangala",
-        },
-        {
-            "id": uuid4(),
-            "title": "1BHK in Whitefield near ITPL",
-            "description": "Quiet flat near tech parks",
-            "locality": "Whitefield",
-        },
-    ]
-
-    search_hits = await search_provider.search(query="Koramangala 2BHK", items=listings_pool)
-    assert len(search_hits) >= 1
-    assert search_hits[0].entity_id == created_prop.id
+    # Embedding similarity (local provider): the Koramangala 2BHK ranks above the Whitefield 1BHK.
+    embedder = LocalHashingEmbedder()
+    query_vec, ours, other = await embedder.embed(
+        ["Koramangala 2BHK", f"{created_prop.title} {created_prop.description} Koramangala",
+         "1BHK in Whitefield near ITPL. Quiet flat near tech parks. Whitefield"],
+        kind="document",
+    )
+    assert cosine(query_vec, ours) > cosine(query_vec, other)
 
     # =========================================================================
     # Step 4: Pairwise 10-Dimension Compatibility & Mutual Matching
@@ -212,6 +201,8 @@ async def test_full_marketplace_end_to_end_journey():
 
     # Mutual Reciprocal Matching Interaction
     matching_service = MatchingService(mock_db)
+    # Ranking-feature snapshots read profiles; covered by tests/test_ml_platform_db.py.
+    matching_service.pair_features = AsyncMock(return_value=None)
 
     # Actor A likes Actor B
     mock_existing_int = MagicMock()
@@ -373,19 +364,13 @@ async def test_full_marketplace_end_to_end_journey():
     # =========================================================================
     # Step 8: Messaging & Safety Heuristic Moderation
     # =========================================================================
-    mod_filter = HeuristicModerationProvider()
-
-    # Clean message from tenant
     clean_msg = "Hello Rajesh, we are looking forward to our flat viewing this Saturday."
-    mod_clean = await mod_filter.check_content(clean_msg)
-    assert mod_clean.is_flagged is False
-    assert mod_clean.action_recommended == "allow"
+    assert prescreen(clean_msg).level == "clear"
 
-    # Scam message flagged in real-time
+    # Scam message: recipients see a warning at once; AI moderation reviews it in the worker.
     scam_msg = "Please transfer money advance before visit via Paytm to confirm key handover."
-    mod_scam = await mod_filter.check_content(scam_msg)
-    assert mod_scam.is_flagged is True
-    assert mod_scam.action_recommended == "block"
+    screen = prescreen(scam_msg)
+    assert screen.level == "high" and screen.warning
 
     # =========================================================================
     # Step 9: Safety Moderation Reporting & Admin Audit

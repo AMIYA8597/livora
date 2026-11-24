@@ -29,12 +29,18 @@ async def list_properties(
     property_category: Optional[str] = Query(None, description="apartment, pg, independent_house, hostel, co_living"),
     configuration: Optional[str] = Query(None, description="1RK, 1BHK, 2BHK, 3BHK, 4BHK_plus, studio"),
     bedrooms: Optional[int] = Query(None, description="Minimum bedrooms"),
+    q: Optional[str] = Query(None, max_length=300, description="Free text, e.g. 'quiet furnished room near Indiranagar metro'. Results are ordered by relevance."),
+    locality: Optional[str] = Query(None, max_length=100, description="Locality name contained in the listing's public address"),
+    furnishing_status: Optional[str] = Query(None, description="fully_furnished, semi_furnished, unfurnished"),
     limit: int = Query(20, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     service = PropertyService(db)
     return await service.list_properties(
+        q=q,
+        locality=locality,
+        furnishing_status=furnishing_status,
         city=city,
         min_rent=min_rent,
         max_rent=max_rent,

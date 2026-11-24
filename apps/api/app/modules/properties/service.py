@@ -10,8 +10,23 @@ from geoalchemy2.shape import to_shape
 from app.modules.properties.models import Property, Room, Bed, PropertyAmenity
 from app.modules.properties.schemas import PropertyCreate, PropertyUpdate
 from app.core.exceptions import NotFoundException, ForbiddenException, BadRequestException, ConflictException
+from app.ml.indexing import queue_embedding_refresh
+from app.ml.moderation import prescreen
+from app.ml.moderation_jobs import ai_moderation_on, queue_property_moderation
+from app.ml.search import clean_query, rank_properties
 
 VALID_LISTING_STATUSES = {"draft", "pending_verification", "published", "paused", "archived"}
+# Changes to these refresh the listing's search embedding / trigger a safety review.
+SEARCHABLE_FIELDS = {"title", "description", "address_display", "city", "configuration",
+                     "property_category", "furnishing_status", "pets_allowed", "smoking_allowed"}
+REVIEWED_FIELDS = {"title", "description", "monthly_rent", "security_deposit"}
+
+
+def queue_listing_review(db: AsyncSession, prop: Property) -> None:
+    """AI review of every new or changed listing when Claude is configured; otherwise only
+    listings the rule pre-screen flags (they still get an automatic report)."""
+    if ai_moderation_on() or prescreen(prop.title + " " + prop.description).level == "high":
+        queue_property_moderation(db, prop.id)
 
 class PropertyService:
     def __init__(self, db: AsyncSession):
@@ -127,28 +142,47 @@ class PropertyService:
         bedrooms: Optional[int] = None,
         limit: int = 20,
         offset: int = 0,
+        q: Optional[str] = None,
+        locality: Optional[str] = None,
+        furnishing_status: Optional[str] = None,
     ) -> List[dict]:
+        conditions = [Property.is_active.is_(True), Property.listing_status == "published"]
+        if locality:
+            conditions.append(Property.address_display.ilike(f"%{locality}%"))
+        if furnishing_status:
+            conditions.append(Property.furnishing_status == furnishing_status)
+        if city:
+            conditions.append(Property.city.ilike(f"%{city}%"))
+        if min_rent is not None:
+            conditions.append(Property.monthly_rent >= min_rent)
+        if max_rent is not None:
+            conditions.append(Property.monthly_rent <= max_rent)
+        if property_category:
+            conditions.append(Property.property_category == property_category)
+        if configuration:
+            conditions.append(Property.configuration == configuration)
+        if bedrooms is not None:
+            conditions.append(Property.total_bedrooms >= bedrooms)
         query = (
             select(Property)
             .options(
                 selectinload(Property.rooms).selectinload(Room.beds),
                 selectinload(Property.amenities)
             )
-            .where(Property.is_active.is_(True))
-            .where(Property.listing_status == "published")
+            .where(*conditions)
         )
-        if city:
-            query = query.where(Property.city.ilike(f"%{city}%"))
-        if min_rent is not None:
-            query = query.where(Property.monthly_rent >= min_rent)
-        if max_rent is not None:
-            query = query.where(Property.monthly_rent <= max_rent)
-        if property_category:
-            query = query.where(Property.property_category == property_category)
-        if configuration:
-            query = query.where(Property.configuration == configuration)
-        if bedrooms is not None:
-            query = query.where(Property.total_bedrooms >= bedrooms)
+
+        text_query = clean_query(q)
+        if text_query:
+            # Hybrid full-text + embedding search over the filtered set (app/ml/search.py).
+            eligible = select(Property.id).where(*conditions)
+            ranking = await rank_properties(self.db, text_query, eligible)
+            page_ids = ranking.ids[offset:offset + limit]
+            if not page_ids:
+                return []
+            rows = (await self.db.execute(query.where(Property.id.in_(page_ids)))).scalars().all()
+            by_id = {p.id: p for p in rows}
+            return [self._format_property_response(by_id[i]) for i in page_ids if i in by_id]
 
         query = query.order_by(Property.created_at.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
@@ -194,6 +228,8 @@ class PropertyService:
         )
         self.db.add(prop)
         await self.db.flush()
+        queue_embedding_refresh(self.db, "property", prop.id)
+        queue_listing_review(self.db, prop)
 
         # Add amenities
         for amenity in data.amenities:
@@ -263,6 +299,10 @@ class PropertyService:
         for key, value in update_dict.items():
             if key not in ("amenities",):
                 setattr(prop, key, value)
+        if SEARCHABLE_FIELDS & update_dict.keys():
+            queue_embedding_refresh(self.db, "property", prop.id)
+        if REVIEWED_FIELDS & update_dict.keys():
+            queue_listing_review(self.db, prop)
 
         await self.db.commit()
         res = await self.get_by_id(prop.id)

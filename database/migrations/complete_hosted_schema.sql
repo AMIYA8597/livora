@@ -87,6 +87,29 @@ CREATE TABLE subscription_plans (
     UNIQUE (code)
 );
 
+CREATE TABLE content_embeddings (
+    id UUID NOT NULL, 
+    entity_type VARCHAR(32) NOT NULL, 
+    entity_id UUID NOT NULL, 
+    model VARCHAR(80) NOT NULL, 
+    embedding FLOAT(24)[] NOT NULL, 
+    content_hash VARCHAR(64) NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    PRIMARY KEY (id)
+);
+
+CREATE TABLE ml_models (
+    id UUID NOT NULL, 
+    name VARCHAR(64) NOT NULL, 
+    version INTEGER NOT NULL, 
+    params JSONB NOT NULL, 
+    metrics JSONB NOT NULL, 
+    training_rows INTEGER NOT NULL, 
+    is_active BOOLEAN NOT NULL, 
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    PRIMARY KEY (id)
+);
+
 CREATE TABLE user_roles (
     id UUID NOT NULL, 
     user_id UUID NOT NULL, 
@@ -245,11 +268,11 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_properties_postal_code ON properties (postal_code);
-
 CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE INDEX ix_properties_city ON properties (city);
+
+CREATE INDEX ix_properties_postal_code ON properties (postal_code);
 
 CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
@@ -272,6 +295,7 @@ CREATE TABLE match_interactions (
     user_id UUID NOT NULL, 
     target_user_id UUID NOT NULL, 
     action VARCHAR(32) NOT NULL, 
+    features JSONB, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     PRIMARY KEY (id), 
     CONSTRAINT uq_user_interaction UNIQUE (user_id, target_user_id), 
@@ -279,9 +303,9 @@ CREATE TABLE match_interactions (
     FOREIGN KEY(target_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
-
 CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
+
+CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
 
 CREATE TABLE mutual_matches (
     id UUID NOT NULL, 
@@ -353,12 +377,14 @@ CREATE INDEX idx_phone_verifications_user_created ON phone_verifications (user_i
 
 CREATE TABLE moderation_reports (
     id UUID NOT NULL, 
-    reporter_id UUID NOT NULL, 
+    reporter_id UUID, 
     target_type VARCHAR(32) NOT NULL, 
     target_id UUID NOT NULL, 
     reason VARCHAR(100) NOT NULL, 
     description TEXT, 
     status VARCHAR(32) NOT NULL, 
+    source VARCHAR(16) NOT NULL, 
+    details JSONB, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     PRIMARY KEY (id), 
     FOREIGN KEY(reporter_id) REFERENCES users (id) ON DELETE CASCADE
@@ -375,9 +401,9 @@ CREATE TABLE user_blocks (
     FOREIGN KEY(blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
-
 CREATE INDEX ix_user_blocks_user_id ON user_blocks (user_id);
+
+CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
 
 CREATE TABLE subscriptions (
     id UUID NOT NULL, 
@@ -415,9 +441,9 @@ CREATE TABLE cities (
     FOREIGN KEY(state_id) REFERENCES states (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_cities_name ON cities (name);
-
 CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
+
+CREATE INDEX ix_cities_name ON cities (name);
 
 CREATE TABLE rooms (
     id UUID NOT NULL, 
@@ -745,9 +771,9 @@ CREATE TABLE conversation_preferences (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
-
 CREATE INDEX ix_conversation_preferences_user_id ON conversation_preferences (user_id);
+
+CREATE INDEX ix_conversation_preferences_conversation_id ON conversation_preferences (conversation_id);
 
 CREATE INDEX idx_conv_pref_archived ON conversation_preferences (user_id, is_archived);
 
@@ -1153,6 +1179,89 @@ CREATE INDEX IF NOT EXISTS idx_phone_verifications_phone_created ON phone_verifi
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_verified_phone ON users (phone_number) WHERE phone_verified_at IS NOT NULL;
 
 UPDATE alembic_version SET version_num='008_phone_verification' WHERE alembic_version.version_num = '007_least_privilege_app_role';
+
+-- Running upgrade 008_phone_verification -> 009_ml_platform
+
+CREATE TABLE IF NOT EXISTS content_embeddings (
+            id UUID PRIMARY KEY,
+            entity_type VARCHAR(32) NOT NULL,
+            entity_id UUID NOT NULL,
+            model VARCHAR(80) NOT NULL,
+            embedding REAL[] NOT NULL,
+            content_hash VARCHAR(64) NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT uq_content_embeddings_entity UNIQUE (entity_type, entity_id),
+            CONSTRAINT ck_content_embeddings_type CHECK (entity_type IN ('property', 'profile'))
+        );
+
+CREATE INDEX IF NOT EXISTS ix_content_embeddings_type_model ON content_embeddings (entity_type, model);
+
+ALTER TABLE properties ADD COLUMN IF NOT EXISTS search_tsv tsvector
+        GENERATED ALWAYS AS (
+            setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+            setweight(to_tsvector('english', coalesce(address_display, '') || ' ' || coalesce(city, '')), 'B') ||
+            setweight(to_tsvector('english', coalesce(description, '')), 'C')
+        ) STORED;
+
+CREATE INDEX IF NOT EXISTS ix_properties_search_tsv ON properties USING gin (search_tsv);
+
+CREATE TABLE IF NOT EXISTS ml_models (
+            id UUID PRIMARY KEY,
+            name VARCHAR(64) NOT NULL,
+            version INTEGER NOT NULL,
+            params JSONB NOT NULL,
+            metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+            training_rows INTEGER NOT NULL DEFAULT 0,
+            is_active BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT uq_ml_models_name_version UNIQUE (name, version)
+        );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ml_models_one_active ON ml_models (name) WHERE is_active;
+
+ALTER TABLE match_interactions ADD COLUMN IF NOT EXISTS features JSONB;
+
+ALTER TABLE moderation_reports ALTER COLUMN reporter_id DROP NOT NULL;
+
+ALTER TABLE moderation_reports ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'user';
+
+ALTER TABLE moderation_reports ADD COLUMN IF NOT EXISTS details JSONB;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_moderation_reports_auto_target ON moderation_reports (target_type, target_id) WHERE source = 'auto';
+
+DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vector' AND typtype = 'd') THEN
+                DROP DOMAIN vector;
+            END IF;
+        END $$;;
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+ALTER TABLE content_embeddings ADD COLUMN IF NOT EXISTS embedding_vec vector(512);
+
+CREATE OR REPLACE FUNCTION content_embeddings_sync_vec() RETURNS trigger AS $$
+        BEGIN
+            IF cardinality(NEW.embedding) = 512 THEN
+                NEW.embedding_vec := NEW.embedding::vector(512);
+            ELSE
+                NEW.embedding_vec := NULL;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;;
+
+DROP TRIGGER IF EXISTS trg_content_embeddings_sync_vec ON content_embeddings;
+
+CREATE TRIGGER trg_content_embeddings_sync_vec
+        BEFORE INSERT OR UPDATE OF embedding ON content_embeddings
+        FOR EACH ROW EXECUTE FUNCTION content_embeddings_sync_vec();
+
+UPDATE content_embeddings SET embedding = embedding;
+
+CREATE INDEX IF NOT EXISTS ix_content_embeddings_vec_hnsw ON content_embeddings USING hnsw (embedding_vec vector_cosine_ops);
+
+UPDATE alembic_version SET version_num='009_ml_platform' WHERE alembic_version.version_num = '008_phone_verification';
 
 DO $$
 DECLARE

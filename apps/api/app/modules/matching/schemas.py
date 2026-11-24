@@ -19,6 +19,10 @@ class ScoreBreakdownSchema(BaseModel):
 class FlatmateMatchResponse(BaseModel):
     profile: ProfileResponse
     match_score: ScoreBreakdownSchema
+    # How the list was ordered: "learned" (like/pass model, see app/ml/ranker.py) or "heuristic".
+    ranking: str = "heuristic"
+    # Learned P(like) when ranking == "learned".
+    rank_score: Optional[float] = None
 
 class MatchInteractionRequest(BaseModel):
     target_user_id: uuid.UUID

@@ -161,6 +161,7 @@ async def test_workflow_a_flatmate_seeker_journey():
 
     # 10 & 11: Send Interest and Establish Mutual Match
     matching_service = MatchingService(mock_db)
+    matching_service.pair_features = AsyncMock(return_value=None)  # profile reads not mocked here
     # Seeker likes Candidate (First interaction)
     mock_no_int = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
     mock_db.execute.side_effect = [mock_no_int, mock_no_int, mock_no_int]

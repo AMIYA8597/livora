@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, List
+from typing import Any, List, Optional
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -118,6 +118,26 @@ class Settings(BaseSettings):
     BUDGET_WEIGHT: float = 0.30
     LOCATION_WEIGHT: float = 0.20
     HABITS_WEIGHT: float = 0.10
+
+    # AI / ML (app/ml). Every feature degrades to a local, deterministic path when its
+    # provider is not configured, so the product works without any paid API.
+    # Claude: moderation of messages/listings flagged by the rule pre-screen, and chat
+    # reply suggestions. Unset key = rules and templates only.
+    ANTHROPIC_API_KEY: Optional[str] = None
+    LLM_MODEL: str = "claude-opus-5-5"
+    LLM_TIMEOUT_SECONDS: float = 20.0
+    AI_MODERATION_ENABLED: bool = True
+    AI_SMART_REPLIES_ENABLED: bool = True
+    # Embeddings for listing and "about me" search: "voyage" (needs VOYAGE_API_KEY) or
+    # "local" (deterministic hashed n-grams: lexical, typo-tolerant, not truly semantic).
+    # Vectors from different models are never compared; switching models needs a backfill
+    # (`python -m app.ml.cli backfill-embeddings`).
+    EMBEDDING_PROVIDER: str = "local"
+    VOYAGE_API_KEY: Optional[str] = None
+    EMBEDDING_MODEL: str = "voyage-3.5-lite"
+    EMBEDDING_TIMEOUT_SECONDS: float = 8.0
+    # The learned ranker needs this many labelled like/pass interactions before training.
+    RANKER_MIN_TRAINING_ROWS: int = 200
 
     # Celery
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")

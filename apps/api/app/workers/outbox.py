@@ -14,9 +14,14 @@ them, so an event can never be lost once the request has been answered. The disp
      MAX_ATTEMPTS the row is `failed` (a dead letter, kept for inspection and purged later).
 
 Delivery is at-least-once: handlers must be idempotent (emails carry idempotency keys).
+
+Handlers receive the dispatcher's session factory. Celery runs each task in a fresh event loop
+with its own NullPool engine, so a handler must never use the API's pooled `AsyncSessionLocal`
+(its connections belong to another loop).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -38,10 +43,11 @@ LEASE = timedelta(minutes=5)
 BASE_BACKOFF_SECONDS = 30
 MAX_BACKOFF_SECONDS = 3600
 
-Handler = Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
+SessionFactory = async_sessionmaker[AsyncSession]
+Handler = Callable[[Dict[str, Any], SessionFactory], Awaitable[Dict[str, Any]]]
 
 
-async def _handle_email(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def _handle_email(payload: Dict[str, Any], session_factory: SessionFactory) -> Dict[str, Any]:
     await deliver_templated_email(
         payload["to"], payload["template"], payload.get("context") or {}, payload.get("idempotency_key")
     )
@@ -53,23 +59,73 @@ async def _handle_email(payload: Dict[str, Any]) -> Dict[str, Any]:
     return scrubbed
 
 
-async def _handle_message_created(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def _handle_message_created(payload: Dict[str, Any], session_factory: SessionFactory) -> Dict[str, Any]:
     # Live delivery already happened over WebSocket during the request. This event is scheduled
     # CHAT_UNREAD_EMAIL_DELAY_MINUTES later: recipients who still haven't read the message get
     # an email. Imported here to avoid an import cycle (notifications -> outbox).
-    from app.core.database import AsyncSessionLocal
     from app.modules.notifications.emails import queue_unread_message_emails
 
-    async with AsyncSessionLocal() as db:
+    async with session_factory() as db:
         queued = await queue_unread_message_emails(db, payload)
     kept = {k: payload.get(k) for k in ("id", "conversation_id", "sender_id", "sent_at")}
     return {**kept, "emails_queued": queued}
 
 
+async def _handle_embedding_refresh(payload: Dict[str, Any], session_factory: SessionFactory) -> Dict[str, Any]:
+    from uuid import UUID
+
+    from app.ml.indexing import refresh_embedding
+
+    async with session_factory() as db:
+        outcome = await refresh_embedding(db, payload["entity_type"], UUID(payload["entity_id"]))
+    return {**payload, "outcome": outcome}
+
+
+async def _handle_message_moderate(payload: Dict[str, Any], session_factory: SessionFactory) -> Dict[str, Any]:
+    from uuid import UUID
+
+    from app.ml.moderation_jobs import moderate_message
+
+    return await moderate_message(session_factory, UUID(payload["message_id"]))
+
+
+async def _handle_property_moderate(payload: Dict[str, Any], session_factory: SessionFactory) -> Dict[str, Any]:
+    from uuid import UUID
+
+    from app.ml.moderation_jobs import moderate_property
+
+    return await moderate_property(session_factory, UUID(payload["property_id"]))
+
+
 HANDLERS: Dict[str, Handler] = {
     EMAIL_EVENT: _handle_email,
     MESSAGE_CREATED_EVENT: _handle_message_created,
+    "embedding.refresh": _handle_embedding_refresh,
+    "message.moderate": _handle_message_moderate,
+    "property.moderate": _handle_property_moderate,
 }
+
+
+_kicks: "set[asyncio.Task[Any]]" = set()
+
+
+def schedule_dispatch() -> None:
+    """Fire-and-forget dispatch from the API process, for events that should run soon (e.g.
+    moderation). The beat sweep is the safety net if this fails or the process exits."""
+    from app.core.database import AsyncSessionLocal
+
+    async def run() -> None:
+        try:
+            await dispatch_pending(AsyncSessionLocal)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Immediate outbox dispatch failed: %s", type(exc).__name__)
+
+    try:
+        task = asyncio.get_running_loop().create_task(run())
+    except RuntimeError:
+        return  # no running loop (e.g. a sync script): the sweep will pick it up
+    _kicks.add(task)
+    task.add_done_callback(_kicks.discard)
 
 
 def backoff_for(attempt: int) -> timedelta:
@@ -114,7 +170,7 @@ async def dispatch_pending(session_factory: async_sessionmaker[AsyncSession], ba
         try:
             if handler is None:
                 raise LookupError(f"No outbox handler for event type '{row['event_type']}'")
-            scrubbed = await handler(dict(row["payload"]))
+            scrubbed = await handler(dict(row["payload"]), session_factory)
             outcomes.append({"id": row["id"], "ok": True, "payload": scrubbed})
         except Exception as exc:  # noqa: BLE001 - every failure is recorded and retried
             attempt = row["retry_count"] + 1

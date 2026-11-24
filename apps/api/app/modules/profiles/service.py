@@ -10,6 +10,7 @@ from app.modules.matching.models import MutualMatch
 from app.modules.profiles.schemas import ProfileUpdate, LifestyleTraitsSchema, PrivacySettingsUpdate, ProfileResponse
 from app.core.exceptions import NotFoundException, ForbiddenException
 from app.core.config import settings
+from app.ml.indexing import queue_embedding_refresh
 
 def compute_lifestyle_vector(traits: LifestyleTraitsSchema) -> list:
     """
@@ -157,6 +158,8 @@ class ProfileService:
         update_dict = data.model_dump(exclude_unset=True)
         for key, value in update_dict.items():
             setattr(profile, key, value)
+        if {"bio", "occupation", "preferred_locations"} & update_dict.keys():
+            queue_embedding_refresh(self.db, "profile", user_id)
 
         await self.db.commit()
         await self.db.refresh(profile)
@@ -171,6 +174,7 @@ class ProfileService:
 
         profile.lifestyle_traits = quiz.model_dump()
         profile.lifestyle_vector = compute_lifestyle_vector(quiz)
+        queue_embedding_refresh(self.db, "profile", user_id)
 
         await self.db.commit()
         await self.db.refresh(profile)

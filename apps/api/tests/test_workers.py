@@ -145,7 +145,7 @@ async def test_outage_then_recovery_delivers_exactly_once(created_ids):
 async def test_concurrent_dispatchers_never_double_send(created_ids, monkeypatch):
     sends = []
 
-    async def slow_handler(payload):
+    async def slow_handler(payload, session_factory):
         sends.append(payload["idempotency_key"])
         await asyncio.sleep(0.05)
         return {"scrubbed": True}
@@ -257,9 +257,9 @@ def test_celery_tasks_and_schedule_registered():
     from app.workers import tasks  # noqa: F401 - registers tasks
     from app.workers.celery_app import celery_app
 
-    assert {"outbox.dispatch", "maintenance.run"} <= set(celery_app.tasks.keys())
+    assert {"outbox.dispatch", "maintenance.run", "ml.train_ranker"} <= set(celery_app.tasks.keys())
     scheduled = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
-    assert scheduled == {"outbox.dispatch", "maintenance.run"}
+    assert scheduled == {"outbox.dispatch", "maintenance.run", "ml.train_ranker"}
     assert celery_app.conf.task_acks_late is True
 
 

@@ -24,6 +24,8 @@ from app.modules.messaging.schemas import (
 from app.modules.messaging.service import MessagingService, message_dict
 from app.modules.messaging.websocket import manager, shares_conversation
 from app.modules.storage.service import StorageService
+from app.core.rate_limit import RateLimiter
+from app.ml.smart_replies import suggest_for_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,20 @@ async def send_message(
     service = MessagingService(db)
     msg = await service.send_message(current_user.id, req)
     return message_dict(msg, await service.attachments_for(msg.id))
+
+@router.post(
+    "/conversations/{conversation_id}/suggestions",
+    dependencies=[Depends(RateLimiter(max_requests=20, window_seconds=60, key_prefix="smart_replies"))],
+)
+async def suggest_replies(
+    conversation_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Up to three suggested messages (icebreaker, reply or follow-up). Generated on request,
+    never stored, never sent automatically. `source` is "ai" or "templates"."""
+    result = await suggest_for_conversation(db, conversation_id, current_user.id)
+    return {"suggestions": result.suggestions, "source": result.source, "mode": result.mode}
 
 @router.patch("/messages/{message_id}")
 async def edit_message(

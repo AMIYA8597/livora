@@ -152,7 +152,7 @@ async def seed(allow_remote: bool = False) -> dict:
 
         async def add_user(key: str, name: str, role: str) -> uuid.UUID:
             uid = sid(f"user:{key}")
-            await s.merge(User(id=uid, email=f"{key}@seed.flatmate.test", hashed_password=password_hash,
+            await s.merge(User(id=uid, email=f"{key}@seed.example.com", hashed_password=password_hash,
                                full_name=name, role=role, is_active=True, is_verified=True))
             await s.merge(UserRole(id=sid(f"role:{key}:{role}"), user_id=uid, role=role, is_verified=True))
             await s.merge(UserPrivacySetting(id=sid(f"privacy:{key}"), user_id=uid, profile_visibility="public"))

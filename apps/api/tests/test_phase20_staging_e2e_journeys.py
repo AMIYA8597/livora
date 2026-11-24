@@ -158,6 +158,7 @@ async def test_journey_a_seeker_complete_lifecycle(mock_db):
 
     # 4. Mutual Match & Messaging
     matching_service = MatchingService(mock_db)
+    matching_service.pair_features = AsyncMock(return_value=None)  # profile reads not mocked here
     mock_no_int = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
     recip = MatchInteraction(user_id=seeker_id, target_user_id=candidate_id, action="like")
     mock_recip_found = MagicMock(scalar_one_or_none=MagicMock(return_value=recip))

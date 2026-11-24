@@ -1,4 +1,5 @@
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional
 from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, func, text
@@ -20,6 +21,9 @@ from app.modules.matching.schemas import (
 from app.modules.profiles.service import ProfileService, build_profile_response
 from app.core.exceptions import NotFoundException, BadRequestException, ForbiddenException
 from app.modules.moderation.models import UserBlock
+from app.ml.embeddings import cosine, get_embedder
+from app.ml.models import ContentEmbedding
+from app.ml.ranker import active_ranker, pair_features
 
 # Retrieval stage size: candidates fetched by SQL before exact re-ranking in Python.
 CANDIDATE_POOL_SIZE = 200
@@ -29,6 +33,8 @@ BUDGET_TOLERANCE = 0.25
 _VECTOR_SEARCH_AVAILABLE: Optional[bool] = None
 
 VALID_INTERACTION_ACTIONS = {"like", "pass", "save", "super_like"}
+# People you passed on come back after this long; likes and saves never reappear.
+PASS_RESURFACE_AFTER = timedelta(days=30)
 
 class MatchingService:
     def __init__(self, db: AsyncSession):
@@ -76,6 +82,13 @@ class MatchingService:
             .exists()
         )
         visibility = func.coalesce(UserPrivacySetting.profile_visibility, "public")
+        already_acted = select(MatchInteraction.target_user_id).where(
+            MatchInteraction.user_id == user_id,
+            or_(
+                MatchInteraction.action != "pass",
+                MatchInteraction.created_at >= datetime.now(timezone.utc) - PASS_RESURFACE_AFTER,
+            ),
+        )
 
         # Budget pre-filter with tolerance: ranges must overlap once widened by BUDGET_TOLERANCE.
         my_min = my_profile.budget_min or 0
@@ -91,6 +104,7 @@ class MatchingService:
                 Profile.user_id != user_id,
                 ~Profile.user_id.in_(blocked_q),
                 ~Profile.user_id.in_(blocker_q),
+                ~Profile.user_id.in_(already_acted),
                 User.is_active.is_(True),
                 or_(visibility == "public", and_(visibility == "matched_only", is_mutual_match)),
                 Profile.budget_min <= widened_max,
@@ -110,6 +124,10 @@ class MatchingService:
 
         rows = (await self.db.execute(stmt)).all()
 
+        bios = await self._bio_embeddings([user_id, *(cand.user_id for cand, _, _ in rows)])
+        my_bio = bios.get(user_id)
+        ranker = await active_ranker(self.db)
+
         recommendations = []
         user_budget = (my_profile.budget_min, my_profile.budget_max)
         for cand, cand_user, cand_privacy in rows:
@@ -127,13 +145,60 @@ class MatchingService:
                 vector_sim=sim,
                 user_dealbreakers=dealbreakers,
             )
+            rank_score = None
+            if ranker is not None:
+                their_bio = bios.get(cand.user_id)
+                rank_score = ranker.score(pair_features(
+                    breakdown_dict, vector_sim=sim,
+                    bio_similarity=cosine(my_bio, their_bio) if my_bio and their_bio else None,
+                    candidate_verified=bool(cand_user.is_verified),
+                    candidate_has_avatar=bool(cand.avatar_url), candidate_has_bio=bool(cand.bio),
+                ))
             recommendations.append(FlatmateMatchResponse(
                 profile=build_profile_response(cand, cand_user, cand_privacy, requester_id=user_id),
                 match_score=ScoreBreakdownSchema(**breakdown_dict),
+                ranking="learned" if ranker is not None else "heuristic",
+                rank_score=round(rank_score, 4) if rank_score is not None else None,
             ))
 
-        recommendations.sort(key=lambda r: r.match_score.overall_score, reverse=True)
+        if ranker is not None:
+            recommendations.sort(key=lambda r: r.rank_score or 0.0, reverse=True)
+        else:
+            recommendations.sort(key=lambda r: r.match_score.overall_score, reverse=True)
         return recommendations[:limit]
+
+    async def _bio_embeddings(self, user_ids: List[UUID]) -> Dict[UUID, List[float]]:
+        """'About me' vectors from the current embedding model, keyed by user id."""
+        if not user_ids:
+            return {}
+        rows = (await self.db.execute(
+            select(ContentEmbedding.entity_id, ContentEmbedding.embedding).where(
+                ContentEmbedding.entity_type == "profile",
+                ContentEmbedding.model == get_embedder().model_id,
+                ContentEmbedding.entity_id.in_(user_ids),
+            )
+        )).all()
+        return {r[0]: list(r[1]) for r in rows}
+
+    async def pair_features(self, user_id: UUID, target_user_id: UUID) -> Optional[Dict[str, float]]:
+        """Ranking features for one (viewer, candidate) pair, or None if a profile is missing."""
+        profile_service = ProfileService(self.db)
+        p1 = await profile_service.get_by_user_id(user_id)
+        p2 = await profile_service.get_by_user_id(target_user_id)
+        target = (await self.db.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
+        if not p1 or not p2 or not target:
+            return None
+        breakdown = await self._breakdown(user_id, p1, p2)
+        bios = await self._bio_embeddings([user_id, target_user_id])
+        mine, theirs = bios.get(user_id), bios.get(target_user_id)
+        v1 = list(p1.lifestyle_vector) if p1.lifestyle_vector is not None else []
+        v2 = list(p2.lifestyle_vector) if p2.lifestyle_vector is not None else []
+        return pair_features(
+            breakdown, vector_sim=cosine_similarity(v1, v2),
+            bio_similarity=cosine(mine, theirs) if mine and theirs else None,
+            candidate_verified=bool(target.is_verified),
+            candidate_has_avatar=bool(p2.avatar_url), candidate_has_bio=bool(p2.bio),
+        )
 
     async def get_pairwise_score(self, user_id: UUID, target_user_id: UUID) -> ScoreBreakdownSchema:
         profile_service = ProfileService(self.db)
@@ -142,7 +207,9 @@ class MatchingService:
 
         if not p1 or not p2:
             raise NotFoundException("One or both profiles could not be found")
+        return ScoreBreakdownSchema(**(await self._breakdown(user_id, p1, p2)))
 
+    async def _breakdown(self, user_id: UUID, p1: Profile, p2: Profile) -> dict:
         db_query = select(UserDealbreaker).where(UserDealbreaker.user_id == user_id)
         dbs_res = await self.db.execute(db_query)
         dealbreakers = [{"rule_key": d.rule_key, "is_strict": d.is_strict, "expected_value": d.expected_value} for d in dbs_res.scalars().all()]
@@ -163,7 +230,7 @@ class MatchingService:
             vector_sim=sim,
             user_dealbreakers=dealbreakers,
         )
-        return ScoreBreakdownSchema(**breakdown)
+        return breakdown
 
     async def record_interaction(
         self,
@@ -194,13 +261,21 @@ class MatchingService:
         existing_res = await self.db.execute(existing_q)
         interaction = existing_res.scalar_one_or_none()
 
+        # Snapshot what the user saw when they decided: training data for the learned ranker.
+        try:
+            features = await self.pair_features(user_id, target_user_id)
+        except Exception:
+            features = None
         if interaction:
             interaction.action = action
+            interaction.created_at = datetime.now(timezone.utc)  # when they last decided
+            interaction.features = features
         else:
             interaction = MatchInteraction(
                 user_id=user_id,
                 target_user_id=target_user_id,
-                action=action
+                action=action,
+                features=features,
             )
             self.db.add(interaction)
         await self.db.flush()

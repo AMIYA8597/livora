@@ -21,7 +21,7 @@ _spec.loader.exec_module(seed_module)
 
 async def _counts():
     async with AsyncSessionLocal() as s:
-        users = await s.scalar(select(func.count()).select_from(User).where(User.email.like("%@seed.flatmate.test")))
+        users = await s.scalar(select(func.count()).select_from(User).where(User.email.like("%@seed.example.com")))
         props = await s.scalar(select(func.count()).select_from(Property).where(Property.address_exact.like("%Seed Residency%")))
         distinct_points = await s.scalar(
             select(func.count(func.distinct(func.ST_AsText(Property.location))))
@@ -40,3 +40,12 @@ async def test_seed_runs_and_is_idempotent():
     assert after_first[0] == first["users"]
     assert after_first[1] == first["properties"]
     assert after_first[2] == first["properties"], "every seeded listing must have its own real location"
+
+
+async def test_seeded_accounts_can_sign_in(async_client):
+    """The seed used an @*.test domain, which the API's email validation rejects as reserved, so no
+    seeded account could log in."""
+    await seed_module.seed()
+    res = await async_client.post("/api/v1/auth/login", json={
+        "email": "priya@seed.example.com", "password": seed_module.SEED_PASSWORD})
+    assert res.status_code == 200, res.text

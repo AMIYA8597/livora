@@ -12,6 +12,7 @@ class FlatmateSearchFilter(BaseModel):
     diet: Optional[str] = None
     smoking: Optional[str] = None
     pets: Optional[str] = None
+    q: Optional[str] = None  # "about me" search, ordered by relevance
     limit: int = 20
     offset: int = 0
 

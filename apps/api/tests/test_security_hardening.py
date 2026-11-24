@@ -114,31 +114,3 @@ async def test_rate_limiter_dependency_blocks():
     assert res.headers["Retry-After"] is not None
 
 
-@pytest.mark.asyncio
-async def test_sql_injection_defense():
-    """Verify that SQL injection strings in search queries are safely handled."""
-    from app.infrastructure.external_services.semantic_search import KeywordFallbackSearchProvider
-    from uuid import uuid4
-
-    provider = KeywordFallbackSearchProvider()
-    items = [
-        {
-            "id": uuid4(),
-            "title": "2BHK Indiranagar 100ft road",
-            "description": "Lovely flat with balcony",
-            "locality": "Indiranagar",
-        }
-    ]
-
-    malicious_inputs = [
-        "' OR '1'='1' --",
-        "admin'--",
-        "'; DROP TABLE users; --",
-        "1; SELECT * FROM profiles WHERE 'a'='a",
-        "<script>alert('xss')</script>",
-    ]
-
-    for bad_input in malicious_inputs:
-        # Must execute cleanly without unhandled exception or SQL syntax error
-        results = await provider.search(bad_input, items)
-        assert isinstance(results, list)

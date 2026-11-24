@@ -19,6 +19,8 @@ async def search_flatmates(
     cleanliness_min: Optional[int] = Query(None),
     diet: Optional[str] = Query(None),
     smoking: Optional[str] = Query(None),
+    pets: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, max_length=300, description="Search people by what they wrote about themselves"),
     limit: int = Query(20, le=50),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
@@ -33,6 +35,8 @@ async def search_flatmates(
         cleanliness_min=cleanliness_min,
         diet=diet,
         smoking=smoking,
+        pets=pets,
+        q=q,
         limit=limit,
         offset=offset,
     )

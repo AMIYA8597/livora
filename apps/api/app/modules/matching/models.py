@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import String, Float, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
+from typing import Optional
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -16,6 +17,8 @@ class MatchInteraction(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     target_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     action: Mapped[str] = mapped_column(String(32), nullable=False) # like, pass, save, super_like
+    # Ranking features as they were when the user acted (training data for app/ml/ranker.py).
+    features: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "target_user_id", name="uq_user_interaction"),)

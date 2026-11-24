@@ -144,6 +144,7 @@ export type WebSocketEventType =
   | 'message.created'
   | 'message.updated'
   | 'message.deleted'
+  | 'message.moderated'
   | 'message.delivered'
   | 'message.read'
   | 'typing.started'

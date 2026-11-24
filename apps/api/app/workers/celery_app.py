@@ -30,5 +30,7 @@ celery_app.conf.update(
         # mostly catches retries and anything left behind by a crash.
         "outbox-dispatch": {"task": "outbox.dispatch", "schedule": 15.0},
         "maintenance-hourly": {"task": "maintenance.run", "schedule": crontab(minute=7)},
+        # Mondays 03:30 UTC: retrain the recommendation ranker from the past week's likes/passes.
+        "ml-train-ranker-weekly": {"task": "ml.train_ranker", "schedule": crontab(minute=30, hour=3, day_of_week=1)},
     },
 )

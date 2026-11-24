@@ -270,10 +270,87 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
       fixed in item 7, and live events now include attachments). The 10-minute email depends on
       the outbox sweep, so it's only timely once the worker and beat run (item 18a). Web push is
       item 13.
-- [ ] **10. AI/ML is mostly heuristic or mock.** `MockExternalML*` providers. Add a real
-      embedding-based "about me"/listing semantic search, learning-to-rank from like/pass
-      interactions, an LLM-assisted scam/abuse moderation provider, and a smart reply/icebreaker
-      feature in chat. Add offline evaluation metrics.
+- [x] **10. AI/ML is mostly heuristic or mock.** *(Done.)* The `MockExternalML*` providers and
+      their test are gone. Everything new lives in `apps/api/app/ml/` (migration
+      `009_ml_platform`). It works without any API key, and gets better when keys are set.
+      - **Search:** listings (`GET /properties?q=`) and "about me" (`GET /flatmates/search?q=`)
+        use hybrid search. Postgres full-text search (a weighted `search_tsv` column with a GIN
+        index on listings) and embedding similarity are fused with reciprocal rank fusion. Every
+        normal filter still applies, and so do privacy rules: private profiles never show,
+        "matched only" needs a mutual match, and blocks hide people in both directions.
+        Embeddings come from Voyage AI (`EMBEDDING_PROVIDER=voyage`, real semantic matches) or
+        a local hashed n-gram model (default; lexical but typo-tolerant, e.g. "koramangla").
+        Vectors are tagged with their model, so switching providers never mixes them. They are
+        kept fresh through the outbox whenever a listing, bio or lifestyle changes. Supabase
+        uses a pgvector HNSW index; without pgvector, search scans recent vectors with numpy.
+        Backfill: `python -m app.ml.cli backfill-embeddings`. Names, phone numbers and emails are
+        never embedded. Listings matching every word rank first, then listings matching only
+        some of the words, so one typo or extra word doesn't empty the results. A `-word`
+        exclusion applies to both full-text and embedding search; before this, embedding search
+        treated "-shared" as a word to look for.
+      - **Flatmate search fixes:** the city filter matched nothing for most users (it compared
+        "Bengaluru" with locality names) and now matches the city's localities. Private
+        profiles and blocked users used to appear in search.
+      - **Learning to rank:** each like, pass and save stores the features the user saw. A
+        logistic-regression ranker trains weekly (`ml.train_ranker` in beat, or
+        `python -m app.ml.cli train-ranker`). It uses the 10 compatibility factors, bio
+        similarity, dealbreakers and profile completeness, with a time-ordered 80/20 split. It
+        goes live only if it beats the heuristic score on held-out AUC by at least 0.01, with at
+        least 200 interactions. Models are versioned in `ml_models`, so rolling back means
+        switching the active row. Passed people come back after 30 days, and liked or saved
+        people never reappear.
+      - **Moderation:**
+        - Chat messages (on send and on edit) and listings first go through rules built from
+          Indian rental scams: advance before a visit, "army officer will courier the keys", UPI
+          ids, gift cards or crypto, OTP requests, off-platform pressure, threats and abuse.
+        - A clear scam warns the recipient at once. Anything uncertain goes to Claude in the
+          worker, with a little context and the content treated as data. Claude can confirm a
+          warning, add one, or lift a false positive.
+        - Confirmed scam or abuse opens one automatic moderation report (`source=auto`,
+          idempotent).
+        - Nothing is blocked or unpublished automatically.
+        - Recipients see the warning under the message, live (`message.moderated` event). The
+          sender never sees it.
+        - The old client-side regex that blocked sending is gone.
+        - Without a key, the rules alone decide.
+      - **Smart replies:** a ✨ button in chat. It suggests icebreakers in an empty chat, replies
+        to the last message, or a follow-up. It uses Claude when configured and otherwise falls
+        back to templates built on the listing and shared lifestyle traits. Every suggestion is
+        screened by the same rules (never money, OTPs, IDs or off-platform). Suggestions only
+        fill the composer, never send. Membership is checked and requests are rate-limited.
+      - **Claude usage:** structured JSON outputs, a short timeout, one retry, and server-side
+        fallbacks to another model under load. Any failure (refusal, timeout, bad JSON) falls back
+        to rules or templates, never to an error for the user. The model is set by `LLM_MODEL`
+        (default `claude-opus-5-5`; `claude-haiku-5-5` costs far less for this volume).
+      - **Offline evaluation:** `app/ml/evaluation.py` has AUC, log loss, precision@k, NDCG@k,
+        MRR and a classification report. Tests gate on:
+        - listing search quality (NDCG@3 ≥ 0.9 on judged queries, better than full-text alone)
+        - ranker learning and activation
+        - a 38-example moderation set (`app/ml/data/moderation_eval.jsonl`): every unsafe or
+          doubtful message reaches review, and no safe one is warned by rules alone
+        - `python -m app.ml.cli evaluate-moderation --llm` measures rules plus Claude (paid
+          calls)
+      - **Fixed along the way:** seeded dev accounts couldn't sign in, because their `.test`
+        email domain is rejected as reserved. They are now `@seed.example.com`, with a test that
+        signs in. The listings and flatmates pages showed "no results" under a loading error.
+      - **Checked in the browser:**
+        - Listing search and "about me" search on seeded data.
+        - A scam message from the other participant arrived live with its warning.
+        - Editing that message into harmless text removed the warning live.
+        - Suggestion chips fill the composer without sending, on desktop and mobile.
+      Not covered:
+      - Claude and Voyage were not called live: no keys are set here. The wrapper is tested
+        with a fake client.
+      - The moderation eval set was written alongside the rules, so its scores are optimistic.
+        Measure precision on real reports after launch.
+      - The local embedder only matches shared words and word pieces. Paraphrases ("meals"
+        vs "food") need Voyage.
+      - AI moderation, embedding refresh and ranker training need the worker and beat running
+        (item 18a).
+      - `POST /search/properties` (not used by the web app) still uses plain text matching.
+      - The web lifestyle form saves to `lifestyle_profiles`, but matching, the diet and sleep
+        filters and the ranker read `profiles.lifestyle_traits`, which only the older quiz
+        endpoint and the seed fill. That pre-dates this item and needs its own fix.
 - [ ] **11. Payments and subscriptions.** Only the models exist. Needs a Razorpay (INR)
       integration: plans API, checkout, signed webhook verification, entitlement checks.
 - [ ] **12. Identity verification is mocked.** Integrate a real KYC provider, or clearly gate

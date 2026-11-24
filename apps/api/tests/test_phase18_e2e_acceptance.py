@@ -126,6 +126,7 @@ async def test_phase18_journey_a_flatmate_seeker_discovery_and_match():
 
     # 4. Mutual matching
     matching_service = MatchingService(mock_db)
+    matching_service.pair_features = AsyncMock(return_value=None)  # profile reads not mocked here
     mock_no_int = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
     mock_db.execute.side_effect = [mock_no_int, mock_no_int, mock_no_int]
     inter_1 = await matching_service.record_interaction(seeker_id, candidate_id, "like")
