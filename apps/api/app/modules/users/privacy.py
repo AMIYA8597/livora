@@ -241,6 +241,7 @@ async def request_deletion(
     await db.commit()
     await db.refresh(req)
     logger.info("Account deletion requested", extra={"fields": {"user_id": str(user.id)}})
+    await _close_sockets(user.id)
 
     if background_tasks is not None:
         from app.modules.notifications.emails import QueuedEmail, enqueue, idempotency_key, web_url
@@ -282,6 +283,13 @@ async def cancel_deletion(db: AsyncSession, user: User) -> bool:
     await db.commit()
     logger.info("Account deletion cancelled by sign-in", extra={"fields": {"user_id": str(user.id)}})
     return True
+
+
+async def _close_sockets(user_id: UUID) -> None:
+    """Live chat sockets of a disabled account close at once on every instance."""
+    from app.modules.messaging.websocket import close_user_sockets_everywhere
+
+    await close_user_sockets_everywhere(user_id)
 
 
 async def on_staff_status_change(db: AsyncSession, user: User, is_active: bool) -> None:
@@ -401,6 +409,7 @@ async def purge_account(db: AsyncSession, user_id: UUID) -> bool:
     user.deleted_at = now
     await db.commit()
     logger.info("Account erased", extra={"fields": {"user_id": str(user_id), "listings": len(owned_ids)}})
+    await _close_sockets(user_id)
 
     prefixes = [(bucket, f"{user_id}/") for bucket in STORAGE_BUCKETS]
     prefixes += [("properties", f"prop_{pid}/") for pid in owned_ids]

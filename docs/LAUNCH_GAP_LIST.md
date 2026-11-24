@@ -22,8 +22,15 @@ Gathered from the open items below and every item's "Not covered" notes.
       (max difference 6e-17), profiles without answers are left alone, and down/up works.
       Tests: `tests/test_lifestyle_traits.py` (10). Not covered: `lifestyle_profiles.preference_vector`
       keeps its old numbers (nothing reads it).
-- [ ] **L2. Deleted or deactivated accounts keep live chat sockets** until they reconnect.
+- [x] **L2. Deleted or deactivated accounts keep live chat sockets** until they reconnect.
       Close them at once.
+      *Done:* staff deactivation, a deletion request and the final erasure publish an internal
+      broker event after they commit. Every API instance closes that user's sockets (all tabs)
+      with 4003, and the event is never forwarded to clients. The client renews its token on 4003,
+      the refresh is refused for an inactive account, and it signs out. If the pub/sub message is
+      lost, each socket re-checks its account on the heartbeat at most once a minute, so it
+      closes within about 85 seconds. Tests: three in `tests/test_chat_realtime_db.py`. Other
+      people's sockets stay open.
 - [ ] **L3. Two WebSockets per tab** on `/messages` and `/notifications`, because the bell opens
       its own. Share one connection.
 - [ ] **L4. Push failures aren't retried.** A temporary failure (timeout, 5xx, 429) should be

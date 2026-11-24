@@ -73,6 +73,10 @@ class AdminService:
         await on_staff_status_change(self.db, user, is_active)
         await self.db.commit()
         await self.db.refresh(user)
+        if not is_active:
+            from app.modules.messaging.websocket import close_user_sockets_everywhere
+
+            await close_user_sockets_everywhere(user.id)
         return user
 
     async def grant_user_role(self, user_id: UUID, role: str) -> UserRole:

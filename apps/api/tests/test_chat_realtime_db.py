@@ -288,3 +288,74 @@ def test_send_request_validation():
     ok = SendMessageRequest(conversation_id=conv, content="  hi  ", metadata={"safety_warning": "forged"})
     assert ok.content == "hi" and ok.metadata == {}
     assert SendMessageRequest(conversation_id=conv, content="", attachment_ids=[uuid4()]).content == ""
+
+
+# --------------------------------------------------------------------------- disabled accounts
+
+async def _connect(sock: "AsgiSocket", user_id) -> None:
+    await sock.send("auth", {"token": _token(user_id)})
+    await sock.next_event("connection.ready")
+
+
+async def _next_close(sock: "AsgiSocket", timeout: float = 5.0) -> dict:
+    while True:
+        msg = await sock.next(timeout)
+        if msg["type"] == "websocket.close":
+            return msg
+
+
+async def test_staff_deactivation_closes_the_accounts_sockets_at_once(people):
+    from app.modules.administration.service import AdminService
+
+    async with AsgiSocket() as a1, AsgiSocket() as a2, AsgiSocket() as b:
+        for sock, who in ((a1, "a"), (a2, "a"), (b, "b")):
+            await _connect(sock, people[who])
+
+        async with AsyncSessionLocal() as s:
+            await AdminService(s).update_user_status(people["a"], False)
+
+        for sock in (a1, a2):  # every tab, not just one
+            closed = await _next_close(sock)
+            assert closed["code"] == 4003
+        # Other people stay connected, and the internal event never reaches a client.
+        await b.send("ping", {})
+        pong = await b.next_event("pong")
+        assert pong["event"] == "pong"
+
+
+async def test_requesting_deletion_closes_the_accounts_sockets(people):
+    from app.core.security import get_password_hash
+    from app.modules.users.privacy import request_deletion
+
+    async with AsyncSessionLocal() as s:
+        user = (await s.execute(select(User).where(User.id == people["a"]))).scalar_one()
+        user.hashed_password = get_password_hash("Correct-horse-1")
+        await s.commit()
+
+    async with AsgiSocket() as a:
+        await _connect(a, people["a"])
+        async with AsyncSessionLocal() as s:
+            user = (await s.execute(select(User).where(User.id == people["a"]))).scalar_one()
+            await request_deletion(s, user, "Correct-horse-1")
+        closed = await _next_close(a)
+        assert closed["code"] == 4003
+
+
+async def test_heartbeat_recheck_closes_a_socket_whose_close_event_was_missed(people, monkeypatch):
+    from app.modules.messaging import websocket as ws_mod
+
+    async with AsgiSocket() as a:
+        await _connect(a, people["a"])
+        # Disabled without the broker event (e.g. the pub/sub message was lost).
+        async with AsyncSessionLocal() as s:
+            user = (await s.execute(select(User).where(User.id == people["a"]))).scalar_one()
+            user.is_active = False
+            await s.commit()
+
+        await a.send("ping", {})
+        assert (await a.next_event("pong"))["event"] == "pong"  # not due yet: no query per ping
+
+        monkeypatch.setattr(ws_mod, "ACCOUNT_RECHECK_SECONDS", 0)
+        await a.send("ping", {})
+        closed = await _next_close(a)
+        assert closed["code"] == 4003

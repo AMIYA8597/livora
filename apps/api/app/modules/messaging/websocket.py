@@ -11,6 +11,9 @@ Responsibilities:
     to every connected client. Going offline is announced after a short grace period, so a
     reconnect (token renewal, flaky network) doesn't flash "offline" to contacts.
   * Ephemeral typing indicators that stop by themselves after a few seconds.
+  * Disabled accounts: when an account is deactivated or scheduled for deletion, every
+    instance closes that user's sockets at once (an internal broker event), and each socket
+    re-checks the account on its heartbeat in case that event was missed.
 """
 from __future__ import annotations
 
@@ -33,6 +36,14 @@ HEARTBEAT_INTERVAL_MS = 25_000
 PRESENCE_TTL_SECONDS = 90
 OFFLINE_GRACE_SECONDS = 10
 TYPING_TIMEOUT_SECONDS = 5
+
+# Handled by every API instance and never forwarded to clients.
+ACCOUNT_DISABLED_EVENT = "internal.account_disabled"
+# Same code as an invalid token: the client renews its token, which fails for a disabled
+# account, and signs out.
+WS_CLOSE_ACCOUNT_DISABLED = 4003
+# A connected socket re-checks that its account is still active at most this often.
+ACCOUNT_RECHECK_SECONDS = 60
 
 PRESENCE_KEY = "flatmate:presence:{user_id}"
 LAST_SEEN_KEY = "flatmate:last_seen:{user_id}"
@@ -73,6 +84,15 @@ async def shares_conversation(user_a: UUID, user_b: UUID) -> bool:
     return user_b in await conversation_contacts(user_a)
 
 
+async def close_user_sockets_everywhere(user_id: UUID) -> None:
+    """Close the user's sockets on every instance. Call after the change is committed.
+    Best effort: a missed event is caught by the heartbeat re-check."""
+    try:
+        await broker.publish(event_type=ACCOUNT_DISABLED_EVENT, data={}, target_user_ids=[user_id])
+    except Exception as exc:  # noqa: BLE001 - must never fail the request that disabled the account
+        logger.warning("Couldn't publish account-disabled event: %s", type(exc).__name__)
+
+
 class ConnectionManager:
     def __init__(self):
         # user_id (str) -> sockets on this process
@@ -83,6 +103,8 @@ class ConnectionManager:
         self.active_typing: Dict[str, asyncio.Task] = {}
         # user_id (str) -> pending "went offline" announcement
         self._offline_tasks: Dict[str, asyncio.Task] = {}
+        # socket -> monotonic time its account was last confirmed active
+        self._checked_at: Dict[WebSocket, float] = {}
         # Local view used when Redis is unavailable: user_id -> {"status", "last_seen_at"}
         self.presence: Dict[str, dict] = {}
         self._background: Set[asyncio.Task] = set()
@@ -108,6 +130,7 @@ class ConnectionManager:
         sockets.add(websocket)
         socket_id = uuid4().hex
         self._socket_ids[websocket] = socket_id
+        self._checked_at[websocket] = time.monotonic()  # the endpoint just checked the account
         now_iso = _now_iso()
         self.presence[user_id] = {"status": "online", "last_seen_at": now_iso}
 
@@ -135,6 +158,7 @@ class ConnectionManager:
     def disconnect(self, user_id: str, websocket: WebSocket) -> None:
         """Forget a socket. If it was the user's last one, announce offline after a grace period."""
         socket_id = self._socket_ids.pop(websocket, None)
+        self._checked_at.pop(websocket, None)
         sockets = self.active_connections.get(user_id)
         if sockets is not None:
             sockets.discard(websocket)
@@ -157,6 +181,28 @@ class ConnectionManager:
         if socket_id:
             await self._presence_touch(user_id, socket_id)
 
+    def account_check_due(self, websocket: WebSocket) -> bool:
+        """True (and the clock restarts) when this socket's account should be checked again."""
+        now = time.monotonic()
+        if now - self._checked_at.get(websocket, 0.0) < ACCOUNT_RECHECK_SECONDS:
+            return False
+        self._checked_at[websocket] = now
+        return True
+
+    async def close_user(self, user_id: str, code: int = WS_CLOSE_ACCOUNT_DISABLED,
+                         reason: str = "Account disabled") -> int:
+        """Close every socket this process holds for the user. Returns how many were closed."""
+        sockets = list(self.active_connections.get(user_id, ()))
+        for ws in sockets:
+            try:
+                await ws.close(code=code, reason=reason)
+            except Exception:  # noqa: BLE001 - already gone
+                pass
+            # The endpoint's own cleanup calls this too; doing it here means nothing more is
+            # delivered to the socket in between.
+            self.disconnect(user_id, ws)
+        return len(sockets)
+
     # ------------------------------------------------------------------ delivery
 
     async def send_to_user(self, user_id: str, envelope: dict) -> None:
@@ -176,6 +222,13 @@ class ConnectionManager:
     async def on_broker_event(self, envelope: dict) -> None:
         """Deliver a broker event to the targeted users connected to this process."""
         targets = envelope.get("target_user_ids")
+        if envelope.get("event") == ACCOUNT_DISABLED_EVENT:
+            for uid in targets or ():
+                closed = await self.close_user(uid)
+                if closed:
+                    logger.info("Closed sockets of a disabled account",
+                                extra={"fields": {"user_id": uid, "sockets": closed}})
+            return
         if targets is None:
             # Untargeted broadcasts are not used for user data; refuse rather than leak.
             logger.warning("Dropping untargeted realtime event %s", envelope.get("event"))

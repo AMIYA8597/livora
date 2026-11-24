@@ -318,6 +318,11 @@ async def authenticate_socket_token(token: object) -> Optional[Tuple[UUID, Optio
     return user_id, expires_at
 
 
+async def _account_active(user_id: UUID) -> bool:
+    async with AsyncSessionLocal() as db:
+        return bool((await db.execute(select(User.is_active).where(User.id == user_id))).scalar_one_or_none())
+
+
 async def _active_recipients(db: AsyncSession, conversation_id: UUID, user_id: UUID) -> Optional[List[UUID]]:
     """Other active participants, or None if `user_id` is not an active participant."""
     rows = (await db.execute(
@@ -421,6 +426,9 @@ async def _handle_frame(websocket: WebSocket, user_id: UUID, frame: dict) -> Non
     data: dict = raw_data if isinstance(raw_data, dict) else {}
 
     if event_type == "ping":
+        if manager.account_check_due(websocket) and not await _account_active(user_id):
+            await _close_quietly(websocket, WS_CLOSE_UNAUTHORIZED, "Account disabled")
+            return
         await manager.heartbeat(str(user_id), websocket)
         await websocket.send_text(_envelope("pong", {}, correlation_id))
         return
