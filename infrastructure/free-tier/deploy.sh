@@ -14,6 +14,10 @@ APP_DIR=${APP_DIR:-/opt/flatmate}
 : "${API_IMAGE:?API_IMAGE is required}"
 : "${API_DOMAIN:?API_DOMAIN is required}"
 : "${ACME_EMAIL:?ACME_EMAIL is required}"
+# .env must be Compose's only source for these: Compose prefers the shell environment over .env,
+# so leaving them exported would make a rollback silently start the new image again.
+NEW_IMAGE=$API_IMAGE NEW_DOMAIN=$API_DOMAIN NEW_ACME_EMAIL=$ACME_EMAIL
+unset API_IMAGE API_DOMAIN ACME_EMAIL REDIS_PASSWORD
 REGISTRY=${REGISTRY:-ghcr.io}
 REGISTRY_USER=${REGISTRY_USER:-}
 WAIT_SECONDS=${WAIT_SECONDS:-180}
@@ -36,9 +40,9 @@ set_env() {  # set_env KEY VALUE: replace or add a line in .env
 }
 
 previous=$(sed -n 's/^API_IMAGE=//p' .env || true)
-set_env API_DOMAIN "$API_DOMAIN"
-set_env ACME_EMAIL "$ACME_EMAIL"
-set_env API_IMAGE "$API_IMAGE"
+set_env API_DOMAIN "$NEW_DOMAIN"
+set_env ACME_EMAIL "$NEW_ACME_EMAIL"
+set_env API_IMAGE "$NEW_IMAGE"
 
 compose() { docker compose --project-directory "$APP_DIR" "$@"; }
 
@@ -50,7 +54,7 @@ fi
 pull_ok=0
 compose pull --quiet api worker && pull_ok=1
 [ -n "$token" ] && docker logout "$REGISTRY" >/dev/null 2>&1 || true
-[ "$pull_ok" = 1 ] || { echo "::error::Couldn't pull $API_IMAGE"; set_env API_IMAGE "$previous"; exit 1; }
+[ "$pull_ok" = 1 ] || { echo "::error::Couldn't pull $NEW_IMAGE"; set_env API_IMAGE "$previous"; exit 1; }
 
 # Caddy reads its file only at start; restart it when the file changed.
 caddy_sum=$(sha256sum Caddyfile | cut -d' ' -f1)
@@ -60,8 +64,8 @@ healthy() {
   # Through Caddy and TLS, as the internet sees it, but without leaving the VM.
   local insecure=()
   [ "$HEALTH_INSECURE_TLS" = 1 ] && insecure=(-k)
-  curl -fsS "${insecure[@]}" --max-time 5 --resolve "${API_DOMAIN}:443:127.0.0.1" \
-    "https://${API_DOMAIN}/health/ready" >/dev/null 2>&1
+  curl -fsS "${insecure[@]}" --max-time 5 --resolve "${NEW_DOMAIN}:443:127.0.0.1" \
+    "https://${NEW_DOMAIN}/health/ready" >/dev/null 2>&1
 }
 
 wait_healthy() {
@@ -73,7 +77,7 @@ wait_healthy() {
   return 1
 }
 
-echo "Starting $API_IMAGE"
+echo "Starting $NEW_IMAGE"
 compose up -d --remove-orphans
 if [ "$caddy_sum" != "$old_caddy_sum" ]; then
   compose restart caddy
@@ -81,7 +85,7 @@ if [ "$caddy_sum" != "$old_caddy_sum" ]; then
 fi
 
 if wait_healthy; then
-  echo "Live: https://${API_DOMAIN} is answering with $API_IMAGE"
+  echo "Live: https://${NEW_DOMAIN} is answering with $NEW_IMAGE"
   docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
   compose ps
   exit 0
@@ -89,7 +93,7 @@ fi
 
 echo "::error::The new release didn't become healthy within ${WAIT_SECONDS}s"
 compose logs --tail 80 api worker caddy || true
-if [ -n "$previous" ] && [ "$previous" != "$API_IMAGE" ]; then
+if [ -n "$previous" ] && [ "$previous" != "$NEW_IMAGE" ]; then
   echo "Rolling back to $previous"
   set_env API_IMAGE "$previous"
   compose up -d --remove-orphans

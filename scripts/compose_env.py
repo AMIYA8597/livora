@@ -2,12 +2,14 @@
 Write the app's settings file (api.env) for the free-tier Docker Compose deployment
 (infrastructure/free-tier, docs/FREE_TIER_LAUNCH.md).
 
-    SECRETS_JSON='${{ toJSON(secrets) }}' python scripts/compose_env.py \\
+    PRODUCTION_APP_DATABASE_URL=... PRODUCTION_SECRET_KEY=... python scripts/compose_env.py \\
         --environment production --prefix PRODUCTION --release <sha> \\
         --extra-env-file runtime.env --out api.env
 
 Secrets are GitHub secrets named <PREFIX>_<NAME>, the same names Secret Manager uses for Cloud
 Run (scripts/deploy_runtime.py SECRETS), e.g. PRODUCTION_APP_DATABASE_URL, PRODUCTION_SECRET_KEY.
+The workflow passes each one by name as an environment variable, never all secrets at once.
+When SECRETS_JSON (a JSON object of the same names) is set, it's read instead.
 Every known one that exists is written; a missing required one stops the deploy. Redis is not a
 secret here: Compose points the app at its own Redis container.
 
@@ -102,10 +104,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--out", type=Path, required=True)
     args = p.parse_args(argv)
     try:
-        raw = os.environ.get("SECRETS_JSON") or "{}"
-        secrets = json.loads(raw)
-        if not isinstance(secrets, dict):
-            raise ConfigError("SECRETS_JSON must be a JSON object")
+        raw = os.environ.get("SECRETS_JSON")
+        if raw:
+            secrets = json.loads(raw)
+            if not isinstance(secrets, dict):
+                raise ConfigError("SECRETS_JSON must be a JSON object")
+        else:
+            secrets = {k: v for k, v in os.environ.items() if k.startswith(f"{args.prefix}_")}
         extra = parse_env_lines(args.extra_env_file.read_text(encoding="utf-8")) if args.extra_env_file else []
         env, missing_optional = build_env(args.environment, args.release, args.prefix, extra, secrets)
     except (ConfigError, json.JSONDecodeError) as exc:

@@ -87,3 +87,24 @@ def test_main_reports_a_missing_secret(tmp_path, monkeypatch, capsys):
                              "--release", "abc", "--out", str(tmp_path / "api.env")]) == 1
     assert "PRODUCTION_APP_DATABASE_URL" in capsys.readouterr().err
 
+
+
+def test_main_reads_named_secrets_from_the_environment(tmp_path, monkeypatch):
+    """The deploy workflow passes each secret by name, never all secrets at once."""
+    monkeypatch.delenv("SECRETS_JSON", raising=False)
+    for name, value in BASE.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("STAGING_SECRET_KEY", "other-environment")
+    out = tmp_path / "api.env"
+    assert compose_env.main(["--environment", "production", "--prefix", "PRODUCTION",
+                             "--release", "abc", "--out", str(out)]) == 0
+    assert f"SECRET_KEY='{'k' * 48}'" in out.read_text(encoding="utf-8")
+
+
+def test_the_deploy_workflow_passes_every_secret_by_name_and_never_all_of_them():
+    workflow = (_SCRIPTS.parent / ".github" / "workflows" / "free-tier-deploy.yml").read_text(encoding="utf-8")
+    assert "toJSON(secrets)" not in workflow
+    for setting, suffix in compose_env.SECRETS.items():
+        if setting != "REDIS_URL":
+            name = f"PRODUCTION_{suffix}"
+            assert f"{name}: ${{{{ secrets.{name} }}}}" in workflow, name

@@ -136,9 +136,24 @@ jobs:
           python -m alembic current
 
       - name: Write the app's settings
+        # Each secret the app reads (scripts/deploy_runtime.py SECRETS), by name, and nothing else.
         env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
           RUNTIME_ENV: ${{ vars.RUNTIME_ENV }}
+          PRODUCTION_APP_DATABASE_URL: ${{ secrets.PRODUCTION_APP_DATABASE_URL }}
+          PRODUCTION_SECRET_KEY: ${{ secrets.PRODUCTION_SECRET_KEY }}
+          PRODUCTION_SUPABASE_SECRET_KEY: ${{ secrets.PRODUCTION_SUPABASE_SECRET_KEY }}
+          PRODUCTION_EMAIL_API_KEY: ${{ secrets.PRODUCTION_EMAIL_API_KEY }}
+          PRODUCTION_SMTP_PASSWORD: ${{ secrets.PRODUCTION_SMTP_PASSWORD }}
+          PRODUCTION_TWILIO_ACCOUNT_SID: ${{ secrets.PRODUCTION_TWILIO_ACCOUNT_SID }}
+          PRODUCTION_TWILIO_AUTH_TOKEN: ${{ secrets.PRODUCTION_TWILIO_AUTH_TOKEN }}
+          PRODUCTION_S3_ACCESS_KEY: ${{ secrets.PRODUCTION_S3_ACCESS_KEY }}
+          PRODUCTION_S3_SECRET_KEY: ${{ secrets.PRODUCTION_S3_SECRET_KEY }}
+          PRODUCTION_ANTHROPIC_API_KEY: ${{ secrets.PRODUCTION_ANTHROPIC_API_KEY }}
+          PRODUCTION_VOYAGE_API_KEY: ${{ secrets.PRODUCTION_VOYAGE_API_KEY }}
+          PRODUCTION_RAZORPAY_KEY_SECRET: ${{ secrets.PRODUCTION_RAZORPAY_KEY_SECRET }}
+          PRODUCTION_RAZORPAY_WEBHOOK_SECRET: ${{ secrets.PRODUCTION_RAZORPAY_WEBHOOK_SECRET }}
+          PRODUCTION_VAPID_PRIVATE_KEY: ${{ secrets.PRODUCTION_VAPID_PRIVATE_KEY }}
+          PRODUCTION_SENTRY_DSN: ${{ secrets.PRODUCTION_SENTRY_DSN }}
         run: |
           umask 077
           printf '%s\n' "$RUNTIME_ENV" > "$RUNNER_TEMP/runtime.env"
