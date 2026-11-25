@@ -1,0 +1,105 @@
+# Free-tier production: one small VM runs HTTPS, the API, the background worker and Redis.
+# The database, sign-in and file storage stay on Supabase; the web app is on Vercel.
+#
+# Sized for an Azure for Students B2ats v2 VM (2 vCPU, 1 GiB RAM, plus 2 GiB swap from
+# cloud-init.yaml). Every container has a memory cap, so one that misbehaves is restarted on its
+# own instead of the kernel killing something at random.
+#
+# Files next to this one on the VM (/opt/flatmate), none of them in git:
+#   .env     compose settings: API_IMAGE, API_DOMAIN, ACME_EMAIL, REDIS_PASSWORD
+#            (REDIS_PASSWORD is generated on the VM by cloud-init and never leaves it)
+#   api.env  the app's settings and secrets, written by the deploy (scripts/compose_env.py)
+#
+# Deployed by .github/workflows/free-tier-deploy.yml. The whole procedure is in
+# docs/FREE_TIER_LAUNCH.md.
+name: flatmate
+
+x-service: &service
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+x-app: &app
+  <<: *service
+  image: ${API_IMAGE:?set API_IMAGE in .env}
+  env_file: [api.env]
+  read_only: true
+  tmpfs: ["/tmp:size=64m"]
+  depends_on:
+    redis: { condition: service_healthy }
+
+services:
+  caddy:
+    <<: *service
+    image: caddy:2.10-alpine
+    cap_add: [NET_BIND_SERVICE]
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+    mem_limit: 96m
+
+  api:
+    <<: *app
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?}@redis:6379/2
+    expose: ["8000"]
+    stop_grace_period: 15s
+    mem_limit: ${API_MEM_LIMIT:-560m}
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.workers.run"]
+    environment:
+      PORT: "8080"
+      WORKER_CONCURRENCY: "1"
+      REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:6379/0
+      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:?}@redis:6379/1
+      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:?}@redis:6379/2
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    stop_grace_period: 30s
+    mem_limit: ${WORKER_MEM_LIMIT:-400m}
+
+  redis:
+    <<: *service
+    image: redis:7.4-alpine
+    user: redis
+    # Only keys with a TTL are evicted (caches, rate-limit windows, metrics), never the job
+    # queue. Append-only file so queued jobs survive a restart.
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server --requirepass "$$REDIS_PASSWORD" --maxmemory 64mb
+        --maxmemory-policy volatile-lru --appendonly yes --appendfsync everysec
+        --save "" --protected-mode yes
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?}
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 112m
+
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:

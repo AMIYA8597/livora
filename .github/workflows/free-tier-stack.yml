@@ -1,0 +1,214 @@
+name: Free-tier Stack Test
+
+# Runs the free-tier production stack (infrastructure/free-tier: Caddy, API, worker, Redis) on the
+# runner the way the VM runs it, with CPU and memory limits that add up to the VM's 2 vCPU / 1 GiB.
+# A throwaway PostGIS database stands in for Supabase, so the app runs in the `ci` environment
+# (local file storage); every other setting comes from scripts/compose_env.py like production.
+#
+# It checks:
+#   - deploy.sh brings a release up through HTTPS, and rolls back from one that never gets healthy;
+#   - HTTPS works, HTTP redirects to it, and HSTS is sent;
+#   - nothing but 80/443 is published (no Redis, no API port);
+#   - the containers are read-only and unprivileged;
+#   - the worker connects;
+#   - under a short load test, no container is OOM-killed, and nothing answers 500.
+# The load numbers and memory use go to the run summary.
+
+on:
+  pull_request:
+    paths:
+      - "infrastructure/free-tier/**"
+      - "apps/api/**"
+      - "scripts/compose_env.py"
+      - "scripts/deploy_runtime.py"
+      - "loadtests/**"
+      - ".github/workflows/free-tier-stack.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/free-tier/**"
+      - "apps/api/**"
+      - "scripts/compose_env.py"
+      - "scripts/deploy_runtime.py"
+      - "loadtests/**"
+      - ".github/workflows/free-tier-stack.yml"
+  workflow_dispatch:
+    inputs:
+      users:
+        description: "Locust users for the load step"
+        default: "150"
+
+concurrency:
+  group: free-tier-stack-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  stack:
+    name: Free-tier stack (deploy, rollback, security, load)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      USERS: ${{ inputs.users || '150' }}
+      API_DOMAIN: localhost
+      ACME_EMAIL: ci@example.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/constraints.txt
+
+      - name: Build the release images into a local registry
+        run: |
+          docker run -d --name registry -p 127.0.0.1:5000:5000 registry:2 >/dev/null
+          docker build -q -t localhost:5000/flatmate-api:good apps/api
+          docker push -q localhost:5000/flatmate-api:good
+          # A release that never becomes healthy, to prove the rollback.
+          printf 'FROM localhost:5000/flatmate-api:good\nCMD ["sleep", "infinity"]\n' \
+            | docker build -q -t localhost:5000/flatmate-api:broken -
+          docker push -q localhost:5000/flatmate-api:broken
+
+      - name: Prepare the app folder the way cloud-init does
+        run: |
+          APP_DIR="$RUNNER_TEMP/flatmate"
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          install -d -m 0750 "$APP_DIR"
+          cp infrastructure/free-tier/docker-compose.yml infrastructure/free-tier/Caddyfile \
+             infrastructure/free-tier/deploy.sh infrastructure/free-tier/ci/docker-compose.override.yml "$APP_DIR/"
+          (umask 077; printf 'REDIS_PASSWORD=%s\nAPI_IMAGE=localhost:5000/flatmate-api:good\nAPI_DOMAIN=localhost\nACME_EMAIL=ci@example.com\n' \
+            "$(openssl rand -hex 32)" > "$APP_DIR/.env")
+
+      - name: Write api.env with scripts/compose_env.py
+        run: |
+          printf 'STORAGE_TYPE=local\nEMAIL_PROVIDER=memory\nWEB_BASE_URL=https://example.com\n' > "$RUNNER_TEMP/runtime.env"
+          SECRET_KEY=$(openssl rand -hex 32)
+          echo "::add-mask::$SECRET_KEY"
+          echo "SECRET_KEY=$SECRET_KEY" >> "$GITHUB_ENV"
+          SECRETS_JSON=$(jq -n --arg k "$SECRET_KEY" \
+            '{CI_APP_DATABASE_URL: "postgresql+asyncpg://flatmate_api_smoke:smoke@db:5432/flatmate", CI_SECRET_KEY: $k}') \
+          python scripts/compose_env.py --environment ci --prefix CI --release "${GITHUB_SHA::12}" \
+            --extra-env-file "$RUNNER_TEMP/runtime.env" --out "$APP_DIR/api.env"
+          test "$(stat -c %a "$APP_DIR/api.env")" = 600
+
+      - name: Start the database and migrate it (as Supabase would be)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          docker compose up -d --wait db
+          docker compose exec -T db bash -c "sed -i 's#apt.postgresql.org/pub/repos/apt#apt-archive.postgresql.org/pub/repos/apt#g' /etc/apt/sources.list.d/*.list && apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends postgresql-17-pgvector >/dev/null"
+          docker compose exec -T db psql -U postgres -d flatmate -qc "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS postgis;"
+          owner=postgresql+asyncpg://postgres:postgres@db:5432/flatmate
+          docker compose run --rm --no-deps -e DATABASE_URL=$owner -e MIGRATION_DATABASE_URL=$owner api python -m alembic upgrade head
+          # The API connects as a least-privilege login, as in production.
+          docker compose exec -T db psql -U postgres -d flatmate -qc \
+            "CREATE ROLE flatmate_api_smoke LOGIN PASSWORD 'smoke' IN ROLE flatmate_app; ALTER ROLE flatmate_api_smoke SET statement_timeout = '15s';"
+
+      - name: Deploy the good release with deploy.sh
+        run: |
+          API_IMAGE=localhost:5000/flatmate-api:good HEALTH_INSECURE_TLS=1 WAIT_SECONDS=150 \
+            bash "$APP_DIR/deploy.sh" </dev/null
+
+      - name: Check HTTPS, headers, exposure and hardening
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          c() { curl -fsS -k --resolve localhost:443:127.0.0.1 "$@"; }
+          c https://localhost/health/ready | jq -e '.status == "ready" and .checks.database.status == "ok" and .checks.redis.status == "ok"'
+          c https://localhost/api/v1/meta/app-config | jq -e '.features.phone_verification == false and .features.payments == false'
+          c -o /dev/null https://localhost/api/v1/properties/
+          c -D - -o /dev/null https://localhost/health/live | tee headers.txt
+          grep -qi '^strict-transport-security: max-age=31536000' headers.txt
+          ! grep -qi '^server:' headers.txt
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: localhost' http://127.0.0.1/health/live)
+          [ "$code" = 308 ] || { echo "::error::HTTP should redirect to HTTPS, got $code"; exit 1; }
+          for port in 6379 8000 8080; do
+            if nc -z -w 2 127.0.0.1 $port; then echo "::error::port $port is reachable from outside"; exit 1; fi
+          done
+          for svc in api worker; do
+            id=$(docker compose ps -q $svc)
+            docker inspect "$id" -f '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.Config.User}} {{.HostConfig.SecurityOpt}}' | tee inspect.txt
+            grep -q '^true \[ALL\] flatmate \[no-new-privileges:true\]' inspect.txt
+          done
+          for _ in $(seq 1 40); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q worker)")" = healthy ] && break
+            sleep 3
+          done
+          docker compose ps
+          [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q worker)")" = healthy ]
+
+      - name: A release that never gets healthy is rolled back
+        run: |
+          if API_IMAGE=localhost:5000/flatmate-api:broken HEALTH_INSECURE_TLS=1 WAIT_SECONDS=45 \
+              bash "$APP_DIR/deploy.sh" </dev/null; then
+            echo "::error::deploy.sh accepted a release that never became healthy"; exit 1
+          fi
+          grep -q '^API_IMAGE=localhost:5000/flatmate-api:good$' "$APP_DIR/.env"
+          curl -fsS -k --resolve localhost:443:127.0.0.1 https://localhost/health/ready >/dev/null
+          echo "Rolled back to the good release and serving."
+
+      - name: Seed load-test data
+        run: |
+          pip install -q -e apps/api -c apps/api/constraints.txt locust
+          cd apps/api
+          DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:55432/flatmate SECRET_KEY="$SECRET_KEY" \
+            ENVIRONMENT=ci python ../../loadtests/seed_load.py --members 400 --owners 80 --listings 800
+
+      - name: Load test (${{ env.USERS }} users, 3 minutes)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$RUNNER_TEMP/caddy-root.crt"
+          echo "127.0.0.1 localhost" | sudo tee -a /etc/hosts >/dev/null
+          set +e
+          ( while sleep 15; do docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' >> "$RUNNER_TEMP/stats.txt"; done ) &
+          watcher=$!
+          REQUESTS_CA_BUNDLE="$RUNNER_TEMP/caddy-root.crt" MAX_FAIL_RATIO=1 MAX_P95_MS=100000 \
+            python -m locust -f "$GITHUB_WORKSPACE/loadtests/locustfile.py" --host https://localhost --headless \
+              -u "$USERS" -r 10 -t 3m --only-summary --csv "$RUNNER_TEMP/load" > "$RUNNER_TEMP/locust.txt" 2>&1
+          kill $watcher
+          set -e
+          tail -30 "$RUNNER_TEMP/locust.txt"
+
+      - name: No crash, no OOM, no 500s
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          python - "$RUNNER_TEMP/load_stats.csv" "$RUNNER_TEMP/load_failures.csv" "$RUNNER_TEMP/stats.txt" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import csv, sys
+          rows = list(csv.DictReader(open(sys.argv[1])))
+          total = next(r for r in rows if r["Name"] == "Aggregated")
+          fails = list(csv.DictReader(open(sys.argv[2])))
+          print("### Free-tier stack under load (2 vCPU / 1 GiB limits)")
+          print(f"- {total['Request Count']} requests, {float(total['Requests/s']):.1f}/s, "
+                f"{total['Failure Count']} failed")
+          print(f"- median {total['50%']} ms, p95 {total['95%']} ms, p99 {total['99%']} ms")
+          for f in fails[:10]:
+              print(f"- failure: {f['Method']} {f['Name']}: {f['Error'][:120]} x{f['Occurrences']}")
+          peak = {}
+          for line in open(sys.argv[3]):
+              parts = line.split()
+              if len(parts) >= 3:
+                  name, used = parts[0], parts[1]
+                  value = float(used.rstrip("GiMBKk")) * (1024 if used.endswith("GiB") else 1 if used.endswith("MiB") else 1 / 1024)
+                  peak[name] = max(peak.get(name, 0), value)
+          print("- peak memory: " + ", ".join(f"{n} {v:.0f} MiB" for n, v in sorted(peak.items())))
+          # Busy answers (503 + Retry-After) are the designed overload response; anything else fails.
+          broken = [f for f in fails if any(code in f["Error"] for code in ("500", "502", "504", "Connection"))]
+          if broken:
+              print("- **server errors under load** (see above)")
+              sys.exit(1)
+          PY
+          cat "$GITHUB_STEP_SUMMARY"
+          for svc in caddy api worker redis; do
+            id=$(docker compose ps -aq $svc)
+            [ "$(docker inspect -f '{{.State.OOMKilled}}' "$id")" = false ] || { echo "::error::$svc was OOM-killed"; exit 1; }
+            [ "$(docker inspect -f '{{.RestartCount}}' "$id")" = 0 ] || { echo "::error::$svc restarted"; docker compose logs --tail 50 $svc; exit 1; }
+          done
+          curl -fsS -k --resolve localhost:443:127.0.0.1 https://localhost/health/ready >/dev/null
+          echo "The stack is healthy after the load test."
+
+      - name: Logs on failure
+        if: failure()
+        working-directory: ${{ env.APP_DIR }}
+        run: docker compose logs --tail 120 || true

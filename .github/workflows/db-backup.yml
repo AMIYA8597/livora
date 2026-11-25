@@ -9,9 +9,12 @@ name: Database Backup
 # "Backups"). That is also how long data from erased accounts can survive in a backup.
 #
 # Scheduled runs use the "production-backups" environment (no required reviewers, so the
-# nightly run never waits): secrets BACKUP_DATABASE_URL (the owner URL) and GCP_BACKUP_SA_KEY
-# (a service account that may only create objects in the bucket), variable BACKUP_BUCKET.
-# Until BACKUP_BUCKET is set the run only notes that backups aren't configured.
+# nightly run never waits) and the secret BACKUP_DATABASE_URL (the owner URL). Where they go:
+#   - Cloud Storage: variable BACKUP_BUCKET and secret GCP_BACKUP_SA_KEY (a service account
+#     that may only create objects in the bucket);
+#   - Azure Blob, the free-tier setup: secret BACKUP_AZURE_SAS_URL, a write-only link to a
+#     private container (infrastructure/free-tier/provision-azure.sh creates both).
+# Until one is set the run only notes that backups aren't configured.
 
 on:
   schedule:
@@ -45,17 +48,19 @@ jobs:
         id: config
         env:
           BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+          BACKUP_AZURE_SAS_URL: ${{ secrets.BACKUP_AZURE_SAS_URL }}
           BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
           GCP_BACKUP_SA_KEY: ${{ secrets.GCP_BACKUP_SA_KEY }}
         run: |
-          if [ -z "$BACKUP_BUCKET" ]; then
-            echo "::notice title=Backups not configured::Set the BACKUP_BUCKET variable (and the secrets BACKUP_DATABASE_URL, GCP_BACKUP_SA_KEY) to turn on daily backups."
+          if [ -z "$BACKUP_BUCKET" ] && [ -z "$BACKUP_AZURE_SAS_URL" ]; then
+            echo "::notice title=Backups not configured::Set the BACKUP_AZURE_SAS_URL secret (free tier) or the BACKUP_BUCKET variable, plus the BACKUP_DATABASE_URL secret, to turn on daily backups."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "gcs=$([ -n "$BACKUP_BUCKET" ] && [ -z "$BACKUP_AZURE_SAS_URL" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           missing=()
           [ -z "$BACKUP_DATABASE_URL" ] && missing+=(BACKUP_DATABASE_URL)
-          [ -z "$GCP_BACKUP_SA_KEY" ] && missing+=(GCP_BACKUP_SA_KEY)
+          [ -z "$BACKUP_AZURE_SAS_URL" ] && [ -z "$GCP_BACKUP_SA_KEY" ] && missing+=(GCP_BACKUP_SA_KEY)
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Backups are configured (BACKUP_BUCKET) but these secrets are missing: ${missing[*]}"
             exit 1
@@ -73,7 +78,7 @@ jobs:
           python-version: "3.12"
 
       - name: Authenticate to Google Cloud
-        if: steps.config.outputs.enabled == 'true'
+        if: steps.config.outputs.enabled == 'true' && steps.config.outputs.gcs == 'true'
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_BACKUP_SA_KEY }}
@@ -84,6 +89,7 @@ jobs:
         with:
           database-url: ${{ secrets.BACKUP_DATABASE_URL }}
           bucket: ${{ vars.BACKUP_BUCKET }}
+          azure-sas-url: ${{ secrets.BACKUP_AZURE_SAS_URL }}
           folder: ${{ inputs.environment || 'production' }}/daily
           label: ${{ inputs.environment || 'production' }}
           pg-version: ${{ vars.PG_VERSION || '17' }}

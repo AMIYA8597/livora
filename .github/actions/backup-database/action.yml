@@ -2,16 +2,23 @@ name: Back up the database (verified)
 description: >-
   Dumps the database with scripts/db_backup.py, restores the dump into a throwaway PostGIS +
   pgvector container and checks it against its manifest (Alembic revision, every table's row
-  count, RLS), then uploads the dump and manifest to Cloud Storage. A backup that doesn't
-  restore fails the job and is never uploaded. Needs Docker, Python (actions/setup-python) and
-  gcloud already authenticated.
+  count, RLS), then uploads the dump and manifest to Cloud Storage or to a private Azure Blob
+  container. A backup that doesn't restore fails the job and is never uploaded. Needs Docker,
+  Python (actions/setup-python), and for Cloud Storage gcloud already authenticated.
 inputs:
   database-url:
     description: Owner connection URL of the database to back up
     required: true
   bucket:
-    description: Cloud Storage bucket for backups (name only)
-    required: true
+    description: Cloud Storage bucket for backups (name only). Give this or azure-sas-url.
+    required: false
+    default: ""
+  azure-sas-url:
+    description: >-
+      Azure Blob container URL with a write-only SAS token
+      (https://<account>.blob.core.windows.net/<container>?<sas>), for the free-tier setup.
+    required: false
+    default: ""
   label:
     description: Folder and file label, e.g. production or pre-deploy-<sha>
     required: true
@@ -24,7 +31,7 @@ inputs:
     default: "17"
 outputs:
   object:
-    description: gs:// path of the uploaded dump
+    description: Where the dump was uploaded (gs:// path or Azure blob path without the token)
     value: ${{ steps.upload.outputs.object }}
 runs:
   using: composite
@@ -77,14 +84,32 @@ runs:
       shell: bash
       env:
         BUCKET: ${{ inputs.bucket }}
+        AZURE_SAS_URL: ${{ inputs.azure-sas-url }}
         FOLDER: ${{ inputs.folder }}
         DUMP: ${{ steps.dump.outputs.dump }}
       run: |
-        dest="gs://$BUCKET/$FOLDER/"
-        # The manifest goes last: a manifest in the bucket means its dump is complete.
-        gcloud storage cp --no-clobber "$DUMP" "$dest"
-        gcloud storage cp --no-clobber "$DUMP.manifest.json" "$dest"
-        object="$dest$(basename "$DUMP")"
+        # The manifest goes last: a manifest in storage means its dump is complete.
+        if [ -n "$AZURE_SAS_URL" ]; then
+          echo "::add-mask::${AZURE_SAS_URL#*\?}"
+          container="${AZURE_SAS_URL%%\?*}"
+          sas="${AZURE_SAS_URL#*\?}"
+          for file in "$DUMP" "$DUMP.manifest.json"; do
+            # The link allows creating blobs only: it can never overwrite, read or delete a backup.
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT --max-time 600 \
+              -H "x-ms-blob-type: BlockBlob" -H "x-ms-version: 2021-08-06" \
+              --data-binary "@$file" "$container/$FOLDER/$(basename "$file")?$sas")
+            [ "$code" = 201 ] || { echo "::error::Upload of $(basename "$file") failed (HTTP $code)"; exit 1; }
+          done
+          object="$container/$FOLDER/$(basename "$DUMP")"
+        elif [ -n "$BUCKET" ]; then
+          dest="gs://$BUCKET/$FOLDER/"
+          gcloud storage cp --no-clobber "$DUMP" "$dest"
+          gcloud storage cp --no-clobber "$DUMP.manifest.json" "$dest"
+          object="$dest$(basename "$DUMP")"
+        else
+          echo "::error::Give the bucket or azure-sas-url input"
+          exit 1
+        fi
         echo "object=$object" >> "$GITHUB_OUTPUT"
         python3 - "$DUMP.manifest.json" "$object" >> "$GITHUB_STEP_SUMMARY" <<'PY'
         import json, sys

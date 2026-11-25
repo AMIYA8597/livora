@@ -5,6 +5,7 @@ import type { UserDTO } from "@flatmate/contracts";
 import { Button, Card } from "@flatmate/ui";
 import { Copy, Fingerprint, Mail, Shield } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { useAppFeatures } from "@/lib/app-features";
 import { InlineNotice } from "@/components/states/InlineNotice";
 import { PhoneVerification } from "./PhoneVerification";
 import { BlockedUsersCard } from "./BlockedUsersCard";
@@ -17,6 +18,7 @@ interface AccountSecurityPanelProps {
 }
 
 export function AccountSecurityPanel({ user, onUserChanged, onNotice }: AccountSecurityPanelProps) {
+  const features = useAppFeatures();
   const [resetNotice, setResetNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [isRequestingReset, setIsRequestingReset] = useState(false);
 
@@ -75,7 +77,9 @@ export function AccountSecurityPanel({ user, onUserChanged, onNotice }: AccountS
             </div>
           </div>
 
-          <PhoneVerification user={user} onVerified={onUserChanged} onNotice={onNotice} />
+          {features?.phone_verification && (
+            <PhoneVerification user={user} onVerified={onUserChanged} onNotice={onNotice} />
+          )}
 
           <div className="p-4 bg-warm rounded-xl border border-slate-200/60 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

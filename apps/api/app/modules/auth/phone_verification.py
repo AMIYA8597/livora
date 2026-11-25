@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import BadRequestException, ConflictException, RateLimitException, ServiceUnavailableException
 from app.core.logging import logger
-from app.infrastructure.sms import SmsConfigurationError, SmsDeliveryError, get_sms_provider
+from app.infrastructure.sms import SmsConfigurationError, SmsDeliveryError, SmsDisabled, get_sms_provider
 from app.modules.auth.models import PhoneVerification
 from app.modules.users.models import User
 
@@ -93,6 +93,9 @@ class PhoneVerificationService:
 
         try:
             provider = get_sms_provider()
+        except SmsDisabled:
+            raise ServiceUnavailableException("Phone verification isn't available yet.",
+                                              error_code="PHONE_VERIFICATION_DISABLED")
         except SmsConfigurationError as exc:
             logger.error(f"Phone verification unavailable: {exc}")
             raise ServiceUnavailableException("Phone verification is not available right now")

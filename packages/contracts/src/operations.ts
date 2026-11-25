@@ -178,8 +178,15 @@ export interface PlatformVersionsDTO {
   update_url?: string | null;
 }
 
+/** Optional features that depend on paid providers; off means the app hides them. */
+export interface AppFeaturesDTO {
+  phone_verification: boolean;
+  payments: boolean;
+}
+
 export interface AppConfigDTO {
   api_version: string;
   android: PlatformVersionsDTO;
   ios: PlatformVersionsDTO;
+  features: AppFeaturesDTO;
 }

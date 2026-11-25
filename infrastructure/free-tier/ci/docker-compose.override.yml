@@ -1,0 +1,34 @@
+# Used only by .github/workflows/free-tier-stack.yml, which copies it next to docker-compose.yml so
+# Compose merges it in. It adds a throwaway PostGIS database (Supabase's role on the VM), sets CPU
+# limits that add up to the VM's 2 vCPUs, and gives local file storage (allowed only in the `ci`
+# environment) somewhere to write on the read-only filesystem.
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: flatmate
+    ports: ["127.0.0.1:55432:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "flatmate"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  api:
+    depends_on:
+      db: { condition: service_healthy }
+    tmpfs: ["/tmp:size=64m", "/app/uploads"]
+    cpus: 1.5
+
+  worker:
+    depends_on:
+      db: { condition: service_healthy }
+    tmpfs: ["/tmp:size=64m", "/app/uploads"]
+    cpus: 0.25
+
+  redis:
+    cpus: 0.1
+
+  caddy:
+    cpus: 0.15

@@ -3,6 +3,9 @@ SMS delivery for one-time codes.
 
   * TwilioSmsProvider - production (REST API; Messaging Service SID or sender number)
   * MemorySmsProvider - development/tests only; refused elsewhere
+  * SMS_PROVIDER=disabled - no SMS at all (a launch without an SMS budget). Phone verification
+    is optional: /meta/app-config reports it off, the web app hides it, and the OTP endpoints
+    answer 503 PHONE_VERIFICATION_DISABLED.
 
 Unlike email, OTP SMS is sent synchronously: a code that arrives after a retry backoff is
 useless, so the user gets an immediate error and can ask again.
@@ -95,9 +98,25 @@ class MemorySmsProvider(SmsProvider):
 _provider: Optional[SmsProvider] = None
 
 
+class SmsDisabled(SmsConfigurationError):
+    """SMS_PROVIDER=disabled: phone verification is deliberately off."""
+
+
+def sms_disabled() -> bool:
+    return (settings.SMS_PROVIDER or "").strip().lower() == "disabled"
+
+
+def phone_verification_available() -> bool:
+    """Whether codes can be sent at all, for /meta/app-config. A misconfigured provider still
+    counts as available: that is an outage to fix, not a feature to hide."""
+    return not sms_disabled()
+
+
 def build_sms_provider() -> SmsProvider:
     provider = (settings.SMS_PROVIDER or "").lower()
     environment = (settings.ENVIRONMENT or "development").lower()
+    if provider == "disabled":
+        raise SmsDisabled("Phone verification is turned off (SMS_PROVIDER=disabled)")
     if provider == "twilio":
         return TwilioSmsProvider(
             settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN,
@@ -109,7 +128,8 @@ def build_sms_provider() -> SmsProvider:
                 f"SMS_PROVIDER=memory sends nothing and is not allowed in '{environment}'. Use twilio."
             )
         return MemorySmsProvider()
-    raise SmsConfigurationError(f"Unknown SMS_PROVIDER '{settings.SMS_PROVIDER}' (expected twilio or memory)")
+    raise SmsConfigurationError(
+        f"Unknown SMS_PROVIDER '{settings.SMS_PROVIDER}' (expected twilio, memory or disabled)")
 
 
 def get_sms_provider() -> SmsProvider:
@@ -125,6 +145,8 @@ def init_sms_provider() -> None:
     try:
         provider = get_sms_provider()
         logger.info(f"SMS provider: {provider.name}")
+    except SmsDisabled as exc:
+        logger.info(str(exc))
     except SmsConfigurationError as exc:
         logger.error(f"Phone verification disabled: {exc}")
 

@@ -7,6 +7,28 @@ Work these top to bottom. Mark each `[x]` only when code + tests land.
 
 Gathered from the open items below and every item's "Not covered" notes.
 
+### The ₹0 launch path (2026-11-26)
+
+With no budget, launch on student offers by following
+[FREE_TIER_LAUNCH.md](FREE_TIER_LAUNCH.md) top to bottom. On that path the E-items below
+change like this:
+- **E1 steps 2 and 4, and E2b:** guide steps 3 and 4.
+- **E3:** an Azure for Students VM instead of Google Cloud; `provision-azure.sh` creates it.
+- **E4:** guide step 9.
+- **E5:** Brevo instead of Resend, Sentry's student plan, and the `UPTIME_*` variables (steps 6
+  and 7). Twilio is off (`SMS_PROVIDER=disabled`, which hides phone verification).
+- **E6:** payments stay off.
+- **E8:** ClamAV doesn't fit the 1 GiB VM; uploads are type- and size-checked only.
+- **E12:** guide step 10.
+- **E13:** replaced by the free sizing: a few hundred people at once, measured by
+  `free-tier-stack.yml`.
+
+Still open on that path:
+- E1 step 6 (the history-scan finding);
+- E2c (the PostGIS decision);
+- E7 (Lighthouse: free on pagespeed.web.dev);
+- E9 (legal review).
+
 ### Code work, in order
 - [x] **L1. Lifestyle answers don't reach matching.** The web form saves to `lifestyle_profiles`;
       matching, the diet and sleep filters and the ranker read `profiles.lifestyle_traits`.

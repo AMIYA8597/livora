@@ -221,6 +221,31 @@ async def test_unconfigured_sms_returns_503_and_sends_nothing(async_client: Asyn
     assert resp.status_code == 503
 
 
+@pytest.mark.asyncio
+async def test_disabled_sms_says_so_and_app_config_hides_it(async_client: AsyncClient, monkeypatch):
+    """A launch without an SMS budget: SMS_PROVIDER=disabled turns phone verification off cleanly."""
+    set_sms_provider(None)
+    monkeypatch.setattr(settings, "SMS_PROVIDER", "disabled")
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    try:
+        _, headers = await _register(async_client)
+        resp = await _send(async_client, headers, _phone())
+        assert resp.status_code == 503
+        assert resp.json()["error_code"] == "PHONE_VERIFICATION_DISABLED"
+        config = await async_client.get("/api/v1/meta/app-config")
+        assert config.status_code == 200
+        assert config.json()["features"]["phone_verification"] is False
+    finally:
+        set_sms_provider(None)
+
+
+@pytest.mark.asyncio
+async def test_app_config_reports_phone_verification_on_when_sms_is_set_up(async_client: AsyncClient, sms):
+    features = (await async_client.get("/api/v1/meta/app-config")).json()["features"]
+    assert features["phone_verification"] is True
+    assert isinstance(features["payments"], bool)
+
+
 # --- Providers -----------------------------------------------------------------------------
 
 def test_memory_sms_refused_outside_dev(monkeypatch):

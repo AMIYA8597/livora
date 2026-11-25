@@ -1,0 +1,186 @@
+name: Free-tier Deployment
+
+# Deploys the API and worker to the free-tier VM (docs/FREE_TIER_LAUNCH.md) after CI passes on
+# main, or by hand. Off until the repository variable FREE_TIER_ENABLED is "true".
+#
+#   1. builds the API image and pushes it to GitHub's container registry (ghcr.io);
+#   2. backs up the database (verified restore) when BACKUP_AZURE_SAS_URL is set;
+#   3. applies database migrations with the owner login;
+#   4. writes the app's settings (scripts/compose_env.py) from PRODUCTION_* secrets and the
+#      RUNTIME_ENV variable;
+#   5. copies the stack to the VM and runs deploy.sh, which rolls back if the release isn't
+#      healthy;
+#   6. checks the live API from outside.
+#
+# Secrets: FREE_TIER_HOST, FREE_TIER_SSH_KEY, FREE_TIER_SSH_KNOWN_HOSTS (provision-azure.sh sets
+# these), PRODUCTION_DATABASE_URL (owner, for migrations and backups), PRODUCTION_APP_DATABASE_URL,
+# PRODUCTION_SECRET_KEY, PRODUCTION_SUPABASE_SECRET_KEY, and optional ones such as
+# PRODUCTION_SMTP_PASSWORD and PRODUCTION_SENTRY_DSN.
+# Variables: FREE_TIER_ENABLED, API_DOMAIN, ACME_EMAIL, RUNTIME_ENV.
+# The web app deploys itself through Vercel's GitHub integration.
+
+on:
+  workflow_run:
+    workflows: ["Flatmate Platform CI Pipeline"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit or tag to deploy (default: the latest main). Use an older one to roll back."
+        required: false
+
+concurrency:
+  group: free-tier-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    name: Deploy to the free-tier VM
+    if: >-
+      vars.FREE_TIER_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      REF: ${{ inputs.ref || github.event.workflow_run.head_sha || github.sha }}
+      API_DOMAIN: ${{ vars.API_DOMAIN }}
+      ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+      HAS_BACKUP: ${{ secrets.BACKUP_AZURE_SAS_URL != '' }}
+    steps:
+      - name: Check the configuration
+        env:
+          FREE_TIER_HOST: ${{ secrets.FREE_TIER_HOST }}
+          FREE_TIER_SSH_KEY: ${{ secrets.FREE_TIER_SSH_KEY }}
+          FREE_TIER_SSH_KNOWN_HOSTS: ${{ secrets.FREE_TIER_SSH_KNOWN_HOSTS }}
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          PRODUCTION_APP_DATABASE_URL: ${{ secrets.PRODUCTION_APP_DATABASE_URL }}
+          PRODUCTION_SECRET_KEY: ${{ secrets.PRODUCTION_SECRET_KEY }}
+          PRODUCTION_SUPABASE_SECRET_KEY: ${{ secrets.PRODUCTION_SUPABASE_SECRET_KEY }}
+        run: |
+          missing=()
+          for name in FREE_TIER_HOST FREE_TIER_SSH_KEY FREE_TIER_SSH_KNOWN_HOSTS PRODUCTION_DATABASE_URL \
+                      PRODUCTION_APP_DATABASE_URL PRODUCTION_SECRET_KEY PRODUCTION_SUPABASE_SECRET_KEY; do
+            [ -n "${!name}" ] || missing+=("secret $name")
+          done
+          [ -n "$API_DOMAIN" ] || missing+=("variable API_DOMAIN")
+          [ -n "$ACME_EMAIL" ] || missing+=("variable ACME_EMAIL")
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf '::error::Missing %s\n' "${missing[@]}"
+            echo "See docs/FREE_TIER_LAUNCH.md, step 6."
+            exit 1
+          fi
+          if [ "$PRODUCTION_APP_DATABASE_URL" = "$PRODUCTION_DATABASE_URL" ]; then
+            echo "::error::PRODUCTION_APP_DATABASE_URL must be the least-privilege login, not the owner (docs/FREE_TIER_LAUNCH.md, step 3)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/constraints.txt
+
+      - name: Build and push the API image
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          sha=$(git rev-parse HEAD)
+          image="ghcr.io/$owner/flatmate-api:$sha"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "$image already exists; reusing it."
+          else
+            docker build -q \
+              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+              --label "org.opencontainers.image.revision=$sha" \
+              -t "$image" apps/api
+            docker push -q "$image"
+          fi
+          docker logout ghcr.io >/dev/null
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Back up the database (verified) before migrating
+        if: env.HAS_BACKUP == 'true'
+        uses: ./.github/actions/backup-database
+        with:
+          database-url: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          azure-sas-url: ${{ secrets.BACKUP_AZURE_SAS_URL }}
+          folder: production/pre-deploy
+          label: pre-deploy-${{ steps.image.outputs.sha }}
+          pg-version: ${{ vars.PG_VERSION || '17' }}
+
+      - name: Apply database migrations
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          MIGRATION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          ENVIRONMENT: production
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pip install -q -e apps/api -c apps/api/constraints.txt
+          cd apps/api
+          python -m alembic upgrade head
+          python -m alembic current
+
+      - name: Write the app's settings
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          RUNTIME_ENV: ${{ vars.RUNTIME_ENV }}
+        run: |
+          umask 077
+          printf '%s\n' "$RUNTIME_ENV" > "$RUNNER_TEMP/runtime.env"
+          python scripts/compose_env.py --environment production --prefix PRODUCTION \
+            --release "${{ steps.image.outputs.sha }}" --extra-env-file "$RUNNER_TEMP/runtime.env" \
+            --out "$RUNNER_TEMP/api.env"
+
+      - name: Deploy to the VM
+        env:
+          HOST: ${{ secrets.FREE_TIER_HOST }}
+          SSH_KEY: ${{ secrets.FREE_TIER_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FREE_TIER_SSH_KNOWN_HOSTS }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh_opts=(-i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20)
+          scp "${ssh_opts[@]}" infrastructure/free-tier/docker-compose.yml infrastructure/free-tier/Caddyfile \
+            infrastructure/free-tier/deploy.sh "$RUNNER_TEMP/api.env" "deploy@$HOST:/opt/flatmate/"
+          # The registry token goes over stdin; deploy.sh logs out after pulling.
+          printf '%s' "$GH_TOKEN" | ssh "${ssh_opts[@]}" "deploy@$HOST" \
+            "API_IMAGE='$IMAGE' API_DOMAIN='$API_DOMAIN' ACME_EMAIL='$ACME_EMAIL' REGISTRY_USER='$GITHUB_ACTOR' bash /opt/flatmate/deploy.sh"
+          rm -f ~/.ssh/deploy_key
+
+      - name: Check the live API from outside
+        run: |
+          for _ in $(seq 1 20); do
+            if curl -fsS --max-time 10 "https://$API_DOMAIN/health/ready" >/dev/null; then break; fi
+            sleep 6
+          done
+          curl -fsS --max-time 10 "https://$API_DOMAIN/health/ready"
+          echo
+          curl -fsS --max-time 10 "https://$API_DOMAIN/api/v1/meta/app-config"
+          {
+            echo "### Free-tier deploy"
+            echo "- release \`${{ steps.image.outputs.sha }}\` is live at https://$API_DOMAIN"
+            echo "- roll back: run this workflow by hand with an older commit as \`ref\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

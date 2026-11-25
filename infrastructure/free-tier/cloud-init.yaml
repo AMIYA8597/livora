@@ -1,0 +1,77 @@
+#cloud-config
+# First boot of the free-tier VM (provision-azure.sh passes this as custom data). It hardens the
+# machine, installs Docker from Ubuntu's archive (so security updates arrive with the OS's), adds
+# swap for the 1 GiB VM, and prepares /opt/flatmate with a Redis password that never leaves it.
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - jq
+  - fail2ban
+  - unattended-upgrades
+  - ufw
+  - docker.io
+  - docker-compose-v2
+
+write_files:
+  # SSH: keys only, no root, few attempts.
+  - path: /etc/ssh/sshd_config.d/10-flatmate.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+      MaxAuthTries 3
+      LoginGraceTime 20
+      X11Forwarding no
+      AllowUsers deploy
+  - path: /etc/fail2ban/jail.d/sshd.local
+    permissions: "0644"
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      findtime = 10m
+      bantime = 1h
+  # Security updates install themselves; the VM reboots at 03:30 IST (22:00 UTC) when one needs it.
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+  - path: /etc/apt/apt.conf.d/52flatmate-reboot
+    permissions: "0644"
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "22:00";
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {"log-driver": "json-file", "log-opts": {"max-size": "10m", "max-file": "3"}, "live-restore": true}
+  - path: /etc/sysctl.d/90-flatmate.conf
+    permissions: "0644"
+    content: |
+      vm.swappiness = 10
+      vm.overcommit_memory = 1
+      net.core.somaxconn = 4096
+      net.ipv4.tcp_max_syn_backlog = 4096
+
+runcmd:
+  # 2 GiB swap: a safety margin for the 1 GiB VM, not working memory.
+  - [sh, -c, "test -f /swapfile || (fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab)"]
+  - [sysctl, --system]
+  # Firewall: SSH and HTTPS only. Redis and the API are never published to the host.
+  - [ufw, default, deny, incoming]
+  - [ufw, default, allow, outgoing]
+  - [ufw, allow, 22/tcp]
+  - [ufw, allow, 80/tcp]
+  - [ufw, allow, 443/tcp]
+  - [ufw, --force, enable]
+  - [systemctl, enable, --now, docker, fail2ban]
+  - [usermod, -aG, docker, deploy]
+  - [systemctl, restart, ssh]
+  # The app's folder, with the Redis password generated here.
+  - [install, -d, -o, deploy, -g, deploy, -m, "0750", /opt/flatmate]
+  - [sh, -c, "test -f /opt/flatmate/.env || (umask 077 && printf 'REDIS_PASSWORD=%s\\n' \"$(openssl rand -hex 32)\" > /opt/flatmate/.env && chown deploy:deploy /opt/flatmate/.env)"]

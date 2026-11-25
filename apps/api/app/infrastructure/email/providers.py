@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import smtplib
+import ssl
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from email.message import EmailMessage as MimeMessage
@@ -119,7 +120,8 @@ class SmtpEmailProvider(EmailProvider):
         mime.add_alternative(message.html, subtype="html")
         with smtplib.SMTP(self.host, self.port, timeout=10) as smtp:
             if self.use_tls:
-                smtp.starttls()
+                # Verify the server's certificate: starttls() without a context doesn't.
+                smtp.starttls(context=ssl.create_default_context())
             if self.username:
                 smtp.login(self.username, self.password)
             smtp.send_message(mime)

@@ -378,6 +378,9 @@
             "title": "Api Version",
             "type": "string"
           },
+          "features": {
+            "$ref": "#/components/schemas/Features"
+          },
           "ios": {
             "$ref": "#/components/schemas/PlatformVersions"
           }
@@ -385,7 +388,8 @@
         "required": [
           "api_version",
           "android",
-          "ios"
+          "ios",
+          "features"
         ],
         "title": "AppConfigResponse",
         "type": "object"
@@ -2121,6 +2125,24 @@
           "created_at"
         ],
         "title": "ExistingTenantVacancyResponse",
+        "type": "object"
+      },
+      "Features": {
+        "properties": {
+          "payments": {
+            "title": "Payments",
+            "type": "boolean"
+          },
+          "phone_verification": {
+            "title": "Phone Verification",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "phone_verification",
+          "payments"
+        ],
+        "title": "Features",
         "type": "object"
       },
       "FlatmateMatchResponse": {
@@ -11290,7 +11312,7 @@
     },
     "/api/v1/meta/app-config": {
       "get": {
-        "description": "API version and, per app platform, the supported and latest versions. Apps call this on\nstart and after any 426 response.",
+        "description": "API version, per app platform the supported and latest versions, and which optional\nfeatures are on. Apps call this on start and after any 426 response.",
         "operationId": "app_config_api_v1_meta_app_config_get",
         "responses": {
           "200": {

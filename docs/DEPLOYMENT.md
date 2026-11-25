@@ -4,6 +4,12 @@
 **Primary Database:** Supabase PostgreSQL (or self-hosted PostgreSQL 16 with PostGIS & pgvector)  
 **Containerization:** Multi-stage Docker + Docker Compose  
 
+> **Launching with no budget?** [FREE_TIER_LAUNCH.md](FREE_TIER_LAUNCH.md) is the complete,
+> scripted procedure for a ₹0 production on student offers: an Azure for Students VM running
+> Caddy, the API, the worker and Redis; Supabase Free; and Vercel Hobby. It's deployed by
+> `free-tier-deploy.yml` and tested by `free-tier-stack.yml`. The Cloud Run setup below is the
+> paid path for 10,000 people at once (CAPACITY_PLAN.md).
+
 ---
 
 ## 1. Environment Configurations
