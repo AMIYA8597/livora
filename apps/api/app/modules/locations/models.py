@@ -31,7 +31,7 @@ class State(Base):
     code: Mapped[str] = mapped_column(String(10), nullable=False) # e.g. KA, MH, DL, TS
     kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="state")  # state, union_territory
     capital_city_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("cities.id", ondelete="SET NULL", use_alter=True), nullable=True)
+        UUID(as_uuid=True), ForeignKey("cities.id", ondelete="SET NULL", use_alter=True), nullable=True, index=True)
 
     country: Mapped["Country"] = relationship("Country", back_populates="states")
     cities: Mapped[List["City"]] = relationship(
@@ -41,7 +41,7 @@ class City(Base):
     __tablename__ = "cities"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    state_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("states.id", ondelete="CASCADE"), nullable=False)
+    state_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("states.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True) # Bengaluru, Mumbai, Delhi, Hyderabad
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     tier: Mapped[int] = mapped_column(Integer, default=1, nullable=False) # Tier 1, Tier 2

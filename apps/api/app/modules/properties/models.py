@@ -102,7 +102,7 @@ class Bed(Base):
     room_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False, index=True)
     bed_identifier: Mapped[str] = mapped_column(String(20), nullable=False) # e.g. "Bed A", "Bed B (Window)"
     is_occupied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    current_occupant_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    current_occupant_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     monthly_rent: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     available_from: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -113,7 +113,7 @@ class PropertyAmenity(Base):
     __tablename__ = "property_amenities"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    property_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    property_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True)
     amenity_key: Mapped[str] = mapped_column(String(50), nullable=False) # power_backup, wifi, ro_water, geyser, security_24x7
 
     property: Mapped["Property"] = relationship("Property", back_populates="amenities")

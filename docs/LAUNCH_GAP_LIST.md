@@ -436,7 +436,11 @@ committed on your OK.
       2. Point the runtime `DATABASE_URL` at `flatmate_api.qjwitdovbsfviaepjcul`.
       3. Keep the owner URL for migrations only.
 - [ ] **E2c. Supabase advisor findings (2026-11-25).**
-      - **Ours, fix with migration 020:**
+      - **Ours: migration 020 is written and tested locally, not yet applied to the hosted
+        database.** It pins the search_path, revokes PUBLIC/`anon`/`authenticated` EXECUTE on
+        our functions in `public`, drops the 3 duplicate indexes and indexes all 23 foreign
+        keys. `test_schema_parity_db.py` now checks these. Its `DROP INDEX` lines must be run
+        through the SQL Editor because the connector refuses DROP.
         - `content_embeddings_sync_vec` and `profiles_sync_lifestyle_embedding` have a mutable
           `search_path`. Pin it.
         - `rls_auto_enable()` is Supabase's SECURITY DEFINER function behind the `ensure_rls`

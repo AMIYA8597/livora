@@ -74,7 +74,7 @@ flowchart LR
 | `apps/api/app/infrastructure` | Adapters to outside systems: storage, email, SMS, image processing, virus scanning, cache, geospatial helpers. |
 | `apps/api/app/workers` | Outbox dispatcher, Celery app and beat schedule, maintenance (retention) jobs. |
 | `apps/api/app/ml` | Rankers, embeddings and semantic search, moderation, smart replies, the Claude client, training and evaluation. |
-| `apps/api/migrations` | Alembic migrations (currently up to `019_device_push_tokens`). |
+| `apps/api/migrations` | Alembic migrations (currently up to `020_database_advisor_fixes`). |
 | `database/migrations/complete_hosted_schema.sql` | The whole schema as one SQL file for the hosted database (generated from Alembic, see §4.6). |
 | `.github/workflows` | CI, security scans, image builds, staging and production deploys, backups, hosted migrations, uptime checks. |
 

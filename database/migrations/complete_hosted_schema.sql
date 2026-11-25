@@ -71,9 +71,9 @@ CREATE TABLE outbox_events (
 
 CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
 
-CREATE INDEX ix_outbox_events_status ON outbox_events (status);
-
 CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
+
+CREATE INDEX ix_outbox_events_status ON outbox_events (status);
 
 CREATE TABLE subscription_plans (
     id UUID NOT NULL, 
@@ -226,6 +226,8 @@ CREATE TABLE states (
     FOREIGN KEY(country_id) REFERENCES countries (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_states_capital_city_id ON states (capital_city_id);
+
 CREATE TABLE lifestyle_profiles (
     id UUID NOT NULL, 
     user_id UUID NOT NULL, 
@@ -311,15 +313,15 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_properties_postal_code ON properties (postal_code);
+
 CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
-CREATE INDEX ix_properties_postal_code ON properties (postal_code);
+CREATE INDEX ix_properties_city ON properties (city);
 
 CREATE INDEX ix_properties_featured_until ON properties (featured_until);
-
-CREATE INDEX ix_properties_city ON properties (city);
 
 CREATE TABLE groups (
     id UUID NOT NULL, 
@@ -335,6 +337,8 @@ CREATE TABLE groups (
     FOREIGN KEY(creator_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_groups_creator_id ON groups (creator_id);
+
 CREATE TABLE match_interactions (
     id UUID NOT NULL, 
     user_id UUID NOT NULL, 
@@ -348,9 +352,9 @@ CREATE TABLE match_interactions (
     FOREIGN KEY(target_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
-
 CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
+
+CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
 
 CREATE TABLE mutual_matches (
     id UUID NOT NULL, 
@@ -386,11 +390,11 @@ CREATE TABLE notifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_notifications_is_read ON notifications (is_read);
-
 CREATE INDEX ix_notifications_user_id ON notifications (user_id);
 
 CREATE INDEX ix_notifications_user_created ON notifications (user_id, created_at);
+
+CREATE INDEX ix_notifications_is_read ON notifications (is_read);
 
 CREATE TABLE push_subscriptions (
     id UUID NOT NULL, 
@@ -458,13 +462,13 @@ CREATE TABLE verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
-
 CREATE INDEX ix_verifications_subject_created ON verifications (subject_hash, created_at);
 
 CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
 
 CREATE INDEX ix_verifications_user_id ON verifications (user_id);
+
+CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
 
 CREATE TABLE phone_verifications (
     id UUID NOT NULL, 
@@ -497,6 +501,8 @@ CREATE TABLE moderation_reports (
     PRIMARY KEY (id), 
     FOREIGN KEY(reporter_id) REFERENCES users (id) ON DELETE CASCADE
 );
+
+CREATE INDEX ix_moderation_reports_reporter_id ON moderation_reports (reporter_id);
 
 CREATE TABLE user_blocks (
     id UUID NOT NULL, 
@@ -534,6 +540,8 @@ CREATE TABLE subscriptions (
     UNIQUE (provider_subscription_id)
 );
 
+CREATE INDEX ix_subscriptions_plan_id ON subscriptions (plan_id);
+
 CREATE INDEX ix_subscriptions_user_id ON subscriptions (user_id);
 
 CREATE TABLE designations (
@@ -560,9 +568,11 @@ CREATE TABLE cities (
     FOREIGN KEY(state_id) REFERENCES states (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_cities_name ON cities (name);
+
 CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
 
-CREATE INDEX ix_cities_name ON cities (name);
+CREATE INDEX ix_cities_state_id ON cities (state_id);
 
 CREATE TABLE rooms (
     id UUID NOT NULL, 
@@ -592,6 +602,8 @@ CREATE TABLE property_amenities (
     PRIMARY KEY (id), 
     FOREIGN KEY(property_id) REFERENCES properties (id) ON DELETE CASCADE
 );
+
+CREATE INDEX ix_property_amenities_property_id ON property_amenities (property_id);
 
 CREATE TABLE pg_buildings (
     id UUID NOT NULL, 
@@ -627,6 +639,8 @@ CREATE TABLE group_members (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_group_members_user_id ON group_members (user_id);
+
 CREATE TABLE group_wishlist_items (
     id UUID NOT NULL, 
     group_id UUID NOT NULL, 
@@ -640,6 +654,10 @@ CREATE TABLE group_wishlist_items (
     FOREIGN KEY(property_id) REFERENCES properties (id) ON DELETE CASCADE, 
     FOREIGN KEY(added_by) REFERENCES users (id) ON DELETE CASCADE
 );
+
+CREATE INDEX ix_group_wishlist_items_property_id ON group_wishlist_items (property_id);
+
+CREATE INDEX ix_group_wishlist_items_added_by ON group_wishlist_items (added_by);
 
 CREATE TABLE payments (
     id UUID NOT NULL, 
@@ -664,6 +682,8 @@ CREATE TABLE payments (
 
 CREATE INDEX ix_payments_user_id ON payments (user_id);
 
+CREATE INDEX ix_payments_subscription_id ON payments (subscription_id);
+
 CREATE TABLE listing_interactions (
     id UUID NOT NULL, 
     user_id UUID NOT NULL, 
@@ -678,11 +698,11 @@ CREATE TABLE listing_interactions (
     FOREIGN KEY(property_id) REFERENCES properties (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_listing_interactions_user_time ON listing_interactions (user_id, created_at);
+
 CREATE INDEX ix_listing_interactions_property ON listing_interactions (property_id);
 
 CREATE INDEX ix_listing_interactions_time ON listing_interactions (created_at);
-
-CREATE INDEX ix_listing_interactions_user_time ON listing_interactions (user_id, created_at);
 
 CREATE TABLE localities (
     id UUID NOT NULL, 
@@ -695,11 +715,11 @@ CREATE TABLE localities (
     FOREIGN KEY(city_id) REFERENCES cities (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_localities_name ON localities (name);
+CREATE INDEX ix_localities_city_id ON localities (city_id);
 
 CREATE INDEX ix_localities_postal_code ON localities (postal_code);
 
-CREATE INDEX ix_localities_city_id ON localities (city_id);
+CREATE INDEX ix_localities_name ON localities (name);
 
 CREATE TABLE beds (
     id UUID NOT NULL, 
@@ -715,6 +735,8 @@ CREATE TABLE beds (
 );
 
 CREATE INDEX ix_beds_room_id ON beds (room_id);
+
+CREATE INDEX ix_beds_current_occupant_id ON beds (current_occupant_id);
 
 CREATE TABLE existing_tenant_vacancies (
     id UUID NOT NULL, 
@@ -735,7 +757,11 @@ CREATE TABLE existing_tenant_vacancies (
     FOREIGN KEY(posted_by_tenant_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+CREATE INDEX ix_existing_tenant_vacancies_room_id ON existing_tenant_vacancies (room_id);
+
 CREATE INDEX ix_existing_tenant_vacancies_property_id ON existing_tenant_vacancies (property_id);
+
+CREATE INDEX ix_existing_tenant_vacancies_posted_by_tenant_id ON existing_tenant_vacancies (posted_by_tenant_id);
 
 CREATE TABLE pg_floors (
     id UUID NOT NULL, 
@@ -772,6 +798,12 @@ CREATE TABLE appointments (
 
 CREATE INDEX ix_appointments_property_id ON appointments (property_id);
 
+CREATE INDEX ix_appointments_host_id ON appointments (host_id);
+
+CREATE INDEX ix_appointments_room_id ON appointments (room_id);
+
+CREATE INDEX ix_appointments_applicant_id ON appointments (applicant_id);
+
 CREATE TABLE applications (
     id UUID NOT NULL, 
     applicant_id UUID NOT NULL, 
@@ -792,11 +824,15 @@ CREATE TABLE applications (
     FOREIGN KEY(room_id) REFERENCES rooms (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_applications_property_id ON applications (property_id);
+CREATE INDEX ix_applications_applicant_id ON applications (applicant_id);
+
+CREATE INDEX ix_applications_group_id ON applications (group_id);
 
 CREATE INDEX ix_applications_status ON applications (status);
 
-CREATE INDEX ix_applications_applicant_id ON applications (applicant_id);
+CREATE INDEX ix_applications_room_id ON applications (room_id);
+
+CREATE INDEX ix_applications_property_id ON applications (property_id);
 
 CREATE TABLE tenant_memberships (
     id UUID NOT NULL, 
@@ -819,7 +855,11 @@ CREATE TABLE tenant_memberships (
 
 CREATE INDEX ix_tenant_memberships_property_id ON tenant_memberships (property_id);
 
+CREATE INDEX ix_tenant_memberships_bed_id ON tenant_memberships (bed_id);
+
 CREATE INDEX ix_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
+
+CREATE INDEX ix_tenant_memberships_room_id ON tenant_memberships (room_id);
 
 CREATE TABLE application_status_events (
     id UUID NOT NULL, 
@@ -836,6 +876,8 @@ CREATE TABLE application_status_events (
 );
 
 CREATE INDEX ix_application_status_events_app_created ON application_status_events (application_id, created_at);
+
+CREATE INDEX ix_application_status_events_actor_id ON application_status_events (actor_id);
 
 CREATE TABLE conversations (
     id UUID NOT NULL, 
@@ -856,15 +898,15 @@ CREATE TABLE conversations (
     FOREIGN KEY(flatmate_match_id) REFERENCES mutual_matches (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_conversations_application_id ON conversations (application_id);
-
-CREATE INDEX ix_conversations_property_id ON conversations (property_id);
+CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
 
 CREATE INDEX ix_conversations_flatmate_match_id ON conversations (flatmate_match_id);
 
 CREATE INDEX ix_conversations_group_id ON conversations (group_id);
 
-CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
+CREATE INDEX ix_conversations_application_id ON conversations (application_id);
+
+CREATE INDEX ix_conversations_property_id ON conversations (property_id);
 
 CREATE TABLE conversation_participants (
     id UUID NOT NULL, 
@@ -907,15 +949,17 @@ CREATE TABLE messages (
     FOREIGN KEY(reply_to_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
-
 CREATE INDEX ix_messages_sent_at ON messages (sent_at);
 
-CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
+CREATE INDEX ix_messages_reply_to_message_id ON messages (reply_to_message_id);
 
 CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
 
 CREATE INDEX ix_messages_sender_id ON messages (sender_id);
+
+CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
+
+CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -954,11 +998,11 @@ CREATE TABLE attachments (
     FOREIGN KEY(uploader_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_attachments_message_id ON attachments (message_id);
-
 CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
 
 CREATE INDEX ix_attachments_uploader_id ON attachments (uploader_id);
+
+CREATE INDEX ix_attachments_message_id ON attachments (message_id);
 
 CREATE TABLE conversation_read_cursors (
     id UUID NOT NULL, 
@@ -972,6 +1016,8 @@ CREATE TABLE conversation_read_cursors (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
     FOREIGN KEY(last_read_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
+
+CREATE INDEX ix_conversation_read_cursors_last_read_message_id ON conversation_read_cursors (last_read_message_id);
 
 CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
 
@@ -1930,6 +1976,99 @@ DO $$
 CREATE INDEX IF NOT EXISTS ix_device_push_tokens_user_id ON device_push_tokens (user_id);
 
 UPDATE alembic_version SET version_num='019_device_push_tokens' WHERE alembic_version.version_num = '018_listing_ranking';
+
+-- Running upgrade 019_device_push_tokens -> 020_database_advisor_fixes
+
+DO $$
+        DECLARE f record;
+        BEGIN
+            FOR f IN
+                SELECT p.oid::regprocedure AS sig FROM pg_proc p
+                WHERE p.pronamespace = 'public'::regnamespace
+                  AND p.proname IN ('profiles_sync_lifestyle_embedding', 'content_embeddings_sync_vec')
+            LOOP
+                EXECUTE format('ALTER FUNCTION %s SET search_path = pg_catalog, public', f.sig);
+            END LOOP;
+        END $$;
+
+DO $$
+        DECLARE
+            f record;
+            api_role text;
+        BEGIN
+            FOR f IN 
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p
+    WHERE p.pronamespace = 'public'::regnamespace
+      AND pg_has_role(current_user, p.proowner, 'MEMBER')
+      AND NOT EXISTS (
+          SELECT 1 FROM pg_depend d
+          WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+      )
+
+            LOOP
+                EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', f.sig);
+                FOREACH api_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = api_role) THEN
+                        EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM %I', f.sig, api_role);
+                    END IF;
+                END LOOP;
+            END LOOP;
+        END $$;
+
+DROP INDEX IF EXISTS idx_attachments_conv;
+
+DROP INDEX IF EXISTS idx_attachments_msg;
+
+DROP INDEX IF EXISTS idx_attachments_uploader;
+
+CREATE INDEX IF NOT EXISTS ix_application_status_events_actor_id ON application_status_events (actor_id);
+
+CREATE INDEX IF NOT EXISTS ix_applications_group_id ON applications (group_id);
+
+CREATE INDEX IF NOT EXISTS ix_applications_room_id ON applications (room_id);
+
+CREATE INDEX IF NOT EXISTS ix_appointments_applicant_id ON appointments (applicant_id);
+
+CREATE INDEX IF NOT EXISTS ix_appointments_host_id ON appointments (host_id);
+
+CREATE INDEX IF NOT EXISTS ix_appointments_room_id ON appointments (room_id);
+
+CREATE INDEX IF NOT EXISTS ix_beds_current_occupant_id ON beds (current_occupant_id);
+
+CREATE INDEX IF NOT EXISTS ix_cities_state_id ON cities (state_id);
+
+CREATE INDEX IF NOT EXISTS ix_conversation_read_cursors_last_read_message_id ON conversation_read_cursors (last_read_message_id);
+
+CREATE INDEX IF NOT EXISTS ix_existing_tenant_vacancies_posted_by_tenant_id ON existing_tenant_vacancies (posted_by_tenant_id);
+
+CREATE INDEX IF NOT EXISTS ix_existing_tenant_vacancies_room_id ON existing_tenant_vacancies (room_id);
+
+CREATE INDEX IF NOT EXISTS ix_group_members_user_id ON group_members (user_id);
+
+CREATE INDEX IF NOT EXISTS ix_group_wishlist_items_added_by ON group_wishlist_items (added_by);
+
+CREATE INDEX IF NOT EXISTS ix_group_wishlist_items_property_id ON group_wishlist_items (property_id);
+
+CREATE INDEX IF NOT EXISTS ix_groups_creator_id ON groups (creator_id);
+
+CREATE INDEX IF NOT EXISTS ix_messages_reply_to_message_id ON messages (reply_to_message_id);
+
+CREATE INDEX IF NOT EXISTS ix_moderation_reports_reporter_id ON moderation_reports (reporter_id);
+
+CREATE INDEX IF NOT EXISTS ix_payments_subscription_id ON payments (subscription_id);
+
+CREATE INDEX IF NOT EXISTS ix_property_amenities_property_id ON property_amenities (property_id);
+
+CREATE INDEX IF NOT EXISTS ix_states_capital_city_id ON states (capital_city_id);
+
+CREATE INDEX IF NOT EXISTS ix_subscriptions_plan_id ON subscriptions (plan_id);
+
+CREATE INDEX IF NOT EXISTS ix_tenant_memberships_bed_id ON tenant_memberships (bed_id);
+
+CREATE INDEX IF NOT EXISTS ix_tenant_memberships_room_id ON tenant_memberships (room_id);
+
+UPDATE alembic_version SET version_num='020_database_advisor_fixes' WHERE alembic_version.version_num = '019_device_push_tokens';
 
 DO $$
 DECLARE

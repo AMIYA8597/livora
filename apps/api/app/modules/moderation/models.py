@@ -14,7 +14,7 @@ class ModerationReport(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # NULL for reports raised automatically by AI moderation (source = "auto").
-    reporter_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    reporter_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     target_type: Mapped[str] = mapped_column(String(32), nullable=False) # user, property, message
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     reason: Mapped[str] = mapped_column(String(100), nullable=False)

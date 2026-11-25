@@ -44,6 +44,75 @@ async def test_constraints_added_by_later_migrations_exist():
     assert CONSTRAINTS <= {(t, n) for t, n in rows}
 
 
+async def test_every_foreign_key_has_a_covering_index():
+    # Without one, deleting or updating the parent row (e.g. purging an account) scans the
+    # whole child table. An index covers the key when the key's columns lead it.
+    async with AsyncSessionLocal() as s:
+        rows = (await s.execute(text(
+            """
+            SELECT c.conrelid::regclass::text, c.conname
+            FROM pg_constraint c
+            WHERE c.contype = 'f' AND c.connamespace = 'public'::regnamespace
+              AND NOT EXISTS (
+                  SELECT 1 FROM pg_index i
+                  WHERE i.indrelid = c.conrelid
+                    AND (i.indkey::int2[])[0:cardinality(c.conkey) - 1] @> c.conkey
+                    AND (i.indkey::int2[])[0:cardinality(c.conkey) - 1] <@ c.conkey
+              )
+            ORDER BY 1, 2
+            """
+        ))).all()
+    assert [tuple(r) for r in rows] == []
+
+
+async def test_no_duplicate_indexes():
+    async with AsyncSessionLocal() as s:
+        rows = (await s.execute(text(
+            """
+            SELECT indrelid::regclass::text, array_agg(indexrelid::regclass::text ORDER BY 1)
+            FROM pg_index
+            WHERE indrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace)
+            GROUP BY indrelid, indkey::text, indclass::text, indcollation::text, indisunique,
+                     coalesce(pg_get_expr(indexprs, indrelid), ''),
+                     coalesce(pg_get_expr(indpred, indrelid), '')
+            HAVING count(*) > 1
+            """
+        ))).all()
+    assert [tuple(r) for r in rows] == []
+
+
+async def test_our_functions_are_not_callable_by_everyone():
+    # PUBLIC's EXECUTE reaches `anon` and `authenticated`, i.e. anyone through /rest/v1/rpc.
+    # Extension functions (PostGIS, pgvector) are exempt: the API needs them.
+    async with AsyncSessionLocal() as s:
+        rows = (await s.execute(text(
+            """
+            SELECT p.oid::regprocedure::text,
+                   coalesce(array_to_string(p.proconfig, ','), '') LIKE '%search_path=%'
+            FROM pg_proc p
+            WHERE p.pronamespace = 'public'::regnamespace
+              AND NOT EXISTS (
+                  SELECT 1 FROM pg_depend d
+                  WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+              )
+            """
+        ))).all()
+        public_exec = (await s.execute(text(
+            """
+            SELECT p.oid::regprocedure::text
+            FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+            WHERE p.pronamespace = 'public'::regnamespace AND a.grantee = 0
+              AND a.privilege_type = 'EXECUTE'
+              AND NOT EXISTS (
+                  SELECT 1 FROM pg_depend d
+                  WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+              )
+            """
+        ))).scalars().all()
+    assert public_exec == []
+    assert [name for name, pinned in rows if not pinned] == []
+
+
 async def test_columns_keep_their_database_defaults():
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(text(
