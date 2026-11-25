@@ -4,7 +4,7 @@ User, Multi-Role RBAC, and Privacy Settings Models
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Boolean, DateTime, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base, utcnow
@@ -70,6 +70,6 @@ class AccountDeletionRequest(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     purge_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    cancellable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    cancellable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=text("true"))
     # Listings that were published when the request was made, so cancelling can restore them.
-    paused_property_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    paused_property_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False, server_default=text("'[]'::jsonb"))

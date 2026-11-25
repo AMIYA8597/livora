@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,10 @@ class ContentEmbedding(Base):
     """One embedding per listing or profile, tagged with the model that produced it."""
 
     __tablename__ = "content_embeddings"
+    __table_args__ = (
+        UniqueConstraint("entity_type", "entity_id", name="uq_content_embeddings_entity"),
+        CheckConstraint("entity_type IN ('property', 'profile')", name="ck_content_embeddings_type"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     entity_type: Mapped[str] = mapped_column(String(32), nullable=False)  # property, profile
@@ -25,22 +29,23 @@ class ContentEmbedding(Base):
     model: Mapped[str] = mapped_column(String(80), nullable=False)
     embedding: Mapped[List[float]] = mapped_column(ARRAY(Float(precision=24)), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False, server_default=text("now()"))
 
 
 class MLModel(Base):
     """Versioned model registry: parameters plus the offline metrics that justified activation."""
 
     __tablename__ = "ml_models"
+    __table_args__ = (UniqueConstraint("name", "version", name="uq_ml_models_name_version"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     params: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    metrics: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
-    training_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False, server_default=text("'{}'::jsonb"))
+    training_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default=text("0"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False, server_default=text("now()"))
 
 
 class ListingInteraction(Base):
@@ -61,4 +66,4 @@ class ListingInteraction(Base):
     action: Mapped[str] = mapped_column(String(16), nullable=False)  # impression, view, save, unsave
     position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     features: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False, server_default=text("now()"))

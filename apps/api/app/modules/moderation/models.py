@@ -4,7 +4,7 @@ Moderation, Reporting, and User Blocking Models
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Text, DateTime, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base, utcnow
@@ -20,7 +20,7 @@ class ModerationReport(Base):
     reason: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="open", nullable=False) # open, under_investigation, resolved, dismissed
-    source: Mapped[str] = mapped_column(String(16), default="user", nullable=False) # user, auto
+    source: Mapped[str] = mapped_column(String(16), default="user", nullable=False, server_default=text("'user'")) # user, auto
     details: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True) # auto: model verdict and signals
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

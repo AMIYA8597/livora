@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, date, timezone
 from decimal import Decimal
 from typing import Optional, List
-from sqlalchemy import Boolean, String, Numeric, Text, Date, DateTime, ForeignKey, Index
+from sqlalchemy import Boolean, String, Numeric, Text, Date, DateTime, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base, utcnow
@@ -39,7 +39,7 @@ class ApplicationStatusEvent(Base):
     from_status: Mapped[str] = mapped_column(String(32), nullable=False)
     to_status: Mapped[str] = mapped_column(String(32), nullable=False)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    by_staff: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    by_staff: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, server_default=text("now()"))
 
     __table_args__ = (Index("ix_application_status_events_app_created", "application_id", "created_at"),)

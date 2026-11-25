@@ -29,9 +29,9 @@ CREATE TABLE users (
     PRIMARY KEY (id)
 );
 
-CREATE INDEX ix_users_phone_number ON users (phone_number);
-
 CREATE UNIQUE INDEX ix_users_email ON users (email);
+
+CREATE INDEX ix_users_phone_number ON users (phone_number);
 
 CREATE TABLE professional_domains (
     id UUID NOT NULL, 
@@ -69,26 +69,26 @@ CREATE TABLE outbox_events (
     PRIMARY KEY (id)
 );
 
-CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
-
 CREATE INDEX ix_outbox_events_event_type ON outbox_events (event_type);
 
 CREATE INDEX ix_outbox_events_status ON outbox_events (status);
+
+CREATE INDEX ix_outbox_events_created_at ON outbox_events (created_at);
 
 CREATE TABLE subscription_plans (
     id UUID NOT NULL, 
     name VARCHAR(100) NOT NULL, 
     code VARCHAR(50) NOT NULL, 
-    audience VARCHAR(16) NOT NULL, 
+    audience VARCHAR(16) DEFAULT 'seeker' NOT NULL, 
     description TEXT, 
     price_inr NUMERIC(10, 2) NOT NULL, 
-    period VARCHAR(16) NOT NULL, 
-    interval INTEGER NOT NULL, 
+    period VARCHAR(16) DEFAULT 'monthly' NOT NULL, 
+    interval INTEGER DEFAULT 1 NOT NULL, 
     duration_days INTEGER NOT NULL, 
     features JSONB NOT NULL, 
     razorpay_plan_id VARCHAR(64), 
     razorpay_plan_amount INTEGER, 
-    sort_order INTEGER NOT NULL, 
+    sort_order INTEGER DEFAULT 0 NOT NULL, 
     is_active BOOLEAN NOT NULL, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     PRIMARY KEY (id), 
@@ -97,13 +97,13 @@ CREATE TABLE subscription_plans (
 
 CREATE TABLE billing_events (
     id UUID NOT NULL, 
-    provider VARCHAR(16) NOT NULL, 
+    provider VARCHAR(16) DEFAULT 'razorpay' NOT NULL, 
     event_id VARCHAR(100) NOT NULL, 
     event_type VARCHAR(64) NOT NULL, 
     payload JSONB NOT NULL, 
-    status VARCHAR(16) NOT NULL, 
+    status VARCHAR(16) DEFAULT 'received' NOT NULL, 
     error TEXT, 
-    received_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    received_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
     processed_at TIMESTAMP WITH TIME ZONE, 
     PRIMARY KEY (id), 
     UNIQUE (event_id)
@@ -116,8 +116,10 @@ CREATE TABLE content_embeddings (
     model VARCHAR(80) NOT NULL, 
     embedding FLOAT(24)[] NOT NULL, 
     content_hash VARCHAR(64) NOT NULL, 
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-    PRIMARY KEY (id)
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    PRIMARY KEY (id), 
+    CONSTRAINT uq_content_embeddings_entity UNIQUE (entity_type, entity_id), 
+    CONSTRAINT ck_content_embeddings_type CHECK (entity_type IN ('property', 'profile'))
 );
 
 CREATE TABLE ml_models (
@@ -125,11 +127,12 @@ CREATE TABLE ml_models (
     name VARCHAR(64) NOT NULL, 
     version INTEGER NOT NULL, 
     params JSONB NOT NULL, 
-    metrics JSONB NOT NULL, 
-    training_rows INTEGER NOT NULL, 
-    is_active BOOLEAN NOT NULL, 
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
-    PRIMARY KEY (id)
+    metrics JSONB DEFAULT '{}'::jsonb NOT NULL, 
+    training_rows INTEGER DEFAULT 0 NOT NULL, 
+    is_active BOOLEAN DEFAULT false NOT NULL, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    PRIMARY KEY (id), 
+    CONSTRAINT uq_ml_models_name_version UNIQUE (name, version)
 );
 
 CREATE TABLE user_roles (
@@ -153,6 +156,7 @@ CREATE TABLE user_privacy_settings (
     show_exact_location BOOLEAN NOT NULL, 
     allow_direct_messages BOOLEAN NOT NULL, 
     profile_visibility VARCHAR(32) NOT NULL, 
+    personalized_ranking BOOLEAN DEFAULT 'true' NOT NULL, 
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     PRIMARY KEY (id), 
     UNIQUE (user_id), 
@@ -163,8 +167,8 @@ CREATE TABLE account_deletion_requests (
     user_id UUID NOT NULL, 
     requested_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     purge_after TIMESTAMP WITH TIME ZONE NOT NULL, 
-    cancellable BOOLEAN NOT NULL, 
-    paused_property_ids JSONB NOT NULL, 
+    cancellable BOOLEAN DEFAULT true NOT NULL, 
+    paused_property_ids JSONB DEFAULT '[]'::jsonb NOT NULL, 
     PRIMARY KEY (user_id), 
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
@@ -215,7 +219,10 @@ CREATE TABLE states (
     country_id UUID NOT NULL, 
     name VARCHAR(100) NOT NULL, 
     code VARCHAR(10) NOT NULL, 
+    kind VARCHAR(16) DEFAULT 'state' NOT NULL, 
+    capital_city_id UUID, 
     PRIMARY KEY (id), 
+    CONSTRAINT uq_states_country_code UNIQUE (country_id, code), 
     FOREIGN KEY(country_id) REFERENCES countries (id) ON DELETE CASCADE
 );
 
@@ -276,6 +283,7 @@ CREATE TABLE properties (
     state VARCHAR(100), 
     postal_code VARCHAR(20) NOT NULL, 
     country VARCHAR(100) NOT NULL, 
+    location_precision VARCHAR(16), 
     currency VARCHAR(3) NOT NULL, 
     monthly_rent NUMERIC(12, 2) NOT NULL, 
     security_deposit NUMERIC(12, 2) NOT NULL, 
@@ -303,15 +311,15 @@ CREATE TABLE properties (
     FOREIGN KEY(owner_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_properties_postal_code ON properties (postal_code);
-
-CREATE INDEX ix_properties_city ON properties (city);
-
 CREATE INDEX ix_properties_monthly_rent ON properties (monthly_rent);
 
 CREATE INDEX ix_properties_owner_id ON properties (owner_id);
 
+CREATE INDEX ix_properties_postal_code ON properties (postal_code);
+
 CREATE INDEX ix_properties_featured_until ON properties (featured_until);
+
+CREATE INDEX ix_properties_city ON properties (city);
 
 CREATE TABLE groups (
     id UUID NOT NULL, 
@@ -340,9 +348,9 @@ CREATE TABLE match_interactions (
     FOREIGN KEY(target_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
-
 CREATE INDEX ix_match_interactions_user_id ON match_interactions (user_id);
+
+CREATE INDEX ix_match_interactions_target_user_id ON match_interactions (target_user_id);
 
 CREATE TABLE mutual_matches (
     id UUID NOT NULL, 
@@ -359,9 +367,9 @@ CREATE TABLE mutual_matches (
     FOREIGN KEY(user_two_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_mutual_matches_user_one_id ON mutual_matches (user_one_id);
-
 CREATE INDEX ix_mutual_matches_user_two_id ON mutual_matches (user_two_id);
+
+CREATE INDEX ix_mutual_matches_user_one_id ON mutual_matches (user_one_id);
 
 CREATE TABLE notifications (
     id UUID NOT NULL, 
@@ -378,11 +386,11 @@ CREATE TABLE notifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_notifications_user_created ON notifications (user_id, created_at);
-
 CREATE INDEX ix_notifications_is_read ON notifications (is_read);
 
 CREATE INDEX ix_notifications_user_id ON notifications (user_id);
+
+CREATE INDEX ix_notifications_user_created ON notifications (user_id, created_at);
 
 CREATE TABLE push_subscriptions (
     id UUID NOT NULL, 
@@ -401,6 +409,24 @@ CREATE TABLE push_subscriptions (
 );
 
 CREATE INDEX ix_push_subscriptions_user_id ON push_subscriptions (user_id);
+
+CREATE TABLE device_push_tokens (
+    id UUID NOT NULL, 
+    user_id UUID NOT NULL, 
+    platform VARCHAR(10) NOT NULL, 
+    token TEXT NOT NULL, 
+    app_version VARCHAR(32), 
+    failure_count INTEGER DEFAULT '0' NOT NULL, 
+    last_success_at TIMESTAMP WITH TIME ZONE, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    PRIMARY KEY (id), 
+    CONSTRAINT ck_device_push_tokens_platform CHECK (platform IN ('android', 'ios')), 
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+    UNIQUE (token)
+);
+
+CREATE INDEX ix_device_push_tokens_user_id ON device_push_tokens (user_id);
 
 CREATE TABLE notification_preferences (
     user_id UUID NOT NULL, 
@@ -432,20 +458,20 @@ CREATE TABLE verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
+CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
 
 CREATE INDEX ix_verifications_subject_created ON verifications (subject_hash, created_at);
 
-CREATE INDEX ix_verifications_user_id ON verifications (user_id);
+CREATE INDEX ix_verifications_user_created ON verifications (user_id, created_at);
 
-CREATE UNIQUE INDEX uq_verifications_approved_subject ON verifications (subject_hash) WHERE status = 'approved' AND subject_hash IS NOT NULL;
+CREATE INDEX ix_verifications_user_id ON verifications (user_id);
 
 CREATE TABLE phone_verifications (
     id UUID NOT NULL, 
     user_id UUID NOT NULL, 
     phone_e164 VARCHAR(20) NOT NULL, 
     code_hash VARCHAR(64) NOT NULL, 
-    attempts INTEGER NOT NULL, 
+    attempts INTEGER DEFAULT 0 NOT NULL, 
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     consumed_at TIMESTAMP WITH TIME ZONE, 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
@@ -453,9 +479,9 @@ CREATE TABLE phone_verifications (
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_phone_verifications_phone_created ON phone_verifications (phone_e164, created_at);
-
 CREATE INDEX idx_phone_verifications_user_created ON phone_verifications (user_id, created_at);
+
+CREATE INDEX idx_phone_verifications_phone_created ON phone_verifications (phone_e164, created_at);
 
 CREATE TABLE moderation_reports (
     id UUID NOT NULL, 
@@ -465,7 +491,7 @@ CREATE TABLE moderation_reports (
     reason VARCHAR(100) NOT NULL, 
     description TEXT, 
     status VARCHAR(32) NOT NULL, 
-    source VARCHAR(16) NOT NULL, 
+    source VARCHAR(16) DEFAULT 'user' NOT NULL, 
     details JSONB, 
     created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     PRIMARY KEY (id), 
@@ -483,25 +509,25 @@ CREATE TABLE user_blocks (
     FOREIGN KEY(blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
-
 CREATE INDEX ix_user_blocks_user_id ON user_blocks (user_id);
+
+CREATE INDEX ix_user_blocks_blocked_user_id ON user_blocks (blocked_user_id);
 
 CREATE TABLE subscriptions (
     id UUID NOT NULL, 
     user_id UUID NOT NULL, 
     plan_id UUID NOT NULL, 
     status VARCHAR(32) NOT NULL, 
-    provider VARCHAR(16) NOT NULL, 
+    provider VARCHAR(16) DEFAULT 'razorpay' NOT NULL, 
     provider_subscription_id VARCHAR(64), 
     short_url VARCHAR(255), 
     started_at TIMESTAMP WITH TIME ZONE NOT NULL, 
     current_start TIMESTAMP WITH TIME ZONE, 
     expires_at TIMESTAMP WITH TIME ZONE, 
-    cancel_at_period_end BOOLEAN NOT NULL, 
+    cancel_at_period_end BOOLEAN DEFAULT false NOT NULL, 
     cancelled_at TIMESTAMP WITH TIME ZONE, 
     provider_event_at BIGINT, 
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
     PRIMARY KEY (id), 
     FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
     FOREIGN KEY(plan_id) REFERENCES subscription_plans (id) ON DELETE RESTRICT, 
@@ -528,13 +554,15 @@ CREATE TABLE cities (
     slug VARCHAR(100) NOT NULL, 
     tier INTEGER NOT NULL, 
     center_location geometry(POINT,4326), 
+    aliases VARCHAR(100)[] DEFAULT '{}' NOT NULL, 
+    is_active BOOLEAN DEFAULT true NOT NULL, 
     PRIMARY KEY (id), 
     FOREIGN KEY(state_id) REFERENCES states (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_cities_name ON cities (name);
-
 CREATE UNIQUE INDEX ix_cities_slug ON cities (slug);
+
+CREATE INDEX ix_cities_name ON cities (name);
 
 CREATE TABLE rooms (
     id UUID NOT NULL, 
@@ -620,7 +648,7 @@ CREATE TABLE payments (
     amount NUMERIC(12, 2) NOT NULL, 
     currency VARCHAR(3) NOT NULL, 
     status VARCHAR(32) NOT NULL, 
-    provider VARCHAR(16) NOT NULL, 
+    provider VARCHAR(16) DEFAULT 'razorpay' NOT NULL, 
     method VARCHAR(32), 
     gateway_order_id VARCHAR(100), 
     gateway_payment_id VARCHAR(100), 
@@ -636,6 +664,26 @@ CREATE TABLE payments (
 
 CREATE INDEX ix_payments_user_id ON payments (user_id);
 
+CREATE TABLE listing_interactions (
+    id UUID NOT NULL, 
+    user_id UUID NOT NULL, 
+    property_id UUID NOT NULL, 
+    action VARCHAR(16) NOT NULL, 
+    position INTEGER, 
+    features JSONB, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+    PRIMARY KEY (id), 
+    CONSTRAINT ck_listing_interactions_action CHECK (action IN ('impression', 'view', 'save', 'unsave')), 
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE, 
+    FOREIGN KEY(property_id) REFERENCES properties (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_listing_interactions_property ON listing_interactions (property_id);
+
+CREATE INDEX ix_listing_interactions_time ON listing_interactions (created_at);
+
+CREATE INDEX ix_listing_interactions_user_time ON listing_interactions (user_id, created_at);
+
 CREATE TABLE localities (
     id UUID NOT NULL, 
     city_id UUID NOT NULL, 
@@ -647,9 +695,9 @@ CREATE TABLE localities (
     FOREIGN KEY(city_id) REFERENCES cities (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_localities_postal_code ON localities (postal_code);
-
 CREATE INDEX ix_localities_name ON localities (name);
+
+CREATE INDEX ix_localities_postal_code ON localities (postal_code);
 
 CREATE INDEX ix_localities_city_id ON localities (city_id);
 
@@ -769,9 +817,9 @@ CREATE TABLE tenant_memberships (
     FOREIGN KEY(tenant_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
-
 CREATE INDEX ix_tenant_memberships_property_id ON tenant_memberships (property_id);
+
+CREATE INDEX ix_tenant_memberships_tenant_id ON tenant_memberships (tenant_id);
 
 CREATE TABLE application_status_events (
     id UUID NOT NULL, 
@@ -780,8 +828,8 @@ CREATE TABLE application_status_events (
     from_status VARCHAR(32) NOT NULL, 
     to_status VARCHAR(32) NOT NULL, 
     note TEXT, 
-    by_staff BOOLEAN NOT NULL, 
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+    by_staff BOOLEAN DEFAULT false NOT NULL, 
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
     PRIMARY KEY (id), 
     FOREIGN KEY(application_id) REFERENCES applications (id) ON DELETE CASCADE, 
     FOREIGN KEY(actor_id) REFERENCES users (id) ON DELETE SET NULL
@@ -808,15 +856,15 @@ CREATE TABLE conversations (
     FOREIGN KEY(flatmate_match_id) REFERENCES mutual_matches (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_conversations_property_id ON conversations (property_id);
+CREATE INDEX ix_conversations_application_id ON conversations (application_id);
 
-CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
+CREATE INDEX ix_conversations_property_id ON conversations (property_id);
 
 CREATE INDEX ix_conversations_flatmate_match_id ON conversations (flatmate_match_id);
 
 CREATE INDEX ix_conversations_group_id ON conversations (group_id);
 
-CREATE INDEX ix_conversations_application_id ON conversations (application_id);
+CREATE INDEX ix_conversations_last_message_at ON conversations (last_message_at);
 
 CREATE TABLE conversation_participants (
     id UUID NOT NULL, 
@@ -834,9 +882,9 @@ CREATE TABLE conversation_participants (
 
 CREATE INDEX ix_conversation_participants_user_id ON conversation_participants (user_id);
 
-CREATE INDEX ix_conversation_participants_conversation_id ON conversation_participants (conversation_id);
-
 CREATE INDEX idx_conv_participant_active ON conversation_participants (user_id, is_active);
+
+CREATE INDEX ix_conversation_participants_conversation_id ON conversation_participants (conversation_id);
 
 CREATE TABLE messages (
     id UUID NOT NULL, 
@@ -859,15 +907,15 @@ CREATE TABLE messages (
     FOREIGN KEY(reply_to_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
-CREATE INDEX ix_messages_sender_id ON messages (sender_id);
+CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
 
 CREATE INDEX ix_messages_sent_at ON messages (sent_at);
 
-CREATE INDEX ix_messages_idempotency_key ON messages (idempotency_key);
+CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
 
 CREATE INDEX idx_conv_messages_sent ON messages (conversation_id, sent_at);
 
-CREATE INDEX ix_messages_conversation_id ON messages (conversation_id);
+CREATE INDEX ix_messages_sender_id ON messages (sender_id);
 
 CREATE TABLE conversation_preferences (
     id UUID NOT NULL, 
@@ -906,9 +954,9 @@ CREATE TABLE attachments (
     FOREIGN KEY(uploader_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
-CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
-
 CREATE INDEX ix_attachments_message_id ON attachments (message_id);
+
+CREATE INDEX ix_attachments_conversation_id ON attachments (conversation_id);
 
 CREATE INDEX ix_attachments_uploader_id ON attachments (uploader_id);
 
@@ -925,9 +973,11 @@ CREATE TABLE conversation_read_cursors (
     FOREIGN KEY(last_read_message_id) REFERENCES messages (id) ON DELETE SET NULL
 );
 
+CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
+
 CREATE INDEX ix_conversation_read_cursors_conversation_id ON conversation_read_cursors (conversation_id);
 
-CREATE INDEX ix_conversation_read_cursors_user_id ON conversation_read_cursors (user_id);
+ALTER TABLE states ADD FOREIGN KEY(capital_city_id) REFERENCES cities (id) ON DELETE SET NULL;
 
 INSERT INTO alembic_version (version_num) VALUES ('001_initial_schema') RETURNING alembic_version.version_num;
 
