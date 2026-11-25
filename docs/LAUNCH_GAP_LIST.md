@@ -436,11 +436,17 @@ committed on your OK.
       2. Point the runtime `DATABASE_URL` at `flatmate_api.qjwitdovbsfviaepjcul`.
       3. Keep the owner URL for migrations only.
 - [ ] **E2c. Supabase advisor findings (2026-11-25).**
-      - **Ours: migration 020 is written and tested locally, not yet applied to the hosted
-        database.** It pins the search_path, revokes PUBLIC/`anon`/`authenticated` EXECUTE on
-        our functions in `public`, drops the 3 duplicate indexes and indexes all 23 foreign
-        keys. `test_schema_parity_db.py` now checks these. Its `DROP INDEX` lines must be run
-        through the SQL Editor because the connector refuses DROP.
+      - **Ours: done. Migration 020 was applied to the hosted database on 2026-11-25, which is
+        now at `020_database_advisor_fixes`.** It pins the search_path, revokes
+        PUBLIC/`anon`/`authenticated` EXECUTE on our functions in `public` (`service_role`
+        keeps it), drops the 3 duplicate indexes and indexes all 23 foreign keys.
+        `test_schema_parity_db.py` now checks these. The `DROP INDEX` lines and the version
+        bump went through the SQL Editor; the rest went through the connector. Checked
+        afterwards:
+        - the 3 sync functions are pinned and `anon`/`authenticated` can't execute them;
+        - `ensure_rls` is still enabled and both sync triggers are present;
+        - no foreign key lacks an index and no index is duplicated;
+        - the advisors no longer report these findings.
         - `content_embeddings_sync_vec` and `profiles_sync_lifestyle_embedding` have a mutable
           `search_path`. Pin it.
         - `rls_auto_enable()` is Supabase's SECURITY DEFINER function behind the `ensure_rls`
