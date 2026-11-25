@@ -7,3 +7,4 @@ export { PhoneVerification } from "./PhoneVerification";
 export { BlockedUsersCard } from "./BlockedUsersCard";
 export { AccountSecurityPanel } from "./AccountSecurityPanel";
 export { DataControlsCard } from "./DataControlsCard";
+export { BrokerAccessCard } from "./BrokerAccessCard";

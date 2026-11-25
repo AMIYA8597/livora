@@ -148,3 +148,17 @@ async def appointment_status_changed(db: AsyncSession, appointment: Any, prop: A
     await _notify(db, user_id=recipient, title=f"Your visit {text}", body=prop.title,
                   notification_type="appointment_status_change", reference_id=appointment.id, link=link,
                   idempotency_window_minutes=1)
+
+
+@fail_safe
+async def role_request_decided(db: AsyncSession, request: Any) -> None:
+    label = "broker" if request.role == "broker" else request.role.replace("_", " ")
+    if request.status == "approved":
+        title, body = f"You're now a verified {label}", "You can list properties for your clients."
+    else:
+        title = f"Your {label} request wasn't approved"
+        body = request.decision_note or "Open your profile for details."
+    await _notify(db, user_id=request.user_id, title=title, body=body[:200],
+                  notification_type="role_request_result", reference_id=request.id,
+                  link="/profile", idempotency_window_minutes=1)
+

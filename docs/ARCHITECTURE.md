@@ -74,22 +74,27 @@ flowchart LR
 | `apps/api/app/infrastructure` | Adapters to outside systems: storage, email, SMS, image processing, virus scanning, cache, geospatial helpers. |
 | `apps/api/app/workers` | Outbox dispatcher, Celery app and beat schedule, maintenance (retention) jobs. |
 | `apps/api/app/ml` | Rankers, embeddings and semantic search, moderation, smart replies, the Claude client, training and evaluation. |
-| `apps/api/migrations` | Alembic migrations (currently up to `020_database_advisor_fixes`). |
+| `apps/api/migrations` | Alembic migrations (currently up to `021_role_requests`). |
 | `database/migrations/complete_hosted_schema.sql` | The whole schema as one SQL file for the hosted database (generated from Alembic, see §4.6). |
 | `.github/workflows` | CI, security scans, image builds, staging and production deploys, backups, hosted migrations, uptime checks. |
 
 ## 3. Who uses it: roles
 
-| Role | Can | Enforced in |
-|---|---|---|
-| Seeker (default) | Search, save, ask owners, apply, book visits, match with flatmates, join groups. | Signed-in routes (`get_current_user`). |
-| Owner, PG operator, broker | List and manage properties, rooms and beds; answer chats; confirm visits; review applications. | `require_roles([...])` on owner routes, plus ownership checks in services (e.g. `prop.owner_id == user.id`). |
-| Moderator | Moderation queue and the applications panel. | `STAFF_ROLES` in `app/core/dependencies.py`. |
-| Admin, super admin | Everything: stats, user management, listing approval, payment events. | `require_roles(["admin", "super_admin"])`. |
+| Role | How you get it | Can | Enforced in |
+|---|---|---|---|
+| Seeker (default), tenant | Sign-up. | Search, save, ask owners, apply, book visits, match with flatmates, join groups. Tenants also post vacancies. | Signed-in routes (`get_current_user`). |
+| Owner, PG operator | Sign-up. | List and manage properties, rooms and beds; answer chats; confirm visits; review applications. | `require_roles(LISTING_ROLES)` on listing and `/owners` routes, plus ownership checks in services (e.g. `prop.owner_id == user.id`). |
+| Broker | Asked for from the profile; an admin approves or declines with a reason (`role_requests`). | The same as an owner. | As above. |
+| Moderator | Appointed by an admin. | Moderation queue and the applications panel. | `STAFF_ROLES` in `app/core/dependencies.py`. |
+| Admin | Appointed by a super admin. | Stats, user management, role requests, listing approval, payment events. Grants non-staff roles and moderator; can't change other admins. | `require_roles(["admin", "super_admin"])`, `can_grant` / `can_manage_account` in `app/core/roles.py`. |
+| Super admin | The first one from `scripts/grant_role.py`; then appointed by a super admin. | Everything, including making and removing admins. The last active super admin can't be removed. | As above. |
 
-Roles live in the database (`user_roles`) and are copied into the access token. **The web app
-only uses roles for display**, taking them from `/auth/me` and never from storage
-(`lib/auth-store.ts`, `lib/staff-access.ts`). Every check that matters happens in the API.
+The rules for who may hold and hand out which role are in one place, `app/core/roles.py`. Roles
+live in the database (the user's main `role` plus `user_roles`) and are copied into the access
+token, but **every check reads them from the database** (`get_current_user` loads them;
+`require_roles`, `role_names` and `has_admin_role` use them). So a removed role stops working
+at once, and a forged claim gets nothing. The web app only uses roles for display, taking them
+from `/auth/me` and never from storage (`lib/auth-store.ts`, `lib/staff-access.ts`).
 
 ## 4. The layers and the rules each one keeps
 
@@ -213,7 +218,8 @@ Then it calls a service.
 |---|---|
 | `config.py` | Every setting, from the environment. Features that need an outside service switch off cleanly when its key is missing (`ANTHROPIC_API_KEY`, `EMBEDDING_PROVIDER`, `GEOCODER`, `SENTRY_DSN`). |
 | `security.py` | Access tokens (60 min) and refresh tokens (30 days), signed JWTs carrying the user id and roles. |
-| `dependencies.py` | `get_current_user` (an access token for an existing, active account), `get_optional_user`, `require_roles`, `STAFF_ROLES`. |
+| `dependencies.py` | `get_current_user` (an access token for an existing, active account, with its roles loaded), `get_optional_user`, `require_roles`, `role_names`, `has_admin_role`, `STAFF_ROLES`. |
+| `roles.py` | The role model: sign-up roles, requestable roles (broker), staff roles, `LISTING_ROLES`, and who may grant what (`can_grant`, `can_manage_account`). |
 | `exceptions.py` | Typed errors returned as RFC 7807 problem documents. |
 | `middleware.py` | Request id (`X-Request-ID`), cloud trace id, timing, request body size limits, security headers. |
 | `rate_limit.py` | Sliding-window limits in Redis, shared by all instances, falling back to per-process. Signed-in callers are keyed by user, anonymous ones by IP (trusting only `TRUSTED_PROXY_HOPS` proxies). `hit()` is for custom keys (per email, per seeker per day). |

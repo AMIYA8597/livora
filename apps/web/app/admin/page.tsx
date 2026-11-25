@@ -10,7 +10,10 @@ import { Card, Button, Badge, Modal, Input, EmptyState, ErrorState, LoadingIndic
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { ApplicationsPanel } from "@/features/admin/ApplicationsPanel";
 import { BillingEventsPanel } from "@/features/admin/BillingEventsPanel";
-import { consoleTabs, type ConsoleTab } from "@/lib/staff-access";
+import { RoleRequestsPanel } from "@/features/admin/RoleRequestsPanel";
+import { UserRolesDialog } from "@/features/admin/UserRolesDialog";
+import { canManageAccount, consoleTabs, grantableRoles, removableRoles, type ConsoleTab } from "@/lib/staff-access";
+import { roleLabel } from "@/lib/role-request-model";
 import { reportNeedsAction } from "@/lib/moderation-reports";
 import {
   ShieldCheck,
@@ -31,6 +34,7 @@ import {
   Lock,
   FileText,
   CreditCard,
+  UserCheck,
 } from "lucide-react";
 
 interface AdminStats {
@@ -56,6 +60,8 @@ interface AdminUser {
   email: string;
   full_name: string;
   role: string;
+  /** Every role held, the main one included. */
+  roles: string[];
   is_active: boolean;
   is_verified: boolean;
   created_at: string;
@@ -74,7 +80,7 @@ interface AdminProperty {
 }
 
 export default function AdminModerationPage() {
-  const { isAuthenticated, isLoading: authLoading, roles } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, roles, user: me } = useAuth();
   const router = useRouter();
   // Moderators get only the tabs their API access allows; admins get all of them.
   const tabs = isAuthenticated ? consoleTabs(roles) : [];
@@ -103,6 +109,11 @@ export default function AdminModerationPage() {
     propertiesQuery.refetch();
   };
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [editingRoles, setEditingRoles] = useState<AdminUser | null>(null);
+  const notify = (message: string) => {
+    setActionNotice(message);
+    setTimeout(() => setActionNotice(null), 4000);
+  };
 
   const handleResolveReport = async (reportId: string, status: "resolved" | "dismissed") => {
     try {
@@ -257,6 +268,14 @@ export default function AdminModerationPage() {
           }`}
         >
           <Users className="w-4 h-4" /> User Management ({users.length})
+        </button>}
+        {has("roles") && <button
+          onClick={() => setActiveTab("roles")}
+          className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "roles" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
+          }`}
+        >
+          <UserCheck className="w-4 h-4" /> Role Requests
         </button>}
         {has("payments") && <button
           onClick={() => setActiveTab("payments")}
@@ -438,6 +457,9 @@ export default function AdminModerationPage() {
         />
       )}
 
+      {/* Broker requests: approve, or decline with a reason the member sees */}
+      {activeTab === "roles" && <RoleRequestsPanel onDone={notify} />}
+
       {/* Tab 4: Users */}
       {activeTab === "users" && (
         <Card className="p-0 border-slate-200/80 overflow-hidden">
@@ -461,9 +483,13 @@ export default function AdminModerationPage() {
                       <div className="text-[11px] text-charcoal-muted">{u.email}</div>
                     </td>
                     <td className="p-4">
-                      <Badge variant="default" className="uppercase text-[10px]">
-                        {u.role}
-                      </Badge>
+                      <div className="flex flex-wrap gap-1 max-w-[220px]">
+                        {(u.roles?.length ? u.roles : [u.role]).map((r) => (
+                          <Badge key={r} variant={r === u.role ? "default" : "info"} className="text-[10px]">
+                            {roleLabel(r)}
+                          </Badge>
+                        ))}
+                      </div>
                     </td>
                     <td className="p-4">
                       {u.is_verified ? (
@@ -481,14 +507,38 @@ export default function AdminModerationPage() {
                     </td>
                     <td className="p-4 text-charcoal-muted">{formatDate(u.created_at)}</td>
                     <td className="p-4 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className={u.is_active ? "text-rose-600 border-rose-200 hover:bg-rose-50" : "text-forest border-forest hover:bg-forest-pale"}
-                        onClick={() => handleToggleUserStatus(u.id, u.is_active)}
-                      >
-                        {u.is_active ? "Suspend" : "Activate"}
-                      </Button>
+                      {(() => {
+                        const held = u.roles?.length ? u.roles : [u.role];
+                        const isSelf = u.id === me?.id;
+                        // Admins can't change other admins; nobody suspends themselves.
+                        const canStatus = !isSelf && canManageAccount(roles, held);
+                        const canRoles =
+                          (isSelf || canManageAccount(roles, held)) &&
+                          (grantableRoles(roles, held).length > 0 ||
+                            removableRoles(roles, { roles: held, role: u.role, isSelf }).length > 0);
+                        if (!canStatus && !canRoles) {
+                          return <span className="text-[11px] text-charcoal-muted">{isSelf ? "You" : "Super admin only"}</span>;
+                        }
+                        return (
+                          <div className="flex justify-end gap-2">
+                            {canRoles && (
+                              <Button size="sm" variant="outline" onClick={() => setEditingRoles({ ...u, roles: held })}>
+                                Roles
+                              </Button>
+                            )}
+                            {canStatus && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className={u.is_active ? "text-rose-600 border-rose-200 hover:bg-rose-50" : "text-forest border-forest hover:bg-forest-pale"}
+                                onClick={() => handleToggleUserStatus(u.id, u.is_active)}
+                              >
+                                {u.is_active ? "Suspend" : "Activate"}
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -496,6 +546,20 @@ export default function AdminModerationPage() {
             </table>
           </div>
         </Card>
+      )}
+
+      {editingRoles && (
+        <UserRolesDialog
+          user={editingRoles}
+          actorRoles={roles}
+          isSelf={editingRoles.id === me?.id}
+          onClose={() => setEditingRoles(null)}
+          onSaved={(updated, message) => {
+            setUsers((prev = []) => prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)));
+            setEditingRoles(updated);
+            notify(message);
+          }}
+        />
       )}
     </div>
   );

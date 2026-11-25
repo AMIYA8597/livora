@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, has_admin_role
 from app.modules.users.models import User
 from app.modules.profiles.schemas import (
     ProfileResponse,
@@ -21,7 +21,7 @@ async def get_my_profile(
     db: AsyncSession = Depends(get_db)
 ):
     service = ProfileService(db)
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     return await service.get_profile_with_privacy(
         requester_id=current_user.id,
         target_user_id=current_user.id,
@@ -36,7 +36,7 @@ async def update_my_profile(
 ):
     service = ProfileService(db)
     await service.update(current_user.id, data)
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     return await service.get_profile_with_privacy(
         requester_id=current_user.id,
         target_user_id=current_user.id,
@@ -68,7 +68,7 @@ async def submit_quiz(
 ):
     service = ProfileService(db)
     await service.submit_lifestyle_quiz(current_user.id, data)
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     return await service.get_profile_with_privacy(
         requester_id=current_user.id,
         target_user_id=current_user.id,
@@ -82,7 +82,7 @@ async def get_profile_by_user_id(
     current_user: User = Depends(get_current_user)
 ):
     service = ProfileService(db)
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     return await service.get_profile_with_privacy(
         requester_id=current_user.id,
         target_user_id=user_id,

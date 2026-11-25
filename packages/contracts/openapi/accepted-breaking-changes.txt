@@ -1,3 +1,9 @@
 # Breaking API changes made on purpose, one line each exactly as `python -m app.core.api_contract
 # compat` reports it, with a comment above saying why it's safe (for example: no released app
 # uses it, or the minimum app version was raised first). CI ignores the lines listed here.
+
+# Role hardening (2026-11-25): staff roles can't be chosen at sign-up and role names are checked.
+# Only valid requests are still accepted: there are 4 sign-up roles and every role name is
+# under 32 characters, so no real client (web or app) sends anything these limits refuse.
+POST /api/v1/admin/users/{user_id}/roles request.role: maxLength tightened from None to 32
+POST /api/v1/auth/register request.additional_roles: maxItems tightened from None to 4

@@ -4,7 +4,7 @@ User, Multi-Role RBAC, and Privacy Settings Models
 import uuid
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import String, Boolean, DateTime, ForeignKey, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Index, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base, utcnow
@@ -73,3 +73,26 @@ class AccountDeletionRequest(Base):
     cancellable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=text("true"))
     # Listings that were published when the request was made, so cancelling can restore them.
     paused_property_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False, server_default=text("'[]'::jsonb"))
+
+
+class RoleRequest(Base):
+    """Someone asking for a role that staff grant after a check (today: broker). One open
+    request per person and role; staff approve (the role is granted) or decline, with a note."""
+
+    __tablename__ = "role_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")  # pending | approved | declined
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # from the requester
+    decision_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # from staff, shown to the requester
+    decided_by: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'approved', 'declined')", name="ck_role_requests_status"),
+        Index("uq_role_requests_open", "user_id", "role", unique=True, postgresql_where=text("status = 'pending'")),
+        Index("ix_role_requests_status_created", "status", "created_at"),
+    )

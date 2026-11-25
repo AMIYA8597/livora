@@ -1,14 +1,14 @@
 from typing import List, Optional
 from uuid import UUID
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Query, Header, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.dependencies import require_roles, get_current_user, get_optional_user
-from app.core.security import decode_token
+from app.core.roles import LISTING_ROLES
+from app.core.dependencies import require_roles, get_current_user, get_optional_user, has_admin_role
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.modules.users.models import User
 from app.modules.properties.schemas import (
@@ -96,7 +96,7 @@ async def record_listing_interaction(
 @router.post("/", response_model=PropertyResponse, status_code=status.HTTP_201_CREATED)
 async def create_property(
     data: PropertyCreate,
-    current_user: User = Depends(require_roles(["owner", "pg_operator", "broker", "admin", "super_admin"])),
+    current_user: User = Depends(require_roles(sorted(LISTING_ROLES))),
     db: AsyncSession = Depends(get_db),
 ):
     service = PropertyService(db)
@@ -105,22 +105,13 @@ async def create_property(
 @router.get("/{property_id}", response_model=PropertyResponse)
 async def get_property(
     property_id: UUID,
-    authorization: Optional[str] = Header(None),
+    viewer: Optional[User] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    viewer_id = None
-    is_admin = False
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-        payload = decode_token(token)
-        if payload and "sub" in payload:
-            try:
-                viewer_id = UUID(payload["sub"])
-                roles = payload.get("app_metadata", {}).get("roles", [])
-                if "admin" in roles or "super_admin" in roles:
-                    is_admin = True
-            except Exception:
-                pass
+    # Roles come from the database, not the token: a revoked admin stops seeing hidden listings
+    # at once, not when their token expires.
+    viewer_id = viewer.id if viewer else None
+    is_admin = bool(viewer and has_admin_role(viewer))
 
     service = PropertyService(db)
     prop = await service.get_by_id(property_id, viewer_id=viewer_id, is_admin=is_admin)
@@ -137,7 +128,7 @@ async def update_property(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     service = PropertyService(db)
     return await service.update(property_id, current_user.id, data, is_admin=is_admin)
 
@@ -148,7 +139,7 @@ async def update_property_listing_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     service = PropertyService(db)
     return await service.update_listing_status(property_id, current_user.id, data.listing_status, is_admin=is_admin)
 
@@ -180,7 +171,7 @@ async def assign_bed(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     service = PropertyService(db)
     return await service.assign_bed_occupant(bed_id, data.occupant_id, current_user.id, is_admin=is_admin)
 
@@ -190,6 +181,6 @@ async def vacate_bed(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     service = PropertyService(db)
     return await service.vacate_bed(bed_id, current_user.id, is_admin=is_admin)

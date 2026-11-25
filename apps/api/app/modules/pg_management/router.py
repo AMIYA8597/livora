@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.dependencies import require_roles, get_current_user
+from app.core.dependencies import require_roles, get_current_user, has_admin_role
 from app.core.exceptions import NotFoundException
 from app.modules.users.models import User
 from app.modules.pg_management.schemas import (
@@ -58,6 +58,6 @@ async def add_pg_floor(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     service = PGService(db)
     return await service.add_floor(pg_id, current_user.id, data, is_admin=is_admin)

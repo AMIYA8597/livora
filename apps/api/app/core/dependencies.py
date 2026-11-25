@@ -64,16 +64,12 @@ def require_roles(allowed_roles: List[str]):
     one of the allowed operational roles (e.g. ['owner', 'admin', 'pg_operator']).
     """
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        # User roles may be stored on the user model or extracted from user_roles
-        user_roles = [current_user.role]
-        if "roles" in current_user.__dict__ and current_user.__dict__["roles"]:
-            user_roles.extend([r.role for r in current_user.__dict__["roles"]])
-
-        # Super administrators bypass operational role restrictions
-        if "super_admin" in user_roles or "admin" in user_roles:
+        # The main role plus every granted one, read from the database (never the token).
+        # Admins and super admins pass every operational check.
+        if has_admin_role(current_user):
             return current_user
 
-        if not any(r in allowed_roles for r in user_roles):
+        if not role_names(current_user) & set(allowed_roles):
             raise ForbiddenException(
                 f"User does not possess required role(s): {', '.join(allowed_roles)}"
             )
@@ -83,12 +79,22 @@ def require_roles(allowed_roles: List[str]):
 STAFF_ROLES = ("moderator", "admin", "super_admin")
 
 
+def role_names(user: User) -> set[str]:
+    """The user's primary role plus any loaded extra roles (as require_roles sees them)."""
+    roles = {user.role}
+    if "roles" in user.__dict__ and user.__dict__["roles"]:
+        roles.update(r.role for r in user.__dict__["roles"])
+    return roles
+
+
+def has_admin_role(user: User) -> bool:
+    """Admins and super admins, from every role held (granted roles count, not just the main one)."""
+    return bool(role_names(user) & {"admin", "super_admin"})
+
+
 def is_staff(user: User) -> bool:
     """Moderators and admins (from the user's role or any loaded extra roles, like require_roles)."""
-    roles = [user.role]
-    if "roles" in user.__dict__ and user.__dict__["roles"]:
-        roles.extend(r.role for r in user.__dict__["roles"])
-    return any(r in STAFF_ROLES for r in roles)
+    return any(r in STAFF_ROLES for r in role_names(user))
 
 
 def verify_resource_ownership(
@@ -97,7 +103,7 @@ def verify_resource_ownership(
     admin_override: bool = True
 ) -> None:
     """Ensures caller owns the resource or is a platform administrator."""
-    if admin_override and current_user.role in ("admin", "super_admin"):
+    if admin_override and has_admin_role(current_user):
         return
     if str(resource_owner_id) != str(current_user.id):
         raise ForbiddenException("You are not authorized to modify or access this resource")

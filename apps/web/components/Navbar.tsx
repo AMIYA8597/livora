@@ -54,11 +54,15 @@ export const Navbar: React.FC = () => {
     { href: "/dashboard", label: "My Space", icon: LayoutDashboard, authOnly: true },
   ];
 
-  const isOwner = roles.includes("owner") || user?.role === "owner";
+  const held = user?.role ? [...roles, user.role] : roles;
+  const isOwner = held.includes("owner");
+  // Owners, PG operators and verified brokers all manage listings from /owner.
+  const canList = isOwner || held.includes("pg_operator") || held.includes("broker");
+  const listingsLabel = isOwner ? "Owner Dashboard" : "My Listings";
   const isTenant = roles.includes("tenant") || user?.role === "tenant";
   const isPG = roles.includes("pg_operator") || user?.role === "pg_operator";
   // Moderators and admins can open the admin console (it shows each role only its own tabs).
-  const isStaff = isStaffRoles(user?.role ? [...roles, user.role] : roles);
+  const isStaff = isStaffRoles(held);
 
   return (
     <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-warm-200">
@@ -175,14 +179,14 @@ export const Navbar: React.FC = () => {
                         </Link>
 
                         {/* Role-Aware Shortcuts */}
-                        {isOwner && (
+                        {canList && (
                           <Link
                             href="/owner"
                             onClick={() => setProfileDropdownOpen(false)}
                             className="flex items-center space-x-2.5 px-3 py-2 rounded-lg text-secondary-green hover:bg-pale-green/20 font-medium transition-colors"
                           >
                             <Building className="w-4 h-4" />
-                            <span>Owner Dashboard</span>
+                            <span>{listingsLabel}</span>
                           </Link>
                         )}
 
@@ -304,14 +308,14 @@ export const Navbar: React.FC = () => {
                 <span>Profile & Lifestyle</span>
               </Link>
 
-              {isOwner && (
+              {canList && (
                 <Link
                   href="/owner"
                   onClick={() => setMobileMenuOpen(false)}
                   className="flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium text-secondary-green hover:bg-pale-green/20"
                 >
                   <Building className="w-5 h-5" />
-                  <span>Owner Dashboard</span>
+                  <span>{listingsLabel}</span>
                 </Link>
               )}
 

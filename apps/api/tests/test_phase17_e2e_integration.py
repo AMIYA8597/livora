@@ -18,6 +18,7 @@ from app.modules.tenants.models import TenantMembership
 from app.modules.properties.models import Room
 from app.modules.users.models import User
 from app.modules.users.privacy import purge_account
+from app.modules.administration.service import AdminService
 
 
 @pytest.fixture
@@ -484,7 +485,8 @@ async def test_complete_phase17_end_to_end_integration(created_accounts):
         assert res_report.status_code == 201, res_report.text
         report_id = res_report.json()["id"]
 
-        # Admin user to review report and platform stats
+        # Admin user to review report and platform stats. Nobody can sign up as staff, so the
+        # account signs up as a seeker and is appointed the way the first one is (grant_role.py).
         admin_email = f"admin_{uuid4().hex[:8]}@example.in"
         created_accounts.append(admin_email)
         res_admin_reg = await client.post(
@@ -493,11 +495,13 @@ async def test_complete_phase17_end_to_end_integration(created_accounts):
                 "email": admin_email,
                 "password": password,
                 "full_name": "Platform Super Admin",
-                "role": "admin",
+                "role": "seeker",
                 "phone_number": "+919999999999",
             },
         )
         assert res_admin_reg.status_code == 201, res_admin_reg.text
+        async with AsyncSessionLocal() as s:
+            await AdminService(s).grant_user_role(UUID(res_admin_reg.json()["user"]["id"]), "admin")
         admin_token = res_admin_reg.json()["access_token"]
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
 

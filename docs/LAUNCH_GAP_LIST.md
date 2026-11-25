@@ -159,6 +159,46 @@ Gathered from the open items below and every item's "Not covered" notes.
       `tests/test_db_backup.py` restores as a non-superuser into a throwaway database (and
       as a superuser, which skips nothing). It fails without the fix. The end-to-end backup
       tests need `PG_BIN` pointing at PostgreSQL 18's `bin` folder on this machine.
+- [x] **L13. Anyone could sign up as an admin.** `/auth/register` accepted any `role`,
+      including `admin` and `super_admin`, so one request made a full administrator. Admins could
+      also make themselves super admins, role names weren't checked, and the listing page
+      believed the token's role claim.
+      *Done (2026-11-25):*
+      - **The role model** is in `app/core/roles.py`.
+        - **Sign-up:** seeker, tenant, owner or PG operator only (anything else gets 422).
+        - **Brokers:** ask from their profile, with a note (agency, RERA number, cities). An
+          admin approves (the role is granted at once) or declines with a reason the person
+          sees. This uses migration `021_role_requests` and notifies the person either way.
+        - **Admins** grant non-staff roles and moderator, and can't change other admins'
+          accounts. Only a super admin makes or removes admins and super admins.
+        - **Safety rules:** nobody changes their own status. An account's main role stays. The
+          last active super admin can't be removed.
+      - **Roles come from the database on every request.** A removed role stops working at
+        once, even with the same token. A forged role claim gets nothing.
+        - A new `has_admin_role` helper replaced 17 checks that looked only at the main role.
+          With those checks, someone *granted* admin wasn't treated as one.
+      - **Listing:** owners, PG operators and brokers can all list. All three now use the
+        listings dashboard (`/owners/*` and the web `/owner` pages); before, it allowed owners
+        only. `/owner/dashboard` was an unlinked old copy whose approve buttons called an
+        endpoint that doesn't exist. It now forwards to `/owner`.
+      - **The first super admin** comes from the command line, since nobody can sign up as one.
+        Sign up as a seeker, then run, with the owner database URL:
+        `python scripts/grant_role.py --email you@example.com --role super_admin`. Everyone
+        else is appointed from the admin console.
+      - **Web:**
+        - an admin-console "Role Requests" tab;
+        - role badges and a Roles dialog in User Management, offering only what that staff
+          member may change;
+        - a "Broker access" card in Profile → Trust & verification;
+        - a "My Listings" link for PG operators and brokers.
+      - **Tested:**
+        - `tests/test_roles_db.py` (18 tests).
+        - Web unit tests for the grant rules and broker states.
+        - Playwright `e2e/roles.spec.ts`, on desktop and phone: broker request → admin approves
+          → the broker can list, and a moderator sees only their tabs.
+        - A 74-check run on a fresh database migrated from empty. New accounts were made for
+          every role: super admin (via the command line), admin, moderator, owner, PG operator,
+          tenant, seeker and broker. All 74 passed.
 
 ### Next phase: India-wide, smarter search, app-ready (collected 2026-11-24)
 Asked for after L1-L12: every state's capital, current location, smarter room finding, chat where
@@ -411,10 +451,11 @@ committed on your OK.
       6. **Afterwards:** mark the `f9ad144` history finding as handled, so the weekly history
          scan goes green.
 
-      **Checked 2026-11-25 16:15 IST. Steps 1–4 are not done yet:**
-      - **Step 1:** the legacy `anon` key reports `disabled: false`, and the Legacy API Keys
-        page still offers "Disable JWT-based API keys". The leaked service-role key still
-        works.
+      **Step 1 done 2026-11-25 11:24 UTC (16:54 IST):** the legacy JWT-based API keys are
+      disabled, so the leaked keys no longer work in the `apikey` header. Supabase notes they
+      "remain valid as a JWT" until step 3, so step 3 is now the one that fully closes the leak.
+
+      **Checked 2026-11-25 16:15 IST, before step 1 (steps 2–4 still open):**
       - **Step 2:** only the original `default` secret key is listed. `.env` and
         `apps/api/.env` are unchanged since 11:53.
       - **Step 3:** the current signing key is ECC P-256. The legacy HS256 secret is under
@@ -499,6 +540,12 @@ committed on your OK.
 - [ ] **E9. Legal review** of the DPDP rights card and the privacy page. Decide how long reports
       about deleted accounts are kept.
 - [ ] **E10. pgvector on this machine** (item 3d), only if you want the vector index locally.
+- [ ] **E11. Apply migration `021_role_requests` to the hosted database** (L13). It only adds
+      the `role_requests` table, its check and its indexes, with no `DROP`, so it can go through
+      the connector. The `ensure_rls` trigger turns RLS on.
+- [ ] **E12. Appoint the first real super admin** once production is up (L13). Choose which
+      email it is. Sign up on the live site, run `scripts/grant_role.py` with the owner database
+      URL, and appoint other staff from the console.
 
 ## P0 — Blocks launch
 

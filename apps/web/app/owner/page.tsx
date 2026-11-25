@@ -41,9 +41,9 @@ function ListSkeleton() {
 }
 
 function OwnerPortalPageContent() {
-  const { isAuthenticated, isLoading: authLoading, isOwner } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, canList } = useAuth();
   const router = useRouter();
-  const canView = isAuthenticated && isOwner;
+  const canView = isAuthenticated && canList;
   // Notification links open a specific tab (e.g. ?tab=applications).
   const requestedTab = useSearchParams().get("tab");
   const [activeTab, setActiveTab] = useState<OwnerTab>(
@@ -146,7 +146,7 @@ function OwnerPortalPageContent() {
 
   if (authLoading) return <PageLoading />;
 
-  if (!isAuthenticated || !isOwner) {
+  if (!isAuthenticated || !canList) {
     return (
       <div className="max-w-md mx-auto py-16 sm:py-20 px-4 text-center">
         <Card className="p-6 sm:p-8">
@@ -154,8 +154,8 @@ function OwnerPortalPageContent() {
           <h1 className="text-xl font-bold text-charcoal mb-2">Owner portal</h1>
           <p className="text-sm text-charcoal-muted mb-6">
             {isAuthenticated
-              ? "This area is for property owners. Your account doesn't have the owner role."
-              : "Sign in with an owner account to manage your listings, applications and visits."}
+              ? "This area is for property owners, PG operators and verified brokers. Brokers can ask for access from their profile."
+              : "Sign in to manage your listings, applications and visits."}
           </p>
           {isAuthenticated ? (
             <Link href="/properties">

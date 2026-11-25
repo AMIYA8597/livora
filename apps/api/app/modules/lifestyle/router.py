@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, has_admin_role
 from app.modules.users.models import User, UserPrivacySetting
 from app.modules.lifestyle.schemas import (
     LifestyleCreateOrUpdate,
@@ -75,7 +75,7 @@ async def get_user_lifestyle(
     db: AsyncSession = Depends(get_db)
 ):
     # Check privacy settings of the requested user
-    if current_user.id != user_id and current_user.role not in ["admin", "super_admin"]:
+    if current_user.id != user_id and not has_admin_role(current_user):
         privacy_query = select(UserPrivacySetting).where(UserPrivacySetting.user_id == user_id)
         privacy_res = await db.execute(privacy_query)
         privacy = privacy_res.scalar_one_or_none()

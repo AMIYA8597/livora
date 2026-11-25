@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 
 class UserBase(BaseModel):
@@ -29,3 +29,21 @@ class UserResponse(UserBase):
     @property
     def phone_verified(self) -> bool:
         return self.phone_verified_at is not None
+
+
+class RoleRequestCreate(BaseModel):
+    role: Literal["broker"]
+    # Agency, RERA registration, city: whatever helps staff check who you are.
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class RoleRequestResponse(BaseModel):
+    id: uuid.UUID
+    role: str
+    status: str
+    note: Optional[str] = None
+    decision_note: Optional[str] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+

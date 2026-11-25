@@ -1,5 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from app.core.roles import SELF_SERVICE_ROLES
 from app.modules.users.schemas import UserResponse
 
 class RegisterRequest(BaseModel):
@@ -7,8 +8,24 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8, description="Password must be at least 8 characters")
     full_name: str = Field(min_length=2)
     role: str = "seeker" # default primary role
-    additional_roles: Optional[List[str]] = None
+    additional_roles: Optional[List[str]] = Field(default=None, max_length=len(SELF_SERVICE_ROLES))
     phone_number: Optional[str] = None
+
+    @field_validator("role")
+    @classmethod
+    def _self_service_role(cls, v: str) -> str:
+        # Staff roles and brokers are granted by staff, never chosen at sign-up.
+        if v not in SELF_SERVICE_ROLES:
+            raise ValueError(f"role must be one of: {', '.join(sorted(SELF_SERVICE_ROLES))}")
+        return v
+
+    @field_validator("additional_roles")
+    @classmethod
+    def _self_service_roles(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        bad = sorted(set(v or []) - SELF_SERVICE_ROLES)
+        if bad:
+            raise ValueError(f"roles not available at sign-up: {', '.join(bad)}")
+        return v
 
 class LoginRequest(BaseModel):
     email: EmailStr

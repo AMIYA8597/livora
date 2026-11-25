@@ -12,6 +12,7 @@ import { InlineNotice } from "@/components/states/InlineNotice";
 import { useMyProfileData } from "@/features/profile/useMyProfileData";
 import {
   AccountSecurityPanel,
+  BrokerAccessCard,
   DealbreakersPanel,
   LifestyleForm,
   PrivacySettingsForm,
@@ -32,7 +33,7 @@ const TABS = [
 ];
 
 export default function ProfilePage() {
-  const { user, isAuthenticated, isLoading: authLoading, refreshUser } = useAuth();
+  const { user, roles, isAuthenticated, isLoading: authLoading, refreshUser } = useAuth();
   const data = useMyProfileData(isAuthenticated);
   const [activeTab, setActiveTab] = useState<ProfileTab>("profile");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -148,6 +149,11 @@ export default function ProfilePage() {
                 </div>
                 <VerificationForm trust={trust} onVerified={(s) => data.trust.setData(s)} />
               </Card>
+            )}
+            {activeTab === "verification" && (
+              <div className="mt-6">
+                <BrokerAccessCard roles={roles} onNotice={(m) => showNotice(m)} />
+              </div>
             )}
             {activeTab === "account" && (
               <AccountSecurityPanel user={user} onUserChanged={refreshUser} onNotice={(m) => showNotice(m)} />

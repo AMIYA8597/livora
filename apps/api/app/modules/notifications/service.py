@@ -39,6 +39,7 @@ TYPE_CATEGORY: Dict[str, str] = {
     "listing_expiry": "rentals",
     "billing": "account",
     "verification_result": "account",
+    "role_request_result": "account",
 }
 SUPPORTED_NOTIFICATION_TYPES = set(TYPE_CATEGORY)
 PAGE_SIZE = 20

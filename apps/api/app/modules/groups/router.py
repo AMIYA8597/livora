@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.dependencies import get_current_user, get_optional_user, is_staff
+from app.core.dependencies import get_current_user, get_optional_user, is_staff, has_admin_role
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.modules.groups.models import Group
 from app.modules.users.models import User
@@ -79,7 +79,7 @@ async def add_group_member(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     service = GroupService(db)
     return await service.add_member(
         group_id, data.user_id, requester_id=current_user.id, role=data.role, is_admin=is_admin
@@ -92,7 +92,7 @@ async def remove_group_member(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    is_admin = current_user.role in ["admin", "super_admin"]
+    is_admin = has_admin_role(current_user)
     service = GroupService(db)
     await service.remove_member(group_id, user_id, requester_id=current_user.id, is_admin=is_admin)
     return None

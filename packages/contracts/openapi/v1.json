@@ -192,7 +192,8 @@
       "AdminRoleGrant": {
         "properties": {
           "role": {
-            "description": "owner, pg_operator, broker, moderator, admin",
+            "description": "seeker, tenant, owner, pg_operator, broker, moderator, admin, super_admin",
+            "maxLength": 32,
             "title": "Role",
             "type": "string"
           }
@@ -201,6 +202,94 @@
           "role"
         ],
         "title": "AdminRoleGrant",
+        "type": "object"
+      },
+      "AdminRoleRequestItem": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decision_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Note"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_email": {
+            "title": "User Email",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          },
+          "user_name": {
+            "title": "User Name",
+            "type": "string"
+          },
+          "user_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "User Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "user_name",
+          "user_email",
+          "user_roles",
+          "role",
+          "status",
+          "created_at"
+        ],
+        "title": "AdminRoleRequestItem",
         "type": "object"
       },
       "AdminUserListItem": {
@@ -234,6 +323,14 @@
           "role": {
             "title": "Role",
             "type": "string"
+          },
+          "roles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
           }
         },
         "required": [
@@ -5760,6 +5857,7 @@
                 "items": {
                   "type": "string"
                 },
+                "maxItems": 4,
                 "type": "array"
               },
               {
@@ -5970,6 +6068,121 @@
           "new_password"
         ],
         "title": "ResetPasswordRequest",
+        "type": "object"
+      },
+      "RoleRequestCreate": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "role": {
+            "const": "broker",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RoleRequestCreate",
+        "type": "object"
+      },
+      "RoleRequestDecision": {
+        "properties": {
+          "approve": {
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "approve"
+        ],
+        "title": "RoleRequestDecision",
+        "type": "object"
+      },
+      "RoleRequestResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decision_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Note"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "status",
+          "created_at"
+        ],
+        "title": "RoleRequestResponse",
         "type": "object"
       },
       "RoomCreate": {
@@ -7430,6 +7643,153 @@
         ]
       }
     },
+    "/api/v1/admin/role-requests": {
+      "get": {
+        "description": "Waiting broker requests, oldest first (or the decided ones, newest first).",
+        "operationId": "list_role_requests_api_v1_admin_role_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "declined"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminRoleRequestItem"
+                  },
+                  "title": "Response List Role Requests Api V1 Admin Role Requests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Role Requests",
+        "tags": [
+          "Administration & Operations"
+        ]
+      }
+    },
+    "/api/v1/admin/role-requests/{request_id}/decision": {
+      "post": {
+        "description": "Approve (the role is granted now) or decline with a reason the person sees.",
+        "operationId": "decide_role_request_api_v1_admin_role_requests__request_id__decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleRequestDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRoleRequestItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Decide Role Request",
+        "tags": [
+          "Administration & Operations"
+        ]
+      }
+    },
     "/api/v1/admin/stats": {
       "get": {
         "operationId": "get_system_stats_api_v1_admin_stats_get",
@@ -7522,6 +7882,7 @@
     },
     "/api/v1/admin/users/{user_id}/roles": {
       "post": {
+        "description": "Admins grant any non-staff role and moderator; only a super admin grants admin roles.",
         "operationId": "grant_user_role_api_v1_admin_users__user_id__roles_post",
         "parameters": [
           {
@@ -7549,7 +7910,9 @@
           "201": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserListItem"
+                }
               }
             },
             "description": "Successful Response"
@@ -7571,6 +7934,64 @@
           }
         ],
         "summary": "Grant User Role",
+        "tags": [
+          "Administration & Operations"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/roles/{role}": {
+      "delete": {
+        "description": "Same rules as granting; the primary role and the last super admin stay.",
+        "operationId": "revoke_user_role_api_v1_admin_users__user_id__roles__role__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "title": "Role",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserListItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Revoke User Role",
         "tags": [
           "Administration & Operations"
         ]
@@ -12401,22 +12822,6 @@
               "title": "Property Id",
               "type": "string"
             }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
           }
         ],
         "responses": {
@@ -12441,6 +12846,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "summary": "Get Property",
         "tags": [
           "Properties"
@@ -13346,6 +13756,81 @@
           }
         ],
         "summary": "Export My Data",
+        "tags": [
+          "Users"
+        ]
+      }
+    },
+    "/api/v1/users/me/role-requests": {
+      "get": {
+        "operationId": "my_role_requests_api_v1_users_me_role_requests_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RoleRequestResponse"
+                  },
+                  "title": "Response My Role Requests Api V1 Users Me Role Requests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "My Role Requests",
+        "tags": [
+          "Users"
+        ]
+      },
+      "post": {
+        "description": "Ask for a role staff grant after a check (brokers). One open request at a time.",
+        "operationId": "request_role_api_v1_users_me_role_requests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleRequestCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Request Role",
         "tags": [
           "Users"
         ]

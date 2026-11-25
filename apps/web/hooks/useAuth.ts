@@ -44,6 +44,8 @@ export function useAuth() {
     refreshUser: refreshAuth,
     hasRole,
     isOwner: hasRole("owner"),
+    /** Owners, PG operators and verified brokers: may list homes and use the listings dashboard. */
+    canList: hasRole("owner") || hasRole("pg_operator") || hasRole("broker"),
     isSeeker: hasRole("seeker"),
     isAdmin: hasRole("admin") || hasRole("super_admin"),
     /** Moderators and admins: may open the admin console (see lib/staff-access.ts). */

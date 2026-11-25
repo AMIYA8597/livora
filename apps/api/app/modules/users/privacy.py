@@ -53,6 +53,7 @@ EXPORT_FORMAT_VERSION = 1
 # activity: blocks *they* made, reports *they* filed, likes *they* gave.
 EXPORT_TABLES: Dict[str, Tuple[str, ...]] = {
     "user_roles": ("user_id",),
+    "role_requests": ("user_id",),
     "user_privacy_settings": ("user_id",),
     "profiles": ("user_id",),
     "lifestyle_profiles": ("user_id",),
@@ -100,6 +101,7 @@ UPCOMING_APPOINTMENT_STATUSES = ("pending", "confirmed", "rescheduled")
 # Erased outright when the grace period ends (single-column ownership).
 PURGE_DELETE: Tuple[Tuple[str, str], ...] = (
     ("user_roles", "user_id"),
+    ("role_requests", "user_id"),
     ("user_privacy_settings", "user_id"),
     ("profiles", "user_id"),
     ("lifestyle_profiles", "user_id"),

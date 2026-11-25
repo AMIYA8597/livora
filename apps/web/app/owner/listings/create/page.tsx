@@ -32,7 +32,7 @@ const STEP_COMPONENTS: React.ComponentType<StepProps>[] = [
 ];
 
 export default function ListingWizardPage() {
-  const { isAuthenticated, isLoading: authLoading, isOwner } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, canList } = useAuth();
   const [draft, setDraft] = useState<ListingDraft>(initialDraft);
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -87,14 +87,16 @@ export default function ListingWizardPage() {
 
   if (authLoading) return <PageLoading />;
 
-  if (!isAuthenticated || !isOwner) {
+  if (!isAuthenticated || !canList) {
     return (
       <div className="max-w-md mx-auto py-16 px-4 text-center">
         <Card className="p-6 sm:p-8">
           <Building className="w-12 h-12 text-forest mx-auto mb-3" />
           <h1 className="text-xl font-bold text-charcoal mb-2">List a property</h1>
           <p className="text-sm text-charcoal-muted mb-6">
-            {isAuthenticated ? "Listing needs an owner account." : "Sign in with an owner account to list a property."}
+            {isAuthenticated
+              ? "Listing needs an owner, PG operator or verified broker account. Brokers can ask for access from their profile."
+              : "Sign in to list a property."}
           </p>
           <Link href={isAuthenticated ? "/properties" : loginHref("/owner/listings/create")}>
             <Button variant="primary" className="w-full">{isAuthenticated ? "Browse listings" : "Sign in"}</Button>

@@ -38,13 +38,34 @@ export interface TokenResponse {
   account_restored?: boolean;
 }
 
+/** Roles anyone may pick at sign-up. Brokers ask later (RoleRequestCreate); staff are appointed. */
+export type SignUpRole = 'seeker' | 'tenant' | 'owner' | 'pg_operator';
+
 export interface RegisterRequest {
   email: string;
   password: string;
   full_name: string;
-  role?: UserRole;
-  additional_roles?: string[];
+  role?: SignUpRole;
+  additional_roles?: SignUpRole[];
   phone_number?: string;
+}
+
+/** POST /users/me/role-requests: ask for broker access (an admin approves or declines). */
+export interface RoleRequestCreate {
+  role: 'broker';
+  /** Agency, RERA number, cities. Up to 500 characters; only staff see it. */
+  note?: string | null;
+}
+
+/** GET /users/me/role-requests (newest first). A declined request carries the reason. */
+export interface RoleRequestDTO {
+  id: string;
+  role: UserRole;
+  status: 'pending' | 'approved' | 'declined';
+  note: string | null;
+  decision_note: string | null;
+  created_at: string;
+  decided_at: string | null;
 }
 
 export interface LoginRequest {

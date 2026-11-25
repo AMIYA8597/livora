@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.dependencies import require_roles
+from app.core.dependencies import require_roles, role_names
 from app.modules.users.models import User
 from app.modules.administration.schemas import (
     AdminApplicationListItem,
@@ -15,6 +15,8 @@ from app.modules.administration.schemas import (
     AdminUserListItem,
     AdminUserStatusUpdate,
     AdminRoleGrant,
+    AdminRoleRequestItem,
+    RoleRequestDecision,
     PlatformStatsResponse,
 )
 from app.modules.administration.service import AdminService
@@ -23,6 +25,7 @@ from app.modules.applications.service import ApplicationService
 from app.core.dependencies import STAFF_ROLES
 from app.core.exceptions import NotFoundException
 from app.modules.billing.service import BillingService
+from app.modules.users import role_requests
 
 router = APIRouter(prefix="/admin", tags=["Administration & Operations"])
 
@@ -40,21 +43,70 @@ async def list_all_users(
 async def update_user_status(
     user_id: UUID,
     data: AdminUserStatusUpdate,
-    _: User = Depends(require_roles(["admin", "super_admin"])),
+    actor: User = Depends(require_roles(["admin", "super_admin"])),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminService(db)
-    return await service.update_user_status(user_id, is_active=data.is_active)
+    await service.update_user_status(user_id, is_active=data.is_active, actor=actor)
+    return await service.get_user_with_roles(user_id)
 
-@router.post("/users/{user_id}/roles", status_code=status.HTTP_201_CREATED)
+@router.post("/users/{user_id}/roles", response_model=AdminUserListItem, status_code=status.HTTP_201_CREATED)
 async def grant_user_role(
     user_id: UUID,
     data: AdminRoleGrant,
+    actor: User = Depends(require_roles(["admin", "super_admin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admins grant any non-staff role and moderator; only a super admin grants admin roles."""
+    service = AdminService(db)
+    await service.grant_user_role(user_id, data.role, actor=actor)
+    return await service.get_user_with_roles(user_id)
+
+@router.delete("/users/{user_id}/roles/{role}", response_model=AdminUserListItem)
+async def revoke_user_role(
+    user_id: UUID,
+    role: str,
+    actor: User = Depends(require_roles(["admin", "super_admin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same rules as granting; the primary role and the last super admin stay."""
+    service = AdminService(db)
+    await service.revoke_user_role(user_id, role, actor=actor)
+    return await service.get_user_with_roles(user_id)
+
+@router.get("/role-requests", response_model=List[AdminRoleRequestItem])
+async def list_role_requests(
+    status_filter: Optional[Literal["pending", "approved", "declined"]] = Query("pending", alias="status"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     _: User = Depends(require_roles(["admin", "super_admin"])),
     db: AsyncSession = Depends(get_db),
 ):
-    service = AdminService(db)
-    return await service.grant_user_role(user_id, data.role)
+    """Waiting broker requests, oldest first (or the decided ones, newest first)."""
+    rows = await role_requests.list_for_staff(db, status_filter, limit=limit, offset=offset)
+    return [_role_request_item(req, user) for req, user in rows]
+
+
+@router.post("/role-requests/{request_id}/decision", response_model=AdminRoleRequestItem)
+async def decide_role_request(
+    request_id: UUID,
+    data: RoleRequestDecision,
+    actor: User = Depends(require_roles(["admin", "super_admin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve (the role is granted now) or decline with a reason the person sees."""
+    req, user = await role_requests.decide(db, request_id, actor, data.approve, data.note)
+    user = await AdminService(db).get_user_with_roles(user.id)
+    return _role_request_item(req, user)
+
+
+def _role_request_item(req, user: User) -> AdminRoleRequestItem:
+    return AdminRoleRequestItem(
+        id=req.id, user_id=user.id, user_name=user.full_name, user_email=user.email,
+        user_roles=sorted(role_names(user)), role=req.role, status=req.status, note=req.note,
+        decision_note=req.decision_note, created_at=req.created_at, decided_at=req.decided_at,
+    )
+
 
 @router.get("/stats", response_model=PlatformStatsResponse)
 async def get_system_stats(
