@@ -406,13 +406,52 @@ committed on your OK.
       3. **JWT Keys:** revoke the legacy JWT secret. Nothing in the API depends on it now.
       4. **Database:** reset the password, then update `DATABASE_URL`, `DATABASE_SYNC_URL` and
          the `HOSTED_*` URLs. Percent-encode special characters, e.g. `@` as `%40`.
-      5. **GitHub `STAGING_DATABASE_URL`:** set it from the new `.env` (the command is in E2).
+      5. **GitHub `STAGING_DATABASE_URL`:** set it from the new `.env` (environment `staging`;
+         only needed for later migrations through `hosted-db-migration.yml`).
       6. **Afterwards:** mark the `f9ad144` history finding as handled, so the weekly history
          scan goes green.
-- [ ] **E2. Apply the hosted schema** (item 1). Postgres ports are blocked from this network
-      (checked again 2026-11-24). Either store `STAGING_DATABASE_URL` in the GitHub `staging`
-      environment and run the migration workflow, or authorize the Supabase MCP connector. The
-      hosted file now includes migrations 016-019.
+- [x] **E2. Apply the hosted schema** (item 1). *(Done 2026-11-25.)* The project
+      `qjwitdovbsfviaepjcul` is at `019_device_push_tokens`. Postgres ports 5432/6543 are still
+      blocked from this network, so it went over HTTPS:
+      - **Supabase connector:** 001, 002, 005-008 and 010-019 plus the final security block.
+      - **SQL Editor:** 003-004 and 009. The connector refuses any migration that contains a
+        `DROP` statement, and these hold guarded drops that do nothing on a fresh database.
+
+      Checked afterwards:
+      - **Security:** RLS is on for all 53 app tables. `anon`/`authenticated` have no grants on
+        any of them. `flatmate_app` is NOLOGIN with no superuser or RLS bypass. It has 53
+        `flatmate_app_all` policies, full DML on every app table, and read-only access to
+        `alembic_version`.
+      - **Extensions:** postgis 3.3.7, pg_trgm 1.6, vector 0.8.2.
+      - **Schema-parity fix (`919c3d4`):** all 23 defaults and 3 constraints present.
+      - **India data:** 36 states/UTs (8 UTs), each with its capital; 36 cities with coordinates.
+      - **Plans:** `seeker_pro` and `owner_pro`.
+      - **Match with local test DB:** 49 of 53 tables are identical per table (columns,
+        constraints, indexes, triggers). `profiles` and `content_embeddings` also have the
+        pgvector column, HNSW index and trigger, which local skips because it has no pgvector.
+        `payments`/`subscriptions` enforce the same uniqueness with a constraint instead of an
+        index.
+- [ ] **E2b. Give the API its own database login.** It must not use the owner (`postgres`):
+      1. Run `scripts/create_app_db_user.sql` with a new strong password.
+      2. Point the runtime `DATABASE_URL` at `flatmate_api.qjwitdovbsfviaepjcul`.
+      3. Keep the owner URL for migrations only.
+- [ ] **E2c. Supabase advisor findings (2026-11-25).**
+      - **Ours, fix with migration 020:**
+        - `content_embeddings_sync_vec` and `profiles_sync_lifestyle_embedding` have a mutable
+          `search_path`. Pin it.
+        - `rls_auto_enable()` is Supabase's SECURITY DEFINER function behind the `ensure_rls`
+          event trigger, owned by `postgres`. `anon`/`authenticated` can call it through
+          `/rest/v1/rpc` via the default `PUBLIC` execute grant. Revoke that.
+        - `attachments` has 3 duplicate indexes (`idx_attachments_*` from 002 repeat
+          `ix_attachments_*`). Drop one of each pair.
+        - 23 foreign keys have no covering index. Add the ones the API filters on.
+      - **PostGIS objects, owned by `supabase_admin`:** RLS is off on `spatial_ref_sys` (ERROR).
+        Its catalog views stay readable by `anon`, and `st_estimatedextent` is SECURITY DEFINER.
+        The data is public reference data. Revoking access needs `supabase_admin` or moving
+        PostGIS out of `public`, which a database with data can't do in place. Decide whether to
+        accept it.
+      - **Accept:** `pg_trgm`, `postgis` and `vector` are installed in `public`. The "unused
+        index" notices mean nothing on an empty database.
 - [ ] **E3. Google Cloud:**
   - Secret Manager secrets, a managed Redis and the backup bucket.
   - The GitHub environments `production` and `production-backups`.
@@ -436,12 +475,10 @@ committed on your OK.
 
 ## P0 — Blocks launch
 
-- [ ] **1. Hosted schema not yet applied.** *(Waiting on owner.)* The Supabase project is
-      reachable again over HTTPS (auth, JWKS and storage verified), but Postgres ports time out
-      from the dev network, so migrations must run from GitHub Actions. The owner adds the
-      `STAGING_DATABASE_URL` secret to the `staging` environment (session pooler, port 5432),
-      then runs the `hosted-db-migration.yml` workflow, or pastes
-      `database/migrations/complete_hosted_schema.sql` into the Supabase SQL editor.
+- [x] **1. Hosted schema applied.** *(Done 2026-11-25, see E2.)* The hosted database is at head
+      (`019_device_push_tokens`), with RLS and least privilege checked. Postgres ports still time
+      out from the dev network. Later migrations go through `hosted-db-migration.yml` (needs the
+      `STAGING_DATABASE_URL` secret) or the Supabase connector and SQL editor.
 - [x] **2. Test hacks in production code.** *(Done: AsyncMock branches removed, block checks always run.)* `matching/service.py` checks
       `type(self.db).__name__ != "AsyncMock"`, so code paths differ between tests and production
       (block filtering is skipped in tests).
