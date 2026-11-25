@@ -159,8 +159,14 @@ jobs:
       - name: Load test (${{ env.USERS }} users, 3 minutes)
         working-directory: ${{ env.APP_DIR }}
         run: |
-          docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$RUNNER_TEMP/caddy-root.crt"
-          echo "127.0.0.1 localhost" | sudo tee -a /etc/hosts >/dev/null
+          # Trust Caddy's local certificate authority (root and intermediate), and prove it before
+          # the run: a load test whose requests all fail TLS measures nothing.
+          docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$RUNNER_TEMP/root.crt"
+          docker compose cp caddy:/data/caddy/pki/authorities/local/intermediate.crt "$RUNNER_TEMP/intermediate.crt"
+          cat "$RUNNER_TEMP/root.crt" "$RUNNER_TEMP/intermediate.crt" > "$RUNNER_TEMP/caddy-root.crt"
+          curl -fsS --cacert "$RUNNER_TEMP/caddy-root.crt" https://localhost/health/live >/dev/null
+          REQUESTS_CA_BUNDLE="$RUNNER_TEMP/caddy-root.crt" python -c \
+            "import requests; r = requests.get('https://localhost/health/live', timeout=10); r.raise_for_status(); print('TLS trusted:', r.status_code)"
           set +e
           ( while sleep 15; do docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' >> "$RUNNER_TEMP/stats.txt"; done ) &
           watcher=$!
@@ -171,7 +177,7 @@ jobs:
           set -e
           tail -30 "$RUNNER_TEMP/locust.txt"
 
-      - name: No crash, no OOM, no 500s
+      - name: No crash, no OOM, no failures but busy answers
         working-directory: ${{ env.APP_DIR }}
         run: |
           python - "$RUNNER_TEMP/load_stats.csv" "$RUNNER_TEMP/load_failures.csv" "$RUNNER_TEMP/stats.txt" >> "$GITHUB_STEP_SUMMARY" <<'PY'
@@ -193,11 +199,16 @@ jobs:
                   value = float(used.rstrip("GiMBKk")) * (1024 if used.endswith("GiB") else 1 if used.endswith("MiB") else 1 / 1024)
                   peak[name] = max(peak.get(name, 0), value)
           print("- peak memory: " + ", ".join(f"{n} {v:.0f} MiB" for n, v in sorted(peak.items())))
-          # Busy answers (503 + Retry-After) are the designed overload response; anything else fails.
-          broken = [f for f in fails if any(code in f["Error"] for code in ("500", "502", "504", "Connection"))]
-          if broken:
-              print("- **server errors under load** (see above)")
+          # Busy answers (503 + Retry-After) are the designed overload response. Any other failure
+          # (server errors, TLS, connections, wrong answers) fails the run, and so does more than
+          # 1% of requests failing for any reason.
+          requests_ = int(total["Request Count"])
+          other = [f for f in fails if "503" not in f["Error"]]
+          ratio = int(total["Failure Count"]) / requests_ if requests_ else 1.0
+          if requests_ == 0 or other or ratio > 0.01:
+              print(f"- **FAILED**: {len(other)} kinds of non-503 failure, {ratio:.1%} of requests failed")
               sys.exit(1)
+          print(f"- passed: {ratio:.2%} of requests failed, all of them busy answers")
           PY
           cat "$GITHUB_STEP_SUMMARY"
           for svc in caddy api worker redis; do
