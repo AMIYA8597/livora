@@ -31,8 +31,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, List, Mapping, Optional
 
-DEFAULT_READY_FILE = "/tmp/flatmate-worker-ready"
-DEFAULT_SCHEDULE_FILE = "/tmp/celerybeat-schedule"
+# The worker runs alone in its own container, so its /tmp is private to it.
+DEFAULT_READY_FILE = "/tmp/flatmate-worker-ready"  # nosec B108
+DEFAULT_SCHEDULE_FILE = "/tmp/celerybeat-schedule"  # nosec B108
 
 
 def _flag(value: Optional[str], default: bool) -> bool:
@@ -91,8 +92,10 @@ def main() -> int:
 
     process = subprocess.Popen(celery_command(env), env=env)
 
+    # Cloud Run sends health checks to $PORT on the container's own interface.
+    host = "0.0.0.0"  # nosec B104
     server = ThreadingHTTPServer(
-        ("0.0.0.0", int(env.get("PORT", "8080"))),
+        (host, int(env.get("PORT", "8080"))),
         make_handler(lambda: health_status(process, ready_file)),
     )
     threading.Thread(target=server.serve_forever, name="health", daemon=True).start()

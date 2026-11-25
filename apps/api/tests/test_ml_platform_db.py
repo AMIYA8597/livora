@@ -87,8 +87,17 @@ def test_rrf_rewards_agreement():
 
 @pytest.fixture
 async def listings():
-    """An owner with four published listings in a city name unique to this test run."""
-    city = f"Testpur{uuid4().hex[:6]}"
+    """An owner with four published listings in a test-only city.
+
+    The city name is fixed: it is part of the embedded listing text, and a random suffix would
+    add random character n-grams that shift the search scores from run to run (the offline eval
+    failed about 1 run in 80). Listings left by an interrupted run are removed first.
+    """
+    city = "Mlevalpur"
+    async with AsyncSessionLocal() as s:
+        stale = (await s.execute(select(Property.id, Property.owner_id).where(Property.city == city))).all()
+    if stale:
+        await _cleanup({owner for _, owner in stale}, [pid for pid, _ in stale])
     async with AsyncSessionLocal() as s:
         owner = User(id=uuid4(), email=f"ml-{uuid4().hex[:8]}@example.com", hashed_password="x",
                      full_name="Owner")
