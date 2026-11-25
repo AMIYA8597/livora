@@ -455,6 +455,17 @@ committed on your OK.
       disabled, so the leaked keys no longer work in the `apikey` header. Supabase notes they
       "remain valid as a JWT" until step 3, so step 3 is now the one that fully closes the leak.
 
+      **Step 3 done 2026-11-25:** the legacy HS256 secret
+      (`2bb2af69-7fd3-4ca4-83e2-79b15081020d`) was revoked under JWT Keys → Previously used
+      keys. The Legacy JWT Secret tab now says the project "has revoked the legacy JWT secret".
+      No JWT is issued or verified with it, so the leaked `anon`/`service_role` keys are dead,
+      both as API keys and as JWTs. The current signing key is ECC P-256. The API is unaffected:
+      its own tokens use `SECRET_KEY`, and Supabase tokens are checked against the published
+      keys (`SUPABASE_JWKS_URL`).
+
+      **Still open: steps 2 and 4–6.** These are the secret key and database password that were
+      pasted into chats, then the GitHub secret and the history-scan finding.
+
       **Checked 2026-11-25 16:15 IST, before step 1 (steps 2–4 still open):**
       - **Step 2:** only the original `default` secret key is listed. `.env` and
         `apps/api/.env` are unchanged since 11:53.
