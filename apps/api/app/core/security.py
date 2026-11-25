@@ -2,6 +2,11 @@
 Security Infrastructure: Supabase Auth & JWT token validation,
 password hashing, and claim verification.
 
+The API signs its own tokens and keyed hashes with SECRET_KEY only. Supabase's legacy JWT
+secret is not used: Supabase can rotate or revoke it without logging anyone out here, and a
+token we issue is never a valid Supabase token. Supabase Auth tokens are verified against the
+project's published keys (SUPABASE_JWKS_URL).
+
 JWTs use PyJWT (maintained; python-jose was dropped for unfixed advisories PYSEC-2026-4298 and,
 through its ecdsa dependency, PYSEC-2026-1325).
 """
@@ -17,6 +22,31 @@ import jwt
 from jwt import PyJWK, PyJWTError
 from app.core.config import settings
 from app.core.logging import logger
+
+DEFAULT_SECRET_KEY = "supersecretkey_please_change_in_production_min_32_chars_1234567890"
+MIN_SECRET_KEY_LENGTH = 32
+_RELAXED_ENVIRONMENTS = {"development", "test", "ci", "local"}
+
+
+class InsecureConfigurationError(RuntimeError):
+    """The API or worker must not start with this configuration."""
+
+
+def require_signing_key() -> None:
+    """
+    Refuse to start outside development with the built-in or a short SECRET_KEY: it signs
+    every session and password-reset token, so anyone who knows it can sign in as anyone.
+    Called at API and worker startup (not on import, so migrations need only the database).
+    """
+    if (settings.ENVIRONMENT or "development").lower() in _RELAXED_ENVIRONMENTS:
+        return
+    key = settings.SECRET_KEY or ""
+    if key == DEFAULT_SECRET_KEY or len(key) < MIN_SECRET_KEY_LENGTH:
+        raise InsecureConfigurationError(
+            f"SECRET_KEY must be set to a random value of at least {MIN_SECRET_KEY_LENGTH} characters "
+            f"in '{settings.ENVIRONMENT}' (e.g. python -c \"import secrets; print(secrets.token_urlsafe(48))\")."
+        )
+
 
 _JWKS_CACHE: Dict[str, Any] = {"keys": {}, "last_fetched": 0.0}
 _JWKS_CACHE_TTL = 3600  # 1 hour TTL
@@ -97,7 +127,7 @@ def create_access_token(
         "iat": datetime.now(timezone.utc),
     }
 
-    secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
+    secret = settings.SECRET_KEY
     return jwt.encode(payload, secret, algorithm=settings.ALGORITHM)
 
 def create_refresh_token(subject: str, roles: List[str] | str, expires_delta: Optional[timedelta] = None) -> str:
@@ -114,7 +144,7 @@ def create_refresh_token(subject: str, roles: List[str] | str, expires_delta: Op
         "type": "refresh",
         "exp": expire,
     }
-    secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
+    secret = settings.SECRET_KEY
     return jwt.encode(payload, secret, algorithm=settings.ALGORITHM)
 
 def password_fingerprint(hashed_password: str) -> str:
@@ -123,7 +153,7 @@ def password_fingerprint(hashed_password: str) -> str:
     stops working as soon as the password changes: each token is single-use, and every
     outstanding token is revoked by any password change.
     """
-    key = (settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY).encode()
+    key = settings.SECRET_KEY.encode()
     return hmac.new(key, (hashed_password or "").encode(), hashlib.sha256).hexdigest()[:32]
 
 
@@ -137,14 +167,14 @@ def create_password_reset_token(subject: str, email: str, hashed_password: str) 
         "exp": now + timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES),
         "iat": now,
     }
-    secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
+    secret = settings.SECRET_KEY
     return jwt.encode(payload, secret, algorithm=settings.ALGORITHM)
 
 def decode_token(token: str) -> Dict[str, Any]:
     """
     Decodes and validates JWT signature, expiry, and structure.
     Supports asymmetric JWKS (ES256/RS256) from hosted Supabase Auth as well as
-    symmetric HS256 tokens signed with SUPABASE_JWT_SECRET / SECRET_KEY.
+    symmetric HS256 tokens this API signed with SECRET_KEY.
     """
     try:
         header = jwt.get_unverified_header(token)
@@ -169,8 +199,8 @@ def decode_token(token: str) -> Dict[str, Any]:
                 logger.warning(f"JWKS token verification failed: {e}")
                 return {}
 
-    # Otherwise fall back to symmetric secret verification (HS256)
-    secret = settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY
+    # Otherwise it must be one of our own HS256 tokens
+    secret = settings.SECRET_KEY
     try:
         # Note: audience check is disabled here to support both Supabase 'authenticated'
         # and standalone local test tokens gracefully.
@@ -183,10 +213,4 @@ def decode_token(token: str) -> Dict[str, Any]:
         return payload
     except PyJWTError as e:
         logger.warning(f"JWT verification failure: {e}")
-        # In non-development environments, fail closed immediately without insecure key fallback
-        if settings.ENVIRONMENT == "development" and settings.SUPABASE_JWT_SECRET and settings.SECRET_KEY != settings.SUPABASE_JWT_SECRET:
-            try:
-                return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM, "HS256"], options={"verify_aud": False})
-            except PyJWTError:
-                pass
         return {}

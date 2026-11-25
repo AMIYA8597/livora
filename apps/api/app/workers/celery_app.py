@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_ready, worker_shutdown
+from celery.signals import worker_init, worker_ready, worker_shutdown
 
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -72,6 +72,13 @@ if _backend_tls:
 
 # app.workers.run serves the health check: it reports ready only once this file exists, i.e.
 # the worker has reached the broker and is consuming.
+@worker_init.connect
+def _check_signing_key(**_: Any) -> None:
+    # Tasks sign password-reset links and hash verification codes with SECRET_KEY.
+    from app.core.security import require_signing_key
+    require_signing_key()
+
+
 @worker_ready.connect
 def _mark_ready(**_: Any) -> None:
     path = os.environ.get("WORKER_READY_FILE")

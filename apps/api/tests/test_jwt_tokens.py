@@ -127,3 +127,32 @@ def test_algorithm_confusion_is_rejected(monkeypatch):
                                           serialization.NoEncryption())
     unknown = jwt.encode({"sub": "x", "exp": exp}, stranger_pem, algorithm="ES256", headers={"kid": "nope"})
     assert security.decode_token(unknown) == {}
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_startup_refuses_a_default_or_short_signing_key(monkeypatch, environment):
+    monkeypatch.setattr(settings, "ENVIRONMENT", environment)
+    for weak in (security.DEFAULT_SECRET_KEY, "short", ""):
+        monkeypatch.setattr(settings, "SECRET_KEY", weak)
+        with pytest.raises(security.InsecureConfigurationError):
+            security.require_signing_key()
+    monkeypatch.setattr(settings, "SECRET_KEY", "k" * 48)
+    security.require_signing_key()
+
+
+def test_development_and_tests_may_use_the_default_key(monkeypatch):
+    monkeypatch.setattr(settings, "SECRET_KEY", security.DEFAULT_SECRET_KEY)
+    for environment in ("development", "test"):
+        monkeypatch.setattr(settings, "ENVIRONMENT", environment)
+        security.require_signing_key()
+
+
+def test_tokens_are_signed_with_secret_key_only(monkeypatch):
+    # A Supabase legacy JWT secret in the environment changes nothing: tokens we sign verify
+    # with SECRET_KEY, and a token signed with the Supabase secret is not ours.
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", "supabase-legacy-secret-supabase-legacy-secret")
+    token = security.create_access_token("user-1", ["seeker"])
+    assert jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])["sub"] == "user-1"
+    foreign = jwt.encode({"sub": "x", "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+                         "supabase-legacy-secret-supabase-legacy-secret", algorithm="HS256")
+    assert security.decode_token(foreign) == {}

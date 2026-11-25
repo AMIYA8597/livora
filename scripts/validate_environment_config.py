@@ -56,9 +56,7 @@ def validate_config(env_dict: Dict[str, str]) -> Dict[str, Any]:
         "SECRET_KEY": ("min_len", 32),
         "DATABASE_URL": ("prefix", ("postgresql://", "postgresql+asyncpg://")),
         "SUPABASE_URL": ("url", ("http", "https")),
-        "SUPABASE_ANON_KEY": ("jwt", None),
-        "SUPABASE_SERVICE_ROLE_KEY": ("jwt", None),
-        "SUPABASE_JWT_SECRET": ("min_len", 16),
+        "SUPABASE_SECRET_KEY": ("prefix", ("sb_secret_",)),
         "STORAGE_TYPE": ("enum", ("local", "supabase", "s3")),
     }
 

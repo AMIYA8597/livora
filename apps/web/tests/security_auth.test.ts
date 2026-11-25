@@ -24,6 +24,8 @@ test('Security check: No service-role keys or JWT secrets leaked in web bundle',
 
   const forbiddenTokens = [
     'SUPABASE_SERVICE_ROLE_KEY',
+    'SUPABASE_SECRET_KEY',
+    'sb_secret_',
     'service_role',
     'postgres://',
     'postgresql://',

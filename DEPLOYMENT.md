@@ -27,9 +27,7 @@ The platform reads configuration from environment variables. Example templates w
 | `DATABASE_URL` | All | Backend | **YES** | Async PostgreSQL connection URI (`postgresql+asyncpg://...`) |
 | `DATABASE_SYNC_URL` | All | Backend | **YES** | Sync PostgreSQL connection URI for Alembic migrations |
 | `SUPABASE_URL` | Staging / Prod | All | **YES** | Hosted Supabase project URL (`https://<ref>.supabase.co`) |
-| `SUPABASE_ANON_KEY` | Staging / Prod | All | **YES** | Public anon JWT key (Safe for client bundle) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Staging / Prod | Backend ONLY | **YES** | Admin service-role key (**NEVER leak to browser**) |
-| `SUPABASE_JWT_SECRET` | Staging / Prod | Backend ONLY | **YES** | Supabase Auth JWT verification secret |
+| `SUPABASE_SECRET_KEY` | Staging / Prod | Backend ONLY | **YES** | Secret key `sb_secret_...` (Project Settings > API Keys) for Storage. **Never in the browser.** The legacy `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` and `SUPABASE_JWT_SECRET` are not used: turn the legacy keys off in the dashboard. |
 | `STORAGE_TYPE` | All | Backend | **YES** | `supabase`, `local`, or `s3` |
 | `SUPABASE_STORAGE_BUCKET`| All | Backend | **YES** | Default media bucket (`flatmate-media-staging`) |
 | `CORS_ORIGINS` | All | Backend | **YES** | Allowed browser origins JSON array |
@@ -139,8 +137,7 @@ migrations → API → worker → web app, all from one run of the **Production 
        `scripts/create_app_db_user.sql`, never the owner.
      - `PRODUCTION_SECRET_KEY`
      - `PRODUCTION_REDIS_URL`: production needs the worker.
-   - Optional, passed when present: `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`,
-     `SUPABASE_ANON_KEY`, `EMAIL_API_KEY`, `SMTP_PASSWORD`, `TWILIO_ACCOUNT_SID`,
+   - Optional, passed when present: `SUPABASE_SECRET_KEY`, `EMAIL_API_KEY`, `SMTP_PASSWORD`, `TWILIO_ACCOUNT_SID`,
      `TWILIO_AUTH_TOKEN`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`,
      `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `VAPID_PRIVATE_KEY`, `SENTRY_DSN`.
      Staging uses the same names with `STAGING_`.

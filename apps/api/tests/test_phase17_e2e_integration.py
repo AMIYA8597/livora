@@ -12,12 +12,30 @@ from datetime import datetime, timezone, timedelta, date
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.database import AsyncSessionLocal
+from sqlalchemy import select
+
 from app.modules.tenants.models import TenantMembership
 from app.modules.properties.models import Room
+from app.modules.users.models import User
+from app.modules.users.privacy import purge_account
+
+
+@pytest.fixture
+async def created_accounts():
+    """
+    Emails the test registers. Their accounts are erased afterwards (listings and files too),
+    so repeated local runs don't pile up listings that crowd other tests' location searches.
+    """
+    emails: list = []
+    yield emails
+    async with AsyncSessionLocal() as s:
+        user_ids = (await s.execute(select(User.id).where(User.email.in_(emails)))).scalars().all()
+        for user_id in user_ids:
+            await purge_account(s, user_id)
 
 
 @pytest.mark.asyncio
-async def test_complete_phase17_end_to_end_integration():
+async def test_complete_phase17_end_to_end_integration(created_accounts):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         # -------------------------------------------------------------
@@ -25,6 +43,7 @@ async def test_complete_phase17_end_to_end_integration():
         # -------------------------------------------------------------
         seeker_email = f"seeker_{uuid4().hex[:8]}@example.in"
         owner_email = f"owner_{uuid4().hex[:8]}@example.in"
+        created_accounts.extend([seeker_email, owner_email])
         password = "SecurePassword123!"
 
         # Register Seeker
@@ -467,6 +486,7 @@ async def test_complete_phase17_end_to_end_integration():
 
         # Admin user to review report and platform stats
         admin_email = f"admin_{uuid4().hex[:8]}@example.in"
+        created_accounts.append(admin_email)
         res_admin_reg = await client.post(
             "/api/v1/auth/register",
             json={

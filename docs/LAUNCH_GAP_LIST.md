@@ -369,20 +369,46 @@ committed on your OK.
       - **The history scan found the live project's service-role key** in commit `f9ad144`
         (three files in `scripts/`) in this public repository. See E1.
 
+- [x] **P10. The API depended on the leaked legacy Supabase keys.**
+      - Storage used the legacy service-role key, so turning the legacy keys off would have
+        broken uploads.
+      - The API signed its own sessions, reset links and verification-code hashes with
+        Supabase's legacy JWT secret, so revoking that secret would have logged everyone out.
+      - Nothing stopped production from starting with the built-in placeholder `SECRET_KEY`.
+      - One CI test failed now and then, and local runs left listings behind.
+      *Done:*
+      - **Storage uses `SUPABASE_SECRET_KEY`** (`sb_secret_...`). The legacy key is a fallback
+        only while no secret key is set.
+      - **Signing uses `SECRET_KEY` only.** Supabase Auth tokens are still checked against the
+        project's published keys (`SUPABASE_JWKS_URL`). The legacy anon key, service-role key
+        and JWT secret settings are gone. Deploys no longer pass them and refuse them as plain
+        settings. The example env files, compose file and deployment docs match.
+      - **Startup check:** the API and worker refuse to start outside development with the
+        placeholder `SECRET_KEY` or one under 32 characters. Migrations don't need it.
+      - **Local `.env` files:** the legacy service-role key, JWT secret and anon keys are
+        removed (nothing reads them now).
+      - **Tests:**
+        - The Phase 17 end-to-end test erases its accounts afterwards.
+        - The local-only location test failure (leftover listings) is gone.
+        - The flaky search eval and bandit fixes were in the previous commit.
+
 ### Needs you (accounts, keys, decisions)
-- [ ] **E1. URGENT: rotate the Supabase keys and database password.** The current service-role
-      key is public: it's in commit `f9ad144` of this public GitHub repository. It bypasses RLS
-      and Storage policies. The keys were also pasted into chats.
-      1. In the Supabase dashboard (Project Settings, API Keys / JWT Keys), stop the legacy JWT
-         secret being used: rotate it, or move to the new signing keys and turn off the legacy
-         `anon` and `service_role` keys. This invalidates the leaked key.
-      2. Create a new secret key (`sb_secret_...`) and reset the database password.
-      3. Put the new values straight into `.env`, `apps/api/.env`, `apps/web/.env.local`, the
-         GitHub `STAGING_DATABASE_URL` secret and Secret Manager (not into a chat).
-      4. Optional: rewriting git history to drop `f9ad144`'s copy needs a force-push, and
-         doesn't un-publish it, so rotating is what matters.
-      5. Then the weekly history scan will still list `f9ad144`. Mark it as handled (rotated)
-         so the scan goes green.
+- [ ] **E1. URGENT: turn off the leaked Supabase keys.** The legacy service-role key is
+      public: it's in commit `f9ad144` of this public GitHub repository, and it bypasses RLS and
+      Storage policies. The other keys and the database password were pasted into chats. The
+      API no longer uses any legacy key (P10), so these steps don't break it. In the Supabase
+      dashboard:
+      1. **API Keys:** turn off the legacy JWT-based API keys (`anon`, `service_role`). The
+         leaked key stops working.
+      2. **API Keys:** create a new secret key and delete the old `sb_secret_...` one, which was
+         pasted into a chat. Put the new one in `SUPABASE_SECRET_KEY` (in `.env` and
+         `apps/api/.env`).
+      3. **JWT Keys:** revoke the legacy JWT secret. Nothing in the API depends on it now.
+      4. **Database:** reset the password, then update `DATABASE_URL`, `DATABASE_SYNC_URL` and
+         the `HOSTED_*` URLs. Percent-encode special characters, e.g. `@` as `%40`.
+      5. **GitHub `STAGING_DATABASE_URL`:** set it from the new `.env` (the command is in E2).
+      6. **Afterwards:** mark the `f9ad144` history finding as handled, so the weekly history
+         scan goes green.
 - [ ] **E2. Apply the hosted schema** (item 1). Postgres ports are blocked from this network
       (checked again 2026-11-24). Either store `STAGING_DATABASE_URL` in the GitHub `staging`
       environment and run the migration workflow, or authorize the Supabase MCP connector. The

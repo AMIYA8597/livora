@@ -60,7 +60,7 @@ KIND_LABEL = {"work_email": "work email", "student_email": "college email"}
 
 
 def _key() -> bytes:
-    return (settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY).encode()
+    return settings.SECRET_KEY.encode()
 
 
 def _code_hash(row_id: uuid.UUID, code: str) -> str:

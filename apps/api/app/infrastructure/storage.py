@@ -76,7 +76,7 @@ LOCAL_STORAGE_ENVIRONMENTS = {"development", "test", "ci", "local"}
 class SupabaseStorageProvider(StorageProvider):
     def __init__(self, url: str, key: str):
         if not url or not key:
-            raise StorageConfigurationError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for Supabase storage")
+            raise StorageConfigurationError("SUPABASE_URL and SUPABASE_SECRET_KEY are required for Supabase storage")
         try:
             from supabase import create_client, Client
             self.client: Client = create_client(url, key)
@@ -151,7 +151,7 @@ def init_storage() -> StorageProvider:
     environment = (settings.ENVIRONMENT or "development").lower()
 
     if storage_type == "supabase":
-        provider = SupabaseStorageProvider(settings.SUPABASE_URL or "", settings.SUPABASE_SERVICE_ROLE_KEY or "")
+        provider = SupabaseStorageProvider(settings.SUPABASE_URL or "", settings.supabase_server_key)
         provider.verify_buckets()
         _storage_instance = provider
     elif storage_type == "local":

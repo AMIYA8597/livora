@@ -71,3 +71,11 @@ def test_cli_writes_env_files_and_outputs(tmp_path):
     outputs = (tmp_path / "out" / "outputs").read_text()
     assert "redis=false" in outputs
     assert "secrets=DATABASE_URL=STAGING_APP_DATABASE_URL:latest,SECRET_KEY=STAGING_SECRET_KEY:latest" in outputs
+
+
+@pytest.mark.parametrize("legacy", ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_JWT_SECRET", "SUPABASE_ANON_KEY"])
+def test_legacy_supabase_keys_are_not_deployed(legacy):
+    with pytest.raises(deploy_runtime.ConfigError, match=legacy):
+        deploy_runtime.parse_env_lines(f"{legacy}=x")
+    assert legacy not in deploy_runtime.SECRETS
+    assert "SUPABASE_SECRET_KEY" in deploy_runtime.SECRETS

@@ -58,7 +58,7 @@ def normalize_phone(raw: str) -> str:
 
 
 def _hash(verification_id: uuid.UUID, code: str) -> str:
-    key = (settings.SUPABASE_JWT_SECRET or settings.SECRET_KEY).encode()
+    key = settings.SECRET_KEY.encode()
     return hmac.new(key, f"{verification_id}:{code}".encode(), hashlib.sha256).hexdigest()
 
 

@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
+    # Signs sessions, password-reset tokens and verification-code hashes. Outside development
+    # the API and worker refuse to start with this default (core/security.require_signing_key).
     SECRET_KEY: str = "supersecretkey_please_change_in_production_min_32_chars_1234567890"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
@@ -85,11 +87,14 @@ class Settings(BaseSettings):
     OTP_MAX_SENDS_PER_HOUR: int = 5
     EMAIL_CODE_TTL_MINUTES: int = 30  # work/college email verification codes
 
-    # Supabase Integration (Free-first / Managed Backend)
+    # Supabase. The API talks to Supabase Storage with the project's secret key (sb_secret_...,
+    # Project Settings > API Keys). SUPABASE_SERVICE_ROLE_KEY is the legacy JWT-shaped key, used
+    # only when no secret key is set; once the secret key is in place, turn the legacy keys off
+    # in the dashboard. Supabase's legacy JWT secret is not used (tokens are signed with
+    # SECRET_KEY; Supabase Auth tokens are checked against SUPABASE_JWKS_URL).
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-    SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
+    SUPABASE_SECRET_KEY: str = os.getenv("SUPABASE_SECRET_KEY", "")
     SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
     SUPABASE_JWKS_URL: str = os.getenv(
         "SUPABASE_JWKS_URL",
         f"{os.getenv('SUPABASE_URL', '').rstrip('/')}/auth/v1/.well-known/jwks.json"
@@ -220,6 +225,11 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
     # Per-statement limit for maintenance and ranker training (the API login allows 15s).
     WORKER_STATEMENT_TIMEOUT_SECONDS: int = Field(default=600, ge=1, le=3600)
+
+    @property
+    def supabase_server_key(self) -> str:
+        """The key the API uses for Supabase Storage: the secret key, else the legacy one."""
+        return self.SUPABASE_SECRET_KEY or self.SUPABASE_SERVICE_ROLE_KEY
 
     model_config = SettingsConfigDict(
         env_file=".env",

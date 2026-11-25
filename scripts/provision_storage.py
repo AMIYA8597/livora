@@ -9,7 +9,8 @@ reported, never deleted.
     python scripts/provision_storage.py            # plan
     python scripts/provision_storage.py --apply    # apply
 
-Reads SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from the environment or apps/api/.env.
+Reads SUPABASE_URL and SUPABASE_SECRET_KEY (or the legacy SUPABASE_SERVICE_ROLE_KEY) from the
+environment or apps/api/.env.
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="apply the changes (default: dry run)")
     args = parser.parse_args()
 
-    provider = SupabaseStorageProvider(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+    provider = SupabaseStorageProvider(settings.SUPABASE_URL, settings.supabase_server_key)
     storage = provider.client.storage
     actual = provider.list_buckets()
     registry = bucket_registry()

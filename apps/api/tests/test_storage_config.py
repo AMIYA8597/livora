@@ -35,9 +35,30 @@ def test_local_storage_refused_outside_dev(monkeypatch, env):
 
 
 def test_supabase_without_credentials_fails(monkeypatch):
-    _configure(monkeypatch, STORAGE_TYPE="supabase", SUPABASE_URL="", SUPABASE_SERVICE_ROLE_KEY="")
+    _configure(monkeypatch, STORAGE_TYPE="supabase", SUPABASE_URL="", SUPABASE_SECRET_KEY="",
+               SUPABASE_SERVICE_ROLE_KEY="")
     with pytest.raises(StorageConfigurationError):
         init_storage()
+
+
+def test_supabase_uses_the_secret_key_before_the_legacy_one(monkeypatch):
+    used = {}
+
+    class _Provider:
+        def __init__(self, url, key):
+            used["key"] = key
+
+        def verify_buckets(self):
+            pass
+
+    monkeypatch.setattr(storage_mod, "SupabaseStorageProvider", _Provider)
+    _configure(monkeypatch, STORAGE_TYPE="supabase", SUPABASE_URL="https://p.supabase.co",
+               SUPABASE_SECRET_KEY="new-secret-key", SUPABASE_SERVICE_ROLE_KEY="legacy-key")
+    init_storage()
+    assert used["key"] == "new-secret-key"
+    _configure(monkeypatch, SUPABASE_SECRET_KEY="")
+    init_storage()
+    assert used["key"] == "legacy-key"  # still works until the secret key is set
 
 
 def test_unknown_storage_type_fails(monkeypatch):

@@ -14,9 +14,7 @@
 | `DATABASE_URL` | All | `postgresql+asyncpg://...` primary database connection string |
 | `DATABASE_SYNC_URL` | All | `postgresql://...` sync connection string used by Alembic |
 | `SUPABASE_URL` | Staging / Prod | Managed Supabase API URL |
-| `SUPABASE_ANON_KEY` | Staging / Prod | Supabase public anonymous key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Staging / Prod | Secure backend service key (strictly server-side) |
-| `SUPABASE_JWT_SECRET` | Staging / Prod | JWT verification secret for Supabase Auth tokens |
+| `SUPABASE_SECRET_KEY` | Staging / Prod | Secret key `sb_secret_...` for Storage (strictly server-side). The legacy service-role, anon and JWT-secret values are not used. |
 | `REDIS_URL` | All | Redis cache and Pub/Sub connection string |
 
 ---
