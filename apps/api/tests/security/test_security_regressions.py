@@ -9,7 +9,7 @@ import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
-from jose import jwt
+import jwt
 
 from app.core.exceptions import ForbiddenException, BadRequestException
 from app.core.security import create_access_token, decode_token

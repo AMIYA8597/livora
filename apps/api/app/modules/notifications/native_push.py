@@ -15,7 +15,7 @@ Native push for the Android and iOS apps, next to Web Push (`push.py`).
     `PushRetryable` (temporary: retry through the outbox), anything else is a permanent
     failure that counts towards dropping the token.
 
-No Firebase or Apple SDK: two small HTTPS calls, signed with python-jose, sent with httpx.
+No Firebase or Apple SDK: two small HTTPS calls, signed with PyJWT, sent with httpx.
 """
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ def reset_credentials() -> None:
 
 def _google_access_token() -> str:
     import httpx
-    from jose import jwt
+    import jwt
 
     with _lock:
         if _google_token["value"] and _google_token["expires"] - 60 > time.time():
@@ -142,7 +142,7 @@ def _google_access_token() -> str:
 
 
 def _apns_provider_token() -> str:
-    from jose import jwt
+    import jwt
 
     with _lock:
         if _apns_token["value"] and time.time() - _apns_token["issued"] < APNS_TOKEN_TTL_SECONDS:

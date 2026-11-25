@@ -1,16 +1,20 @@
-import hashlib
-import hmac
 """
 Security Infrastructure: Supabase Auth & JWT token validation,
 password hashing, and claim verification.
+
+JWTs use PyJWT (maintained; python-jose was dropped for unfixed advisories PYSEC-2026-4298 and,
+through its ecdsa dependency, PYSEC-2026-1325).
 """
+import hashlib
+import hmac
+
 import bcrypt
 import time
 import httpx
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Any, Dict, List
-from jose import jwt, jwk, JWTError
-from jose.constants import ALGORITHMS
+import jwt
+from jwt import PyJWK, PyJWTError
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -37,10 +41,10 @@ def _get_jwks_key(kid: Optional[str]) -> Optional[Any]:
                 keys_map = {}
                 for key_dict in data.get("keys", []):
                     k_id = key_dict.get("kid")
-                    alg = key_dict.get("alg", ALGORITHMS.ES256)
+                    alg = key_dict.get("alg", "ES256")
                     if k_id:
                         try:
-                            keys_map[k_id] = jwk.construct(key_dict, algorithm=alg)
+                            keys_map[k_id] = PyJWK(key_dict, algorithm=alg).key
                         except Exception as e:
                             logger.warning(f"Failed to construct JWK for kid {k_id}: {e}")
                 _JWKS_CACHE["keys"] = keys_map
@@ -161,7 +165,7 @@ def decode_token(token: str) -> Dict[str, Any]:
                     algorithms=[alg],
                     options={"verify_aud": False}
                 )
-            except JWTError as e:
+            except PyJWTError as e:
                 logger.warning(f"JWKS token verification failed: {e}")
                 return {}
 
@@ -177,12 +181,12 @@ def decode_token(token: str) -> Dict[str, Any]:
             options={"verify_aud": False}
         )
         return payload
-    except JWTError as e:
+    except PyJWTError as e:
         logger.warning(f"JWT verification failure: {e}")
         # In non-development environments, fail closed immediately without insecure key fallback
         if settings.ENVIRONMENT == "development" and settings.SUPABASE_JWT_SECRET and settings.SECRET_KEY != settings.SUPABASE_JWT_SECRET:
             try:
                 return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM, "HS256"], options={"verify_aud": False})
-            except JWTError:
+            except PyJWTError:
                 pass
         return {}

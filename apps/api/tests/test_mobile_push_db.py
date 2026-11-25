@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from jose import jwt
+import jwt
 from sqlalchemy import delete, select, update
 
 from app.core.config import settings

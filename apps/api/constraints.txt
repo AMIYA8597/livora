@@ -34,7 +34,6 @@ cryptography==50.0.2
 deprecation==2.1.0
 dnspython==2.9.2
 docstring-parser==0.18.0
-ecdsa==0.19.2
 email-validator==2.4.0
 fastapi==0.165.0
 frozenlist==1.8.0
@@ -87,7 +86,6 @@ pytest-cov==7.1.0
 pytest==9.2.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.4
-python-jose==3.5.0
 python-multipart==0.0.34
 pytokens==0.4.1
 pywebpush==2.5.0

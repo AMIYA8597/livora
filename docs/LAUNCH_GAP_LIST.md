@@ -350,9 +350,39 @@ committed on your OK.
       - **Snapshot check:** byte-for-byte with the pinned versions; at contract level (and it
         says so) with others. Export refuses unpinned versions.
 
+- [x] **P9. The security workflow never passed, and hid what it found.**
+      - Its secret scan was a text search that matched local dev URLs, so it always failed.
+      - `pip-audit` and `pnpm audit` ended in `|| true`, so vulnerabilities never failed it.
+      - It only ran weekly and on pull requests, so pushes to `main` were never checked.
+      *Done:*
+      - **python-jose replaced with PyJWT** (`core/security.py`, native push). python-jose had an
+        unfixed advisory (PYSEC-2026-4298) and pulled in `ecdsa` (PYSEC-2026-1325). New tests
+        cover our tokens, Supabase JWKS tokens, `alg: none`, wrong keys, expiry and algorithm
+        confusion. The pinned set now has no known vulnerabilities.
+      - **`scripts/secret_scan.py`**, a real scanner with tests:
+        - It looks for private keys, Supabase service-role JWTs and `sb_secret_` keys, URLs
+          with real passwords to non-local hosts, provider keys, and secret settings with
+          real-looking values.
+        - It never prints the value.
+        - It scans committed files on every run, and all of git history weekly.
+      - **The workflow** runs on every push to `main`, and audits now fail the build.
+      - **The history scan found the live project's service-role key** in commit `f9ad144`
+        (three files in `scripts/`) in this public repository. See E1.
+
 ### Needs you (accounts, keys, decisions)
-- [ ] **E1. Rotate the Supabase keys and database password.** They were pasted into a chat. Do
-      it before launch; then update `.env`, Secret Manager and GitHub.
+- [ ] **E1. URGENT: rotate the Supabase keys and database password.** The current service-role
+      key is public: it's in commit `f9ad144` of this public GitHub repository. It bypasses RLS
+      and Storage policies. The keys were also pasted into chats.
+      1. In the Supabase dashboard (Project Settings, API Keys / JWT Keys), stop the legacy JWT
+         secret being used: rotate it, or move to the new signing keys and turn off the legacy
+         `anon` and `service_role` keys. This invalidates the leaked key.
+      2. Create a new secret key (`sb_secret_...`) and reset the database password.
+      3. Put the new values straight into `.env`, `apps/api/.env`, `apps/web/.env.local`, the
+         GitHub `STAGING_DATABASE_URL` secret and Secret Manager (not into a chat).
+      4. Optional: rewriting git history to drop `f9ad144`'s copy needs a force-push, and
+         doesn't un-publish it, so rotating is what matters.
+      5. Then the weekly history scan will still list `f9ad144`. Mark it as handled (rotated)
+         so the scan goes green.
 - [ ] **E2. Apply the hosted schema** (item 1). Postgres ports are blocked from this network
       (checked again 2026-11-24). Either store `STAGING_DATABASE_URL` in the GitHub `staging`
       environment and run the migration workflow, or authorize the Supabase MCP connector. The

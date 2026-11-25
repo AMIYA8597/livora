@@ -1,6 +1,8 @@
 name: Security & Vulnerability Scan
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "0 2 * * 1" # Every Monday at 02:00 UTC
   pull_request:
@@ -38,7 +40,8 @@ jobs:
 
       - name: Python Dependency Vulnerability Audit (pip-audit)
         run: |
-          pip-audit --desc || true
+          # Fails on any known vulnerability in the installed (pinned) set.
+          pip-audit --desc --skip-editable
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
@@ -56,18 +59,13 @@ jobs:
 
       - name: Frontend Dependency Security Audit (pnpm audit)
         run: |
-          pnpm audit --audit-level=high || true
+          pnpm audit --audit-level=high
 
-      - name: Secret Scan for Accidental Credentials
-        run: |
-          # Ensure no private keys, passwords, or service-role keys committed
-          ! git grep -i "SUPABASE_SERVICE_ROLE_KEY=ey" -- ':!.env*.example'
-          ! git grep -i "BEGIN RSA PRIVATE KEY" -- ':!*.pem'
-          ! git grep -i "postgres:[^@]*@" -- ':!.env*.example' ':!docker-compose*.yml' ':!apps/api/tests/*' ':!database/seeds/*'
+      - name: Secret Scan (committed files)
+        run: python scripts/secret_scan.py
 
-      - name: Execute Security Regression Test Suite
-        env:
-          ENVIRONMENT: test
-          SECRET_KEY: security_audit_test_key_minimum_32_characters_123
-        run: |
-          python -m pytest apps/api/tests/test_security_hardening.py apps/api/tests/test_auth_rbac.py apps/api/tests/test_infrastructure_resilience.py -v
+      - name: Secret Scan (whole git history)
+        # Weekly and on demand: a secret that was ever pushed stays readable in history, so the
+        # only fix is rotating it. See scripts/secret_scan.py.
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: python scripts/secret_scan.py --history
