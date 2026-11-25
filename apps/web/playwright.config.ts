@@ -14,7 +14,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : undefined,
+  // Two everywhere: more parallel browsers starve `next start` on a laptop, and journeys time
+  // out on navigations the server hasn't answered yet.
+  workers: 2,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL,

@@ -33,7 +33,8 @@ test("a member signs in, sees their space, and signs out", async ({ page }) => {
   await page.getByLabel("Email Address").fill(seeded("priya"));
   await page.getByLabel("Password").fill("definitely-not-the-password");
   await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page.getByRole("alert").or(page.getByText(/invalid|incorrect/i)).first()).toBeVisible();
+  // Not any role=alert: Next.js's route announcer is one, so that would pass before the reply.
+  await expect(page.getByRole("alert").filter({ hasText: /invalid email or password/i })).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
 
   await signIn(page, seeded("priya"), seedPassword(), "/dashboard");
