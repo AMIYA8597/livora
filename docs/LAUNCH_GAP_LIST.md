@@ -410,6 +410,18 @@ committed on your OK.
          only needed for later migrations through `hosted-db-migration.yml`).
       6. **Afterwards:** mark the `f9ad144` history finding as handled, so the weekly history
          scan goes green.
+
+      **Checked 2026-11-25 16:15 IST. Steps 1–4 are not done yet:**
+      - **Step 1:** the legacy `anon` key reports `disabled: false`, and the Legacy API Keys
+        page still offers "Disable JWT-based API keys". The leaked service-role key still
+        works.
+      - **Step 2:** only the original `default` secret key is listed. `.env` and
+        `apps/api/.env` are unchanged since 11:53.
+      - **Step 3:** the current signing key is ECC P-256. The legacy HS256 secret is under
+        "Previously used keys": it still verifies tokens and hasn't been revoked.
+      - **Step 4:** the only password reset on record (`PATCH .../db-password`) isn't in the
+        last 48 h of logs, so it predates the leak. The `.env` database password is
+        unchanged.
 - [x] **E2. Apply the hosted schema** (item 1). *(Done 2026-11-25.)* The project
       `qjwitdovbsfviaepjcul` is at `019_device_push_tokens`. Postgres ports 5432/6543 are still
       blocked from this network, so it went over HTTPS:
@@ -435,6 +447,19 @@ committed on your OK.
       1. Run `scripts/create_app_db_user.sql` with a new strong password.
       2. Point the runtime `DATABASE_URL` at `flatmate_api.qjwitdovbsfviaepjcul`.
       3. Keep the owner URL for migrations only.
+
+      **Checked 2026-11-25 16:15 IST: not done.** There's no `flatmate_api` role, and
+      `DATABASE_URL` in both `.env` files still logs in as `postgres.qjwitdovbsfviaepjcul`.
+      `flatmate_app` is ready for it: NOLOGIN, 53 policies, full DML, read-only
+      `alembic_version`.
+- [ ] **E2d. Leftover test files in Supabase Storage.**
+      - **Leftover files:** 56 tiny test files, 16–526 bytes, from 2026-11-14 (one from
+        11-24). They sit in `avatars` (25), `properties` (18) and `verification` (12), under
+        user/listing IDs that no longer exist (0 users, 0 listings).
+      - **Extra buckets:** `scripts/setup_supabase_storage.py` created `property-photos` and
+        `verification-docs`, which the API doesn't use. Each holds one `test/` file.
+        `SUPABASE_STORAGE_BUCKET=property-photos` in `apps/api/.env` is read by nothing.
+      - **To decide:** whether to delete them before launch.
 - [ ] **E2c. Supabase advisor findings (2026-11-25).**
       - **Ours: done. Migration 020 was applied to the hosted database on 2026-11-25, which is
         now at `020_database_advisor_fixes`.** It pins the search_path, revokes
@@ -447,14 +472,6 @@ committed on your OK.
         - `ensure_rls` is still enabled and both sync triggers are present;
         - no foreign key lacks an index and no index is duplicated;
         - the advisors no longer report these findings.
-        - `content_embeddings_sync_vec` and `profiles_sync_lifestyle_embedding` have a mutable
-          `search_path`. Pin it.
-        - `rls_auto_enable()` is Supabase's SECURITY DEFINER function behind the `ensure_rls`
-          event trigger, owned by `postgres`. `anon`/`authenticated` can call it through
-          `/rest/v1/rpc` via the default `PUBLIC` execute grant. Revoke that.
-        - `attachments` has 3 duplicate indexes (`idx_attachments_*` from 002 repeat
-          `ix_attachments_*`). Drop one of each pair.
-        - 23 foreign keys have no covering index. Add the ones the API filters on.
       - **PostGIS objects, owned by `supabase_admin`:** RLS is off on `spatial_ref_sys` (ERROR).
         Its catalog views stay readable by `anon`, and `st_estimatedextent` is SECURITY DEFINER.
         The data is public reference data. Revoking access needs `supabase_admin` or moving
