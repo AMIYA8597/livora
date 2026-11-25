@@ -504,14 +504,23 @@ committed on your OK.
       `DATABASE_URL` in both `.env` files still logs in as `postgres.qjwitdovbsfviaepjcul`.
       `flatmate_app` is ready for it: NOLOGIN, 53 policies, full DML, read-only
       `alembic_version`.
-- [ ] **E2d. Leftover test files in Supabase Storage.**
-      - **Leftover files:** 56 tiny test files, 16–526 bytes, from 2026-11-14 (one from
-        11-24). They sit in `avatars` (25), `properties` (18) and `verification` (12), under
-        user/listing IDs that no longer exist (0 users, 0 listings).
-      - **Extra buckets:** `scripts/setup_supabase_storage.py` created `property-photos` and
-        `verification-docs`, which the API doesn't use. Each holds one `test/` file.
-        `SUPABASE_STORAGE_BUCKET=property-photos` in `apps/api/.env` is read by nothing.
-      - **To decide:** whether to delete them before launch.
+- [x] **E2d. Leftover test files in Supabase Storage.** *(Done 2026-11-25.)*
+      - **What was removed:** 55 tiny test files (16–526 bytes, from 2026-11-14 and one from
+        11-24): 25 in `avatars`, 18 in `properties` and 12 in `verification`. Each sat under a
+        user or listing ID that didn't exist; there were 0 users and 0 listings, re-checked just
+        before deleting. All three buckets were emptied with the dashboard's "Empty bucket".
+      - **Unused buckets:** `property-photos` and `verification-docs` (one `test/` file each)
+        were deleted. The API never used them. Its buckets are `properties`, `avatars`,
+        `verification` and `chat-attachments` (`app/infrastructure/storage_buckets.py`), and no
+        `STORAGE_BUCKET_*` override points elsewhere.
+      - **Checked afterwards:** exactly those four buckets remain, all empty, with the
+        visibility, size limits and file types the API expects.
+      - **So it doesn't come back:** `scripts/setup_supabase_storage.py` (it created the two
+        unused buckets) and `scripts/test_live_supabase_storage.py` (it uploaded test files to
+        the live project and never removed them) were deleted. Use
+        `scripts/provision_storage.py`: it builds buckets from the API's registry, does a dry
+        run by default and never deletes. `SUPABASE_STORAGE_BUCKET=property-photos` in the
+        `.env` files is read by nothing and can be removed.
 - [ ] **E2c. Supabase advisor findings (2026-11-25).**
       - **Ours: done. Migration 020 was applied to the hosted database on 2026-11-25, which is
         now at `020_database_advisor_fixes`.** It pins the search_path, revokes
