@@ -31,6 +31,9 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SNAPSHOT = REPO_ROOT / "packages" / "contracts" / "openapi" / "v1.json"
 ACCEPTED = REPO_ROOT / "packages" / "contracts" / "openapi" / "accepted-breaking-changes.txt"
+CONSTRAINTS = REPO_ROOT / "apps" / "api" / "constraints.txt"
+# The packages whose versions shape the generated document.
+GENERATORS = ("fastapi", "pydantic", "pydantic-core", "starlette")
 
 METHODS = ("get", "put", "post", "delete", "patch")
 MAX_DEPTH = 12
@@ -44,6 +47,34 @@ def current_spec() -> Spec:
 
     app.openapi_schema = None
     return app.openapi()
+
+
+def generator_mismatches() -> List[str]:
+    """Installed versions of the generating packages that differ from constraints.txt."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    pinned: Dict[str, str] = {}
+    if CONSTRAINTS.exists():
+        for line in CONSTRAINTS.read_text(encoding="utf-8").splitlines():
+            name, sep, ver = line.strip().partition("==")
+            if sep:
+                pinned[name.lower().replace("_", "-")] = ver.strip()
+    out = []
+    for name in GENERATORS:
+        try:
+            installed = version(name)
+        except PackageNotFoundError:
+            installed = "missing"
+        if name in pinned and installed != pinned[name]:
+            out.append(f"{name} {installed} (pinned {pinned[name]})")
+    return out
+
+
+def same_contract(a: Spec, b: Spec) -> bool:
+    """No difference an API client would notice: the same operations and nothing breaking in
+    either direction (which also catches added response fields)."""
+    return (set(_operations(a)) == set(_operations(b))
+            and not breaking_changes(a, b) and not breaking_changes(b, a))
 
 
 def dumps(spec: Spec) -> str:
@@ -243,17 +274,31 @@ def unaccepted(problems: Iterable[str], accepted: Set[str]) -> List[str]:
 def main(argv: List[str]) -> int:
     command = argv[0] if argv else "check"
     if command == "export":
+        if generator_mismatches():
+            print("Refusing to export with unpinned versions (" + ", ".join(generator_mismatches()) + "). "
+                  "Install with -c apps/api/constraints.txt first.")
+            return 1
         SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
         SNAPSHOT.write_text(dumps(current_spec()), encoding="utf-8")
         print(f"Wrote {SNAPSHOT.relative_to(REPO_ROOT)}")
         return 0
     if command == "check":
-        if not SNAPSHOT.exists() or json.loads(SNAPSHOT.read_text(encoding="utf-8")) != json.loads(dumps(current_spec())):
-            print("The API changed but packages/contracts/openapi/v1.json didn't. "
-                  "Run `python -m app.core.api_contract export` in apps/api and commit the result.")
-            return 1
-        print("API contract snapshot is up to date.")
-        return 0
+        current = json.loads(dumps(current_spec()))
+        saved = json.loads(SNAPSHOT.read_text(encoding="utf-8")) if SNAPSHOT.exists() else None
+        mismatched = generator_mismatches()
+        if saved is not None and not mismatched and saved == current:
+            print("API contract snapshot is up to date.")
+            return 0
+        if saved is not None and mismatched and same_contract(saved, current):
+            # Other FastAPI/Pydantic versions word the document differently (e.g. regex patterns);
+            # only the pinned versions can check it byte for byte.
+            print("API contract matches (checked at contract level: " + ", ".join(mismatched) + "; "
+                  "install with -c apps/api/constraints.txt for the exact check).")
+            return 0
+        print("The API changed but packages/contracts/openapi/v1.json didn't. Run "
+              "`python -m app.core.api_contract export` in apps/api (with the pinned versions: "
+              "pip install -e \"apps/api[dev]\" -c apps/api/constraints.txt) and commit the result.")
+        return 1
     if command == "compat" and len(argv) == 2:
         old = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
         new = json.loads(SNAPSHOT.read_text(encoding="utf-8"))

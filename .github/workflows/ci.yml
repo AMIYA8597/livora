@@ -60,7 +60,7 @@ jobs:
       - name: Install Backend Dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install -e "apps/api[dev]"
+          pip install -e "apps/api[dev]" -c apps/api/constraints.txt
 
       - name: Python Linter (Ruff)
         run: |
@@ -246,7 +246,7 @@ jobs:
       - name: Install Backend Dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          pip install -e "apps/api[dev]"
+          pip install -e "apps/api[dev]" -c apps/api/constraints.txt
 
       - name: Install pgvector into PostGIS service
         run: |

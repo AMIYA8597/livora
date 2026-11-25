@@ -132,7 +132,7 @@ jobs:
         run: |
           echo "::add-mask::$DATABASE_URL"
           python -m pip install --upgrade pip
-          pip install -e apps/api
+          pip install -e apps/api -c apps/api/constraints.txt
           cd apps/api
           python -m alembic upgrade head
           python -m alembic current

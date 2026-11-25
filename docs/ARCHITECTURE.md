@@ -366,7 +366,11 @@ server enforces them, not the web app.
   Generator). A React Native app can use the TypeScript types in `packages/contracts/src`
   instead.
 - **Keeping it current.** The pytest suite fails when the code and the snapshot differ. To
-  update it, run `python -m app.core.api_contract export` in `apps/api`.
+  update it, run `python -m app.core.api_contract export` in `apps/api`. Export with the
+  pinned versions (`apps/api/constraints.txt`): other FastAPI/Pydantic versions word the
+  document differently, so export refuses without them.
+- **Pinned dependencies.** `apps/api/constraints.txt` holds the exact versions CI tested. CI,
+  every workflow and the Docker images install with it, so production runs what was tested.
 - **Keeping it stable.** CI compares the snapshot with the previous commit's
   (`app/core/api_contract.py` lists what counts as breaking) and fails on changes that would
   break an installed app:

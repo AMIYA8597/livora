@@ -70,7 +70,7 @@ jobs:
       - name: Install API package (Alembic env imports the app models)
         run: |
           python -m pip install --upgrade pip
-          pip install -e apps/api
+          pip install -e apps/api -c apps/api/constraints.txt
 
       - name: Execute Alembic Migration Forward
         env:

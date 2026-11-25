@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md constraints.txt ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip wheel --no-cache-dir --wheel-dir /app/wheels .
+    pip wheel --no-cache-dir --wheel-dir /app/wheels -c constraints.txt .
 
 # Stage 2: Final hardened minimal runtime image
 FROM python:3.12-slim

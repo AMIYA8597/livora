@@ -81,7 +81,6 @@
             "type": "string"
           },
           "proposed_rent": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Proposed Rent",
             "type": "string"
           },
@@ -390,7 +389,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -465,7 +463,6 @@
             "type": "string"
           },
           "proposed_rent": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Proposed Rent",
             "type": "string"
           },
@@ -935,7 +932,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -987,7 +983,6 @@
           },
           "monthly_rent": {
             "description": "Monthly rent in INR",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Monthly Rent",
             "type": "string"
           },
@@ -1111,7 +1106,6 @@
       "CheckoutOut": {
         "properties": {
           "amount_inr": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Amount Inr",
             "type": "string"
           },
@@ -1889,7 +1883,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -1909,7 +1902,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -1968,7 +1960,6 @@
             "type": "string"
           },
           "deposit_required": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Deposit Required",
             "type": "string"
           },
@@ -1977,7 +1968,6 @@
             "type": "string"
           },
           "expected_rent": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Expected Rent",
             "type": "string"
           },
@@ -3538,7 +3528,6 @@
             "type": "integer"
           },
           "estimated_monthly_revenue": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Estimated Monthly Revenue",
             "type": "string"
           },
@@ -4051,7 +4040,6 @@
             "type": "string"
           },
           "price_inr": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Price Inr",
             "type": "string"
           }
@@ -4744,7 +4732,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -4765,7 +4752,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -4809,7 +4795,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -4993,7 +4978,6 @@
           "maintenance_monthly": {
             "default": "0.00",
             "description": "Maintenance in INR",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Maintenance Monthly",
             "type": "string"
           },
@@ -5013,7 +4997,6 @@
           },
           "monthly_rent": {
             "description": "Monthly rent in INR",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Monthly Rent",
             "type": "string"
           },
@@ -5058,7 +5041,6 @@
           "security_deposit": {
             "default": "0.00",
             "description": "Security deposit in INR",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Security Deposit",
             "type": "string"
           },
@@ -5196,7 +5178,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -5212,7 +5193,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -5358,7 +5338,6 @@
             "type": "integer"
           },
           "monthly_rent": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Monthly Rent",
             "type": "string"
           },
@@ -5371,7 +5350,6 @@
             "type": "string"
           },
           "security_deposit": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Security Deposit",
             "type": "string"
           },
@@ -5524,7 +5502,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -5539,7 +5516,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -5565,7 +5541,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -6031,7 +6006,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -6073,7 +6047,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               }
             ],
@@ -6123,7 +6096,6 @@
           "deposit": {
             "default": "0.00",
             "description": "Security deposit in INR",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Deposit",
             "type": "string"
           },
@@ -6166,7 +6138,6 @@
           },
           "room_rent": {
             "description": "Monthly rent in INR",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Room Rent",
             "type": "string"
           },
@@ -6610,7 +6581,6 @@
             "type": "string"
           },
           "monthly_rent": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Monthly Rent",
             "type": "string"
           },
@@ -6676,7 +6646,6 @@
             "type": "string"
           },
           "monthly_rent": {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Monthly Rent",
             "type": "string"
           },
@@ -11998,7 +11967,6 @@
                   "type": "number"
                 },
                 {
-                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                   "type": "string"
                 },
                 {
@@ -12020,7 +11988,6 @@
                   "type": "number"
                 },
                 {
-                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                   "type": "string"
                 },
                 {
@@ -13044,7 +13011,6 @@
                   "type": "number"
                 },
                 {
-                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                   "type": "string"
                 },
                 {

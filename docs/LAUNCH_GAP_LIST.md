@@ -335,6 +335,21 @@ committed on your OK.
       - Prisma and `@supabase/server` from Supabase's setup page are not used: Alembic owns the
         schema and the FastAPI service is the only database client.
 
+- [x] **P8. CI had been red since `990cceb`.** mypy failed first, so pytest and the browser
+      journeys never ran, while the staging deploy kept succeeding.
+      *Done:*
+      - **mypy:** fixed the 13 errors at their cause (typed values, no ignores).
+      - **Two failures that only showed once pytest ran in CI:**
+        - The moderation eval set (`app/ml/data/`) was never committed because `.gitignore`
+          ignored every `data/` directory; that directory is now an exception.
+        - The OpenAPI snapshot differed because CI installed newer FastAPI/Pydantic than this
+          machine.
+      - **Pinned dependencies:** `apps/api/constraints.txt` holds the exact set CI tested. CI,
+        the migration, deploy and security workflows, and all three Dockerfiles install with
+        it, so production runs what was tested.
+      - **Snapshot check:** byte-for-byte with the pinned versions; at contract level (and it
+        says so) with others. Export refuses unpinned versions.
+
 ### Needs you (accounts, keys, decisions)
 - [ ] **E1. Rotate the Supabase keys and database password.** They were pasted into a chat. Do
       it before launch; then update `.env`, Secret Manager and GitHub.

@@ -1,0 +1,38 @@
+{"text": "Hi, the room is available. Please transfer 5000 token amount before visit to block it, many people are interested.", "label": "unsafe", "kind": "scam"}
+{"text": "I am in the army and got transferred to Jammu, so I can't show the flat. Pay the deposit on my UPI ramesh.k@ybl and I will courier the keys.", "label": "unsafe", "kind": "scam"}
+{"text": "Send the advance first, then I'll show you the flat on Sunday.", "label": "unsafe", "kind": "scam"}
+{"text": "Pay first and visit later, the keys are with my caretaker.", "label": "unsafe", "kind": "scam"}
+{"text": "For verification please share the OTP you just received on your phone.", "label": "unsafe", "kind": "scam"}
+{"text": "You can pay the booking amount with Amazon gift cards, it's easier for me.", "label": "unsafe", "kind": "scam"}
+{"text": "Payment only in USDT or bitcoin please, I'm currently abroad.", "label": "unsafe", "kind": "scam"}
+{"text": "Transfer 2000 right now to hold the room, otherwise it goes to someone else today itself.", "label": "unsafe", "kind": "scam"}
+{"text": "Deposit has to be paid without visiting, the society doesn't allow visitors.", "label": "unsafe", "kind": "scam"}
+{"text": "I'm posted with the CRPF in Assam, cannot come to Pune. Pay 10000 to hold the flat immediately on gpay.", "label": "unsafe", "kind": "scam"}
+{"text": "Share your UPI PIN so I can send you the refund.", "label": "unsafe", "kind": "scam"}
+{"text": "If you report me I will find where you live.", "label": "unsafe", "kind": "harassment"}
+{"text": "I'll beat you up if you don't move out by Friday.", "label": "unsafe", "kind": "harassment"}
+{"text": "You stupid bitch, stop messaging me.", "label": "unsafe", "kind": "harassment"}
+{"text": "Chutiya, you wasted my whole weekend.", "label": "unsafe", "kind": "harassment"}
+{"text": "Is the room still available from 1st December?", "label": "safe", "kind": "normal"}
+{"text": "Can I visit on Saturday around 11am? I'd like to see the kitchen as well.", "label": "safe", "kind": "normal"}
+{"text": "What's the deposit? Is it two months' rent?", "label": "safe", "kind": "normal"}
+{"text": "I can pay the deposit after the visit once we sign the agreement.", "label": "safe", "kind": "normal"}
+{"text": "Rent is 18000 plus maintenance 1500, electricity separate as per meter.", "label": "safe", "kind": "normal"}
+{"text": "Please bring a copy of your ID when we sign the rental agreement.", "label": "safe", "kind": "normal"}
+{"text": "I'm vegetarian but fine if you cook non-veg in the kitchen.", "label": "safe", "kind": "normal"}
+{"text": "I hate loud music after midnight, hope that's okay with you.", "label": "safe", "kind": "normal"}
+{"text": "My office is in Koramangala, how long is the commute from your place?", "label": "safe", "kind": "normal"}
+{"text": "I'll be there in 10 minutes, I'm near the metro.", "label": "safe", "kind": "normal"}
+{"text": "My number is 9876543210, call me when you reach the gate.", "label": "safe", "kind": "normal"}
+{"text": "Do you allow pets? I have a small indie dog, very calm.", "label": "safe", "kind": "normal"}
+{"text": "The previous tenant was a fraud, so we now verify everyone properly.", "label": "safe", "kind": "normal"}
+{"text": "I would die for a balcony like that, it's lovely!", "label": "safe", "kind": "normal"}
+{"text": "Is there a power backup? Load shedding is common in our area.", "label": "safe", "kind": "normal"}
+{"text": "We split the Wi-Fi and cook bills equally every month.", "label": "safe", "kind": "normal"}
+{"text": "Can we move the visit to Sunday? Something came up at work.", "label": "safe", "kind": "normal"}
+{"text": "Token amount is paid only after you see the flat and like it.", "label": "safe", "kind": "normal"}
+{"text": "The owner lives abroad but the caretaker can show you the flat any evening.", "label": "safe", "kind": "normal"}
+{"text": "Let's continue on WhatsApp, my number is in my profile.", "label": "review", "kind": "off_platform"}
+{"text": "Check the photos here: http://bit.ly/flat-pics-2bhk", "label": "review", "kind": "link"}
+{"text": "Send your Aadhaar copy and PAN card photo first for the police verification.", "label": "review", "kind": "documents"}
+{"text": "My UPI is meena.r@okaxis, you can pay rent there every month.", "label": "review", "kind": "upi"}

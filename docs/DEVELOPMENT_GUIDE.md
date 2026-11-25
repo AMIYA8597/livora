@@ -42,8 +42,8 @@ source .venv/bin/activate
 # Activate on Windows PowerShell:
 .\.venv\Scripts\Activate.ps1
 
-# Install dependencies in editable mode
-pip install -e .
+# Install dependencies in editable mode, at the exact versions CI tested
+pip install -e ".[dev]" -c constraints.txt
 cd ../..
 ```
 

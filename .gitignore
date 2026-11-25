@@ -76,6 +76,8 @@ pnpm-debug.log*
 
 # Database / Storage local mounts
 data/
+# Committed: the moderation model's labelled eval set (synthetic messages, no personal data).
+!apps/api/app/ml/data/
 minio_data/
 postgres_data/
 redis_data/

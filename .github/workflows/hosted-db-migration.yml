@@ -61,7 +61,7 @@ jobs:
         run: |
           pip install --upgrade pip
           # Alembic's env.py imports every app model, so the full API package is required.
-          pip install -e apps/api
+          pip install -e apps/api -c apps/api/constraints.txt
 
       - name: Verify Network Connectivity & Execute Migration
         env:
