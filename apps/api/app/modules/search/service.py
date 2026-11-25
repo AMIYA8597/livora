@@ -95,7 +95,7 @@ class SearchService:
                 query = query.order_by(distance_km, Property.id)
             else:
                 query = query.order_by(Property.created_at.desc(), Property.id)
-            rows = (await self.db.execute(query.limit(filters.limit).offset(filters.offset))).all()
+            rows = list((await self.db.execute(query.limit(filters.limit).offset(filters.offset))).all())
 
         items: List[PropertySearchResultItem] = []
         for row in rows:

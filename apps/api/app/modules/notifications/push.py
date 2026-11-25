@@ -19,6 +19,7 @@ outbox handler that also delivers to the Android and iOS apps (`native_push.py`)
 from __future__ import annotations
 
 import asyncio
+import functools
 import base64
 import json
 import logging
@@ -235,10 +236,9 @@ async def handle_push(payload: Dict[str, Any], session_factory: async_sessionmak
             failed[kind].append(target_id)
 
     for sub_id, info in web:
-        await deliver("web", sub_id, lambda info=info: _sender(info, data, ttl, urgency))
+        await deliver("web", sub_id, functools.partial(_sender, info, data, ttl, urgency))
     for device_id, platform, token in devices:
-        await deliver("device", device_id,
-                      lambda p=platform, t=token: native_push.send(p, t, message, ttl, urgency))
+        await deliver("device", device_id, functools.partial(native_push.send, platform, token, message, ttl, urgency))
 
     now = datetime.now(timezone.utc)
     first_at = _first_attempt_at(payload, now)

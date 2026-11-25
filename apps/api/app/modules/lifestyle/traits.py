@@ -125,6 +125,11 @@ def lifestyle_vector(traits: Optional[Mapping[str, Any]], dim: int = 64) -> List
     t = canonical_traits(traits)
     vec = [0.0] * dim
 
+    def key(name: str) -> str:
+        """The answer as a lookup key ("" when missing or not text, giving the default)."""
+        value = t.get(name)
+        return value if isinstance(value, str) else ""
+
     def fill(start: int, end: int, value: float, wave) -> None:
         for i in range(start, min(end, dim)):
             vec[i] = value * wave(i)
@@ -133,13 +138,13 @@ def lifestyle_vector(traits: Optional[Mapping[str, Any]], dim: int = 64) -> List
         clean = float(t.get("cleanliness_level", 3)) / 5.0
     except (TypeError, ValueError):
         clean = 0.6
-    fill(0, 8, _SLEEP.get(t.get("sleep_schedule"), 0.5), math.cos)
+    fill(0, 8, _SLEEP.get(key("sleep_schedule"), 0.5), math.cos)
     fill(8, 16, clean, math.sin)
-    fill(16, 24, _SOCIAL.get(t.get("social_battery"), 0.5), math.cos)
-    fill(24, 32, _WORK.get(t.get("work_arrangement"), 0.5), math.sin)
-    fill(32, 40, _DIET.get(t.get("diet_preference"), 0.5), math.cos)
-    fill(40, 48, _SMOKING.get(t.get("smoking"), 0.0), math.sin)
-    fill(48, 64, _PETS.get(t.get("pet_preference"), 0.5), lambda i: math.cos(i * 0.5))
+    fill(16, 24, _SOCIAL.get(key("social_battery"), 0.5), math.cos)
+    fill(24, 32, _WORK.get(key("work_arrangement"), 0.5), math.sin)
+    fill(32, 40, _DIET.get(key("diet_preference"), 0.5), math.cos)
+    fill(40, 48, _SMOKING.get(key("smoking"), 0.0), math.sin)
+    fill(48, 64, _PETS.get(key("pet_preference"), 0.5), lambda i: math.cos(i * 0.5))
 
     norm = math.sqrt(sum(x * x for x in vec))
     return [x / norm for x in vec] if norm > 0 else vec

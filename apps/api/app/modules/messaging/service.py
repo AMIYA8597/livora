@@ -389,9 +389,11 @@ class MessagingService:
         prop = await self._listing_for_chat(property_id)
         if prop.owner_id == seeker_id:
             raise BadRequestException("This is your own listing.")
-        conv = await self._find_listing_chat(prop.id, seeker_id, prop.owner_id)
-        created = conv is None
-        if created:
+        existing = await self._find_listing_chat(prop.id, seeker_id, prop.owner_id)
+        created = existing is None
+        if existing is not None:
+            conv = existing
+        else:
             await rate_limit.hit(
                 f"listing_chat:user:{seeker_id}", *LISTING_CHATS_PER_DAY,
                 message="You've contacted a lot of owners today. Try again tomorrow, or reply in your open chats.",

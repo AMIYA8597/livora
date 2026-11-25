@@ -3,7 +3,7 @@ from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, literal_column, select, text
+from sqlalchemy import ColumnElement, func, literal_column, select, text
 from sqlalchemy.orm import selectinload
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.shape import to_shape
@@ -174,7 +174,7 @@ class PropertyService:
             # PostGIS on (location::geography), which has a GiST index (migration 004). Metres.
             here = text("ST_SetSRID(ST_MakePoint(:near_lng, :near_lat), 4326)::geography").bindparams(
                 near_lng=float(near[1]), near_lat=float(near[0]))
-            geog = literal_column("properties.location::geography")
+            geog: ColumnElement = literal_column("properties.location::geography")
             conditions.append(func.ST_DWithin(geog, here, float(radius_km) * 1000.0))
             distance = func.ST_Distance(geog, here)
         if locality:

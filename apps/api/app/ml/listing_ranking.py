@@ -159,7 +159,7 @@ async def load_viewer(db: AsyncSession, user_id: Optional[UUID]) -> Viewer:
 
     vectors = await _vectors(db, weights)
     if vectors:
-        viewer.taste_vector = _unit(sum(weights[pid] * v for pid, v in vectors.items()))
+        viewer.taste_vector = _unit(np.sum([weights[pid] * v for pid, v in vectors.items()], axis=0))
     liked = (await db.execute(select(Property.id, Property.monthly_rent, Property.configuration).where(
         Property.id.in_(list(weights))))).all()
     if liked:
@@ -317,7 +317,10 @@ async def rank_listings(
         return []
     ids = [p.id for p in props]
     owners = list({p.owner_id for p in props})
-    verified = dict((await db.execute(select(User.id, User.is_verified).where(User.id.in_(owners)))).all())
+    verified: Dict[object, bool] = {
+        row[0]: bool(row[1])
+        for row in (await db.execute(select(User.id, User.is_verified).where(User.id.in_(owners)))).all()
+    }
     reports = await _open_reports(db, ids)
     responses = await owner_response_rates(db, owners)
     dupes = await _duplicates(db, props)
