@@ -110,7 +110,7 @@ async def _redis_client():
         import fakeredis  # optional locally; CI runs a real Redis
 
         return fakeredis.FakeAsyncRedis(decode_responses=True)
-    except ImportError:
+    except Exception:  # noqa: BLE001 - missing, or a fakeredis release that breaks on this redis-py
         return None
 
 

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func, update
 from sqlalchemy.orm import selectinload
+from sqlalchemy.dialects.postgresql import distinct_on
 
 from app.modules.messaging.models import (
     Conversation, ConversationParticipant, Message, Attachment,
@@ -193,7 +194,7 @@ class MessagingService:
             select(Message)
             .options(selectinload(Message.attachments))
             .where(Message.conversation_id.in_(conv_ids))
-            .distinct(Message.conversation_id)
+            .ext(distinct_on(Message.conversation_id))
             .order_by(Message.conversation_id, Message.is_deleted.asc(), Message.sent_at.desc(), Message.id.desc())
         )
         last_by_conv = {m.conversation_id: m for m in (await self.db.execute(last_q)).scalars().all()}
