@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.database import Base
 from app.core.exceptions import BadRequestException, ServiceUnavailableException
-from app.core.security import verify_password
+from app.core.security import verify_password_async
 from app.modules.users.models import AccountDeletionRequest, User
 
 logger = logging.getLogger("flatmate.privacy")
@@ -220,7 +220,7 @@ async def _stop_renewals(db: AsyncSession, user: User) -> None:
 async def request_deletion(
     db: AsyncSession, user: User, password: str, background_tasks: Optional[BackgroundTasks] = None,
 ) -> AccountDeletionRequest:
-    if not verify_password(password, user.hashed_password):
+    if not await verify_password_async(password, user.hashed_password):
         raise BadRequestException("That password isn't right.")
     existing = await _pending(db, user.id)
     if existing is not None:

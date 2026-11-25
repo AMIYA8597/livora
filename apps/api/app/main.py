@@ -1,7 +1,9 @@
 import asyncio
+import hmac
 import time
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -10,6 +12,7 @@ from app.core.logging import logger
 from app.core.observability import init_sentry
 from app.core.events import lifespan
 from app.core.middleware import RequestTraceAndSecurityMiddleware
+from app.core.overload import OverloadGuard
 from app.core.exceptions import AppException
 from app.api.v1.router import api_router
 
@@ -30,8 +33,11 @@ app = FastAPI(
 async def app_exception_handler(request: Request, exc: AppException):
     return exc.to_problem_response(request)
 
-# Custom Middlewares
+# Middlewares, innermost first: tracing and security headers, then overload protection and
+# request metrics (app/core/overload.py), then CORS outermost so even a "busy" 503 is readable
+# by the browser.
 app.add_middleware(RequestTraceAndSecurityMiddleware)
+app.add_middleware(OverloadGuard)
 
 app.add_middleware(
     CORSMiddleware,
@@ -95,6 +101,22 @@ async def readiness_check(response: Response):
     response.status_code = 200 if ready else 503
     response.headers["Cache-Control"] = "no-store"
     return {"status": "ready" if ready else "not_ready", "release": settings.APP_RELEASE, "checks": checks}
+
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics(request: Request):
+    """Prometheus text for this process (app/core/metrics.py). Exists only when METRICS_TOKEN is
+    set, and needs it as a bearer token."""
+    from app.core.metrics import render_prometheus
+
+    token = settings.METRICS_TOKEN
+    supplied = request.headers.get("authorization", "")
+    if not token:
+        return PlainTextResponse("Not Found", status_code=404)
+    if not hmac.compare_digest(supplied.encode(), f"Bearer {token}".encode()):
+        return PlainTextResponse("Unauthorized", status_code=401, headers={"WWW-Authenticate": "Bearer"})
+    return PlainTextResponse(render_prometheus(), media_type="text/plain; version=0.0.4",
+                             headers={"Cache-Control": "no-store"})
+
 
 @app.get("/", tags=["System"])
 async def root():

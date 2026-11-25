@@ -50,4 +50,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health/live || exit 1
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# WEB_CONCURRENCY processes (one per vCPU, set by the deploy). Keep-alive above the load
+# balancer's idle timeout; in-flight requests get 8 s to finish when an instance is stopped.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --timeout-keep-alive 75 --timeout-graceful-shutdown 8 --backlog 2048 --no-server-header"]

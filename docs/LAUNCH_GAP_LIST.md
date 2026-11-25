@@ -200,6 +200,29 @@ Gathered from the open items below and every item's "Not covered" notes.
           every role: super admin (via the command line), admin, moderator, owner, PG operator,
           tenant, seeker and broker. All 74 passed.
 
+- [x] **L14. Capacity: 10,000 people at once without errors or crashes.** *(Code done
+      2026-11-25; production sizing is E13.)*
+      - **Found:** password hashing ran on the event loop (~250 ms each), and a busy database
+        pool hung for 30 s and then returned 500. Nothing was cached, and an unknown token key
+        id refetched Supabase's keys on every request. Every signed-in tab's socket queried the
+        database each minute, and the deploy set no instance limits.
+      - **Fixed:**
+        - bcrypt runs in threads;
+        - overload answers `503` + `Retry-After` (shedding, database busy) or `504` (a 30 s
+          deadline), and the web app retries those quietly;
+        - hot public reads are cached (`hot_cache.py`), with concurrent misses coalesced;
+        - Supabase keys are fetched at most once a minute, and sockets re-check every 5 min;
+        - uvicorn keep-alive is 75 s, with one process per vCPU and graceful shutdown;
+        - Cloud Run sizing comes from GitHub variables, with a separate realtime service for
+          sockets.
+      - **Traffic monitoring:**
+        - an admin **Traffic** tab, live and summed over all instances through Redis;
+        - Prometheus `/metrics`;
+        - a Cloud Monitoring dashboard and four alert policies in `infrastructure/monitoring/`.
+      - **Measured** (`loadtests/`): one process served 700 users at 109 requests a second with
+        0% failures and p95 260 ms. At 4× that it turned the excess away quickly, with no 500s
+        and no crash, and recovered at once. It held 5,000 sockets with none dropped.
+
 ### Next phase: India-wide, smarter search, app-ready (collected 2026-11-24)
 Asked for after L1-L12: every state's capital, current location, smarter room finding, chat where
 it helps, clear layers, and later Android/iOS apps. Same workflow: one at a time, tested, then
@@ -573,6 +596,21 @@ committed on your OK.
 - [ ] **E12. Appoint the first real super admin** once production is up (L13). Choose which
       email it is. Sign up on the live site, run `scripts/grant_role.py` with the owner database
       URL, and appoint other staff from the console.
+- [ ] **E13. Capacity for 10,000 people at once** (L14, docs/CAPACITY_PLAN.md). The code side
+      is done and measured. These need your accounts and cost money:
+      - **a. Upgrade Supabase compute.** The Free/Nano plan allows 200 pooler clients and 60
+        database connections; production needs about 665 clients. Use **Large** at minimum
+        (~$110/month) or **XL** for launch week (~$210/month), and connect through the
+        transaction pooler (port 6543).
+      - **b. Redis in production** (part of E3): Memorystore Basic 1 GB or a managed Redis,
+        stored as the `PRODUCTION_REDIS_URL` secret. Without it the realtime service isn't
+        deployed and each instance's cache and limits are its own.
+      - **c. Set `NEXT_PUBLIC_WS_URL`** in Vercel production to the realtime service's address
+        (the first deploy prints it).
+      - **d. Apply the dashboard and alert policies** (`infrastructure/monitoring/`) and add a
+        notification channel. Optionally set `METRICS_TOKEN` to scrape `/metrics`.
+      - **e. Run the 10,000-user rehearsal on staging, sized like production**
+        (CAPACITY_PLAN.md section 7) and record the results here.
 
 ## P0 — Blocks launch
 

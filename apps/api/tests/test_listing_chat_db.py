@@ -21,6 +21,7 @@ from app.modules.appointments.schemas import AppointmentStatusUpdate
 from app.modules.appointments.service import AppointmentService
 from app.modules.messaging.contact_guard import HIDDEN, VISIT_CONFIRMED_NOTE, hide_contacts
 from app.modules.messaging.models import Conversation, ConversationParticipant, Message, OutboxEvent
+from app.core import hot_cache
 from app.modules.messaging.response_time import MIN_CHATS, owner_response, response_label
 from app.modules.notifications.models import Notification
 from app.modules.properties.models import Property
@@ -262,6 +263,7 @@ async def test_owner_response_badge(async_client, listing):
 
 
 async def _badge(listing):
+    hot_cache.clear()  # the badge is cached per owner; this test changes the chats in between
     async with AsyncSessionLocal() as s:
         return await owner_response(s, listing.owner)
 

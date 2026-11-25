@@ -11,11 +11,13 @@ import { formatDate, formatCurrency } from "@/lib/utils";
 import { ApplicationsPanel } from "@/features/admin/ApplicationsPanel";
 import { BillingEventsPanel } from "@/features/admin/BillingEventsPanel";
 import { RoleRequestsPanel } from "@/features/admin/RoleRequestsPanel";
+import { TrafficPanel } from "@/features/admin/TrafficPanel";
 import { UserRolesDialog } from "@/features/admin/UserRolesDialog";
 import { canManageAccount, consoleTabs, grantableRoles, removableRoles, type ConsoleTab } from "@/lib/staff-access";
 import { roleLabel } from "@/lib/role-request-model";
 import { reportNeedsAction } from "@/lib/moderation-reports";
 import {
+  Gauge,
   ShieldCheck,
   ShieldAlert,
   Users,
@@ -236,6 +238,14 @@ export default function AdminModerationPage() {
           }`}
         >
           <Activity className="w-4 h-4" /> System Overview
+        </button>}
+        {has("traffic") && <button
+          onClick={() => setActiveTab("traffic")}
+          className={`pb-3 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === "traffic" ? "border-forest text-forest font-bold" : "border-transparent text-charcoal-muted hover:text-charcoal"
+          }`}
+        >
+          <Gauge className="w-4 h-4" /> Traffic
         </button>}
         {has("moderation") && <button
           onClick={() => setActiveTab("moderation")}
@@ -459,6 +469,8 @@ export default function AdminModerationPage() {
 
       {/* Broker requests: approve, or decline with a reason the member sees */}
       {activeTab === "roles" && <RoleRequestsPanel onDone={notify} />}
+
+      {activeTab === "traffic" && <TrafficPanel />}
 
       {/* Tab 4: Users */}
       {activeTab === "users" && (

@@ -65,7 +65,12 @@ def test_cli_writes_env_files_and_outputs(tmp_path):
         "--extra-env-file", str(tmp_path / "runtime.env"), "--out-dir", str(tmp_path / "out"),
     ])
     assert code == 0
-    assert 'WEB_BASE_URL: "https://staging.example"' in (tmp_path / "out" / "api-env.yaml").read_text()
+    api = (tmp_path / "out" / "api-env.yaml").read_text()
+    assert 'WEB_BASE_URL: "https://staging.example"' in api and 'WEB_CONCURRENCY: "1"' in api
+    realtime = (tmp_path / "out" / "realtime-env.yaml").read_text()
+    assert 'WEB_CONCURRENCY: "1"' in realtime and 'MAX_IN_FLIGHT_REQUESTS: "100"' in realtime
+    assert 'DB_POOL_SIZE: "5"' in realtime and 'DB_MAX_OVERFLOW: "5"' in realtime
+    assert 'WEB_BASE_URL: "https://staging.example"' in realtime
     worker = (tmp_path / "out" / "worker-env.yaml").read_text()
     assert 'WORKER_CONCURRENCY: "2"' in worker and 'APP_RELEASE: "abc"' in worker
     outputs = (tmp_path / "out" / "outputs").read_text()
@@ -79,3 +84,14 @@ def test_legacy_supabase_keys_are_not_deployed(legacy):
         deploy_runtime.parse_env_lines(f"{legacy}=x")
     assert legacy not in deploy_runtime.SECRETS
     assert "SUPABASE_SECRET_KEY" in deploy_runtime.SECRETS
+
+
+def test_api_workers_follow_the_vcpus(tmp_path):
+    (tmp_path / "secrets.txt").write_text("PRODUCTION_APP_DATABASE_URL\nPRODUCTION_SECRET_KEY\n")
+    args = ["--environment", "production", "--prefix", "PRODUCTION", "--release", "abc", "--project", "p",
+            "--project-name", "Flatmate", "--available-secrets-file", str(tmp_path / "secrets.txt"),
+            "--out-dir", str(tmp_path / "out")]
+    assert deploy_runtime.main(args + ["--api-workers", "2"]) == 0
+    assert 'WEB_CONCURRENCY: "2"' in (tmp_path / "out" / "api-env.yaml").read_text()
+    assert deploy_runtime.main(args + ["--api-workers", "0"]) == 1
+    assert deploy_runtime.main(args + ["--api-workers", "lots"]) == 1

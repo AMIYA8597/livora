@@ -1,0 +1,20 @@
+{
+  "displayName": "Flatmate API: turning requests away (503)",
+  "documentation": {
+    "content": "flatmate-api answered more than 1 request a second with 503 for 5 minutes: instances are full (SERVER_BUSY) or the database is out of connections (SERVICE_BUSY). The web app retries these quietly, but users will notice soon. Look at the Traffic tab (turned away, database connections) and docs/CAPACITY_PLAN.md: raise `API_MAX_INSTANCES` if instances are at the max and the database has headroom; otherwise upgrade the database compute and pooler first.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "503s above 1/s (5 min)",
+      "conditionPrometheusQueryLanguage": {
+        "query": "sum(rate(run_googleapis_com:request_count{monitored_resource=\"cloud_run_revision\",service_name=\"flatmate-api\",response_code=\"503\"}[5m])) > 1",
+        "duration": "300s",
+        "evaluationInterval": "60s"
+      }
+    }
+  ],
+  "alertStrategy": {"autoClose": "1800s"},
+  "severity": "CRITICAL"
+}

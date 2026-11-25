@@ -28,7 +28,7 @@ from app.workers.outbox import dispatch_pending
 
 T = TypeVar("T")
 
-POOL_KEYS = {"pool_size", "max_overflow"}
+POOL_KEYS = {"pool_size", "max_overflow", "pool_timeout"}
 
 
 def timeout_statements(seconds: int) -> list[str]:

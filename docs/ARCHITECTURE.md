@@ -49,7 +49,11 @@ flowchart LR
 - **A modular monolith.** One FastAPI process, split into domain modules (`app/modules/*`). It
   scales by running more identical instances. Anything shared between instances lives in
   Postgres or Redis, never in process memory (rate limits, realtime fan-out, geocoder
-  throttling).
+  throttling, the traffic numbers). Process memory holds only short-lived caches.
+- **Built for 10,000 people at once.** In production the same image runs as two Cloud Run
+  services: `flatmate-api` for requests and `flatmate-realtime` for sockets. Hot public reads
+  are cached. An overloaded instance answers "busy, retry" instead of failing. The sizing, the
+  measurements and the alerts are in [CAPACITY_PLAN.md](CAPACITY_PLAN.md).
 - **Slow or outside work happens later, in workers.** A request writes its change and an
   `outbox_events` row in one transaction. The worker sends emails and push notifications,
   calls Claude, geocodes and refreshes embeddings afterwards, with retries.
@@ -221,7 +225,10 @@ Then it calls a service.
 | `dependencies.py` | `get_current_user` (an access token for an existing, active account, with its roles loaded), `get_optional_user`, `require_roles`, `role_names`, `has_admin_role`, `STAFF_ROLES`. |
 | `roles.py` | The role model: sign-up roles, requestable roles (broker), staff roles, `LISTING_ROLES`, and who may grant what (`can_grant`, `can_manage_account`). |
 | `exceptions.py` | Typed errors returned as RFC 7807 problem documents. |
-| `middleware.py` | Request id (`X-Request-ID`), cloud trace id, timing, request body size limits, security headers. |
+| `middleware.py` | Request id (`X-Request-ID`), cloud trace id, timing, request body size limits, security headers. A busy database (pool exhausted, too many connections, statement timeout) becomes `503` + `Retry-After`, not `500`. |
+| `overload.py` | `OverloadGuard`: sheds requests past `MAX_IN_FLIGHT_REQUESTS` with `503` + `Retry-After`, stops requests after `REQUEST_TIMEOUT_SECONDS` with `504`, never refuses health checks, and measures every request by route template. |
+| `metrics.py` | Live traffic: the last minute per process (requests, status classes, latency histogram, refusals, event-loop delay, pool and sockets), summed across instances through Redis for the admin Traffic tab (`GET /admin/traffic`), and Prometheus text at `/metrics` (needs `METRICS_TOKEN`). |
+| `hot_cache.py` | Short-lived cache for reads that are the same for everyone (city catalogue, anonymous listing pages, owner reply time). Memory plus Redis; concurrent misses load once; never fails a request. |
 | `rate_limit.py` | Sliding-window limits in Redis, shared by all instances, falling back to per-process. Signed-in callers are keyed by user, anonymous ones by IP (trusting only `TRUSTED_PROXY_HOPS` proxies). `hit()` is for custom keys (per email, per seeker per day). |
 | `logging.py`, `observability.py` | JSON log lines with request ids, and Sentry when configured. Logs carry paths, not query strings, and no message text or personal data. |
 
@@ -286,6 +293,11 @@ nothing depends on an outside model being up.**
   token). The socket closes when the token expires or the account is disabled.
 - **Fan-out.** Events go through Redis pub/sub (`broker.py`), so a message sent to one
   instance reaches sockets on all of them; without Redis it falls back to in-memory.
+- **Where sockets live.** In production, sockets connect to a separate Cloud Run service
+  (`flatmate-realtime`, the same image, 1,000 sockets an instance; the web app's
+  `NEXT_PUBLIC_WS_URL`). Idle sockets then don't take the API's request slots. Each socket
+  re-checks its account every 5 minutes. Disabling an account closes its sockets at once
+  everywhere.
 - **Sending.** Messages can be sent over the socket or REST. Both go through
   `MessagingService.send_message`, so the same rate limit, block checks and moderation apply.
 - **Contact details in listing chats** stay hidden until the owner confirms a visit

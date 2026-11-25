@@ -6947,6 +6947,277 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "TrafficInstance": {
+        "properties": {
+          "db_pool": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Db Pool",
+            "type": "object"
+          },
+          "in_flight": {
+            "default": 0,
+            "title": "In Flight",
+            "type": "integer"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instance"
+          },
+          "loop_lag_ms": {
+            "default": 0.0,
+            "title": "Loop Lag Ms",
+            "type": "number"
+          },
+          "requests": {
+            "default": 0,
+            "title": "Requests",
+            "type": "integer"
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds"
+          },
+          "websockets": {
+            "default": 0,
+            "title": "Websockets",
+            "type": "integer"
+          }
+        },
+        "title": "TrafficInstance",
+        "type": "object"
+      },
+      "TrafficLatency": {
+        "properties": {
+          "p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50"
+          },
+          "p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95"
+          },
+          "p99": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P99"
+          }
+        },
+        "title": "TrafficLatency",
+        "type": "object"
+      },
+      "TrafficPool": {
+        "properties": {
+          "checked_out": {
+            "default": 0,
+            "title": "Checked Out",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "TrafficPool",
+        "type": "object"
+      },
+      "TrafficRoute": {
+        "properties": {
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Ms"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "requests",
+          "errors"
+        ],
+        "title": "TrafficRoute",
+        "type": "object"
+      },
+      "TrafficSnapshot": {
+        "properties": {
+          "db_pool": {
+            "$ref": "#/components/schemas/TrafficPool"
+          },
+          "error_rate": {
+            "title": "Error Rate",
+            "type": "number"
+          },
+          "in_flight": {
+            "title": "In Flight",
+            "type": "integer"
+          },
+          "instances": {
+            "title": "Instances",
+            "type": "integer"
+          },
+          "latency_ms": {
+            "$ref": "#/components/schemas/TrafficLatency"
+          },
+          "loop_lag_ms": {
+            "default": 0.0,
+            "title": "Loop Lag Ms",
+            "type": "number"
+          },
+          "per_instance": {
+            "items": {
+              "$ref": "#/components/schemas/TrafficInstance"
+            },
+            "title": "Per Instance",
+            "type": "array"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "requests_per_second": {
+            "title": "Requests Per Second",
+            "type": "number"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/TrafficRoute"
+            },
+            "title": "Routes",
+            "type": "array"
+          },
+          "scope": {
+            "enum": [
+              "all_instances",
+              "this_instance"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "shed": {
+            "title": "Shed",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrafficStatus"
+          },
+          "timeouts": {
+            "title": "Timeouts",
+            "type": "integer"
+          },
+          "unavailable": {
+            "title": "Unavailable",
+            "type": "integer"
+          },
+          "websockets": {
+            "title": "Websockets",
+            "type": "integer"
+          },
+          "window_seconds": {
+            "title": "Window Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "scope",
+          "window_seconds",
+          "instances",
+          "requests",
+          "requests_per_second",
+          "status",
+          "error_rate",
+          "latency_ms",
+          "shed",
+          "timeouts",
+          "unavailable",
+          "in_flight",
+          "websockets",
+          "db_pool",
+          "routes",
+          "per_instance"
+        ],
+        "title": "TrafficSnapshot",
+        "type": "object"
+      },
+      "TrafficStatus": {
+        "properties": {
+          "2xx": {
+            "default": 0,
+            "title": "2Xx",
+            "type": "integer"
+          },
+          "3xx": {
+            "default": 0,
+            "title": "3Xx",
+            "type": "integer"
+          },
+          "4xx": {
+            "default": 0,
+            "title": "4Xx",
+            "type": "integer"
+          },
+          "5xx": {
+            "default": 0,
+            "title": "5Xx",
+            "type": "integer"
+          }
+        },
+        "title": "TrafficStatus",
+        "type": "object"
+      },
       "UploadResponse": {
         "properties": {
           "bucket": {
@@ -7811,6 +8082,33 @@
           }
         ],
         "summary": "Get System Stats",
+        "tags": [
+          "Administration & Operations"
+        ]
+      }
+    },
+    "/api/v1/admin/traffic": {
+      "get": {
+        "description": "Live traffic over the last minute: requests per second, errors, latency, refusals under\nload, connections in use, open sockets, the busiest routes and each instance. Added up over\nevery running instance when Redis is connected, else this instance only (`scope`).",
+        "operationId": "get_traffic_api_v1_admin_traffic_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Traffic",
         "tags": [
           "Administration & Operations"
         ]

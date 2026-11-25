@@ -6,13 +6,18 @@ Listings are saved under the official city name, and searches by any name find t
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import List, Optional, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import hot_cache
 from app.modules.locations.models import City, Country, State
+
+# The catalogue changes only with a migration or an admin turning a city on; five minutes stale
+# at most, and searches by city no longer read the whole catalogue each time.
+CATALOGUE_TTL_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,12 @@ class LocationService:
 
     async def cities(self, active_only: bool = True) -> List[CatalogueCity]:
         """Every catalogue city, grouped by state name then city name."""
+        rows = await hot_cache.cached(
+            f"locations:cities:{'active' if active_only else 'all'}", CATALOGUE_TTL_SECONDS,
+            lambda: self._load_cities(active_only))
+        return [CatalogueCity(**{**row, "aliases": tuple(row["aliases"])}) for row in rows]
+
+    async def _load_cities(self, active_only: bool) -> List[dict]:
         capitals = select(State.capital_city_id).where(State.capital_city_id.is_not(None))
         query = (
             select(City, State,
@@ -54,13 +65,17 @@ class LocationService:
             query = query.where(City.is_active.is_(True))
         rows = (await self.db.execute(query)).all()
         return [
-            CatalogueCity(slug=c.slug, name=c.name, state=s.name, state_code=s.code, state_kind=s.kind,
-                          is_capital=bool(cap), tier=c.tier, latitude=lat, longitude=lng,
-                          aliases=tuple(c.aliases or ()), is_active=c.is_active)
+            {**asdict(CatalogueCity(
+                slug=c.slug, name=c.name, state=s.name, state_code=s.code, state_kind=s.kind,
+                is_capital=bool(cap), tier=c.tier, latitude=lat, longitude=lng,
+                aliases=tuple(c.aliases or ()), is_active=c.is_active)), "aliases": list(c.aliases or ())}
             for c, s, lat, lng, cap in rows
         ]
 
     async def states(self) -> List[dict]:
+        return await hot_cache.cached("locations:states", CATALOGUE_TTL_SECONDS, self._load_states)
+
+    async def _load_states(self) -> List[dict]:
         capital = City.__table__.alias("capital")
         rows = (await self.db.execute(
             select(State.code, State.name, State.kind, capital.c.name, capital.c.slug)

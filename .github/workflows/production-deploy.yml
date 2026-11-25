@@ -151,6 +151,16 @@ jobs:
           worker-service: flatmate-worker
           runtime-env: ${{ vars.RUNTIME_ENV }}
           require-redis: "true"
+          # Launch sizing for 10,000 people at once (docs/CAPACITY_PLAN.md). Override with
+          # GitHub variables without editing this file.
+          api-min-instances: ${{ vars.API_MIN_INSTANCES || '2' }}
+          api-max-instances: ${{ vars.API_MAX_INSTANCES || '30' }}
+          api-concurrency: ${{ vars.API_CONCURRENCY || '80' }}
+          api-cpu: ${{ vars.API_CPU || '1' }}
+          api-memory: ${{ vars.API_MEMORY || '1Gi' }}
+          realtime-service: ${{ vars.REALTIME_SERVICE || 'flatmate-realtime' }}
+          realtime-min-instances: ${{ vars.REALTIME_MIN_INSTANCES || '2' }}
+          realtime-max-instances: ${{ vars.REALTIME_MAX_INSTANCES || '20' }}
           vpc-network: ${{ vars.PRODUCTION_VPC_NETWORK }}
           vpc-subnet: ${{ vars.PRODUCTION_VPC_SUBNET }}
 

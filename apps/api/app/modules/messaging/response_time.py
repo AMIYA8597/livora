@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 RESPONSE_DAYS = 90
 REPLY_WINDOW_DAYS = 7
 MIN_CHATS = 3
+OWNER_RESPONSE_TTL_SECONDS = 600
 
 
 def response_label(reply_rate: float, median_minutes: Optional[float]) -> str:
@@ -32,6 +33,15 @@ def response_label(reply_rate: float, median_minutes: Optional[float]) -> str:
 
 
 async def owner_response(db: AsyncSession, owner_id: UUID) -> Optional[dict]:
+    """Cached for a few minutes per owner: it's a 90-day aggregate shown on every view of
+    every listing they have, and a reply-time badge doesn't need to be to-the-second."""
+    from app.core import hot_cache
+
+    return await hot_cache.cached(f"owner_response:{owner_id}", OWNER_RESPONSE_TTL_SECONDS,
+                                  lambda: _owner_response(db, owner_id))
+
+
+async def _owner_response(db: AsyncSession, owner_id: UUID) -> Optional[dict]:
     row = (await db.execute(text(
         """
         WITH firsts AS (

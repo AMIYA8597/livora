@@ -1,0 +1,20 @@
+{
+  "displayName": "Flatmate API: near its instance limit",
+  "documentation": {
+    "content": "flatmate-api has run at 80% or more of its max instances for 10 minutes (the threshold assumes the launch max of 30: update it with `API_MAX_INSTANCES`). Past the max, Cloud Run queues and then refuses requests. Before raising the max, check that instances x (DB_POOL_SIZE + DB_MAX_OVERFLOW) still fits the database pooler's client limit (docs/CAPACITY_PLAN.md).",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "24+ of 30 instances (10 min)",
+      "conditionPrometheusQueryLanguage": {
+        "query": "sum(run_googleapis_com:container_instance_count{monitored_resource=\"cloud_run_revision\",service_name=\"flatmate-api\",state=\"active\"}) >= 24",
+        "duration": "600s",
+        "evaluationInterval": "60s"
+      }
+    }
+  ],
+  "alertStrategy": {"autoClose": "1800s"},
+  "severity": "WARNING"
+}

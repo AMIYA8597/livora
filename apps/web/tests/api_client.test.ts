@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { apiClient, ApiError, NetworkError, API_BASE_URL, refreshAccessToken } from '../lib/api-client.ts';
+import { apiClient, ApiError, NetworkError, API_BASE_URL, refreshAccessToken, busyRetryDelayMs, BUSY_RETRIES } from '../lib/api-client.ts';
 
 // Mock localStorage for Node test environment
 class MockLocalStorage {
@@ -253,5 +253,71 @@ test('a rejected refresh token clears the session and announces it', async () =>
     globalThis.fetch = originalFetch;
     (globalThis as any).window.dispatchEvent = () => true;
     mockStorage.clear();
+  }
+});
+
+
+test('busy 503s are retried after Retry-After, with jitter, a limited number of times', () => {
+  const half = () => 0.5;
+  // Refused before any work: every method may retry.
+  assert.strictEqual(busyRetryDelayMs('GET', 503, 'SERVER_BUSY', '2', 0, half), 2000);
+  assert.strictEqual(busyRetryDelayMs('POST', 503, 'SERVER_BUSY', '3', 1, half), 3000);
+  // Database busy: reads only (a write may have got partway).
+  assert.strictEqual(busyRetryDelayMs('GET', 503, 'SERVICE_BUSY', '2', 0, half), 2000);
+  assert.strictEqual(busyRetryDelayMs('POST', 503, 'SERVICE_BUSY', '2', 0, half), null);
+  // Jitter spreads the wait between 0.5x and 1.5x; long waits are capped.
+  assert.strictEqual(busyRetryDelayMs('GET', 503, 'SERVER_BUSY', '2', 0, () => 0), 1000);
+  assert.strictEqual(busyRetryDelayMs('GET', 503, 'SERVER_BUSY', '60', 0, half), 5000);
+  // No header: one second.
+  assert.strictEqual(busyRetryDelayMs('GET', 503, 'SERVER_BUSY', null, 0, half), 1000);
+  // Other errors, and after the last retry, are shown.
+  assert.strictEqual(busyRetryDelayMs('GET', 503, 'SERVER_BUSY', '2', BUSY_RETRIES, half), null);
+  assert.strictEqual(busyRetryDelayMs('GET', 503, undefined, '2', 0, half), null);
+  assert.strictEqual(busyRetryDelayMs('GET', 500, 'SERVER_BUSY', '2', 0, half), null);
+  assert.strictEqual(busyRetryDelayMs('GET', 429, 'RATE_LIMITED', '2', 0, half), null);
+});
+
+test('apiClient retries a busy 503 and returns the later answer', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = globalThis.setTimeout;
+  let calls = 0;
+  // Run the retry wait at once.
+  (globalThis as any).setTimeout = (fn: () => void, ms?: number) => originalTimeout(fn, ms && ms > 100 ? 0 : ms);
+  globalThis.fetch = (async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response(JSON.stringify({ status: 503, title: 'Server Busy', error_code: 'SERVER_BUSY' }), {
+        status: 503, headers: { 'Content-Type': 'application/problem+json', 'Retry-After': '2' },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const body = await apiClient<{ ok: boolean }>('/busy-then-ok');
+    assert.deepStrictEqual(body, { ok: true });
+    assert.strictEqual(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as any).setTimeout = originalTimeout;
+  }
+});
+
+test('apiClient shows the busy error once the retries are used up', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = globalThis.setTimeout;
+  let calls = 0;
+  (globalThis as any).setTimeout = (fn: () => void, ms?: number) => originalTimeout(fn, ms && ms > 100 ? 0 : ms);
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ status: 503, title: 'Server Busy', error_code: 'SERVER_BUSY', detail: 'Busy' }), {
+      status: 503, headers: { 'Content-Type': 'application/problem+json', 'Retry-After': '2' },
+    });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(apiClient('/always-busy'), (err: unknown) => err instanceof ApiError && err.status === 503);
+    assert.strictEqual(calls, 1 + BUSY_RETRIES);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as any).setTimeout = originalTimeout;
   }
 });

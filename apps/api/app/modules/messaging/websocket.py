@@ -42,8 +42,10 @@ ACCOUNT_DISABLED_EVENT = "internal.account_disabled"
 # Same code as an invalid token: the client renews its token, which fails for a disabled
 # account, and signs out.
 WS_CLOSE_ACCOUNT_DISABLED = 4003
-# A connected socket re-checks that its account is still active at most this often.
-ACCOUNT_RECHECK_SECONDS = 60
+# A connected socket re-checks that its account is still active at most this often. It's the
+# fallback: disabling an account closes its sockets at once through ACCOUNT_DISABLED_EVENT. Every
+# signed-in tab holds a socket, so at 10,000 users 60 s meant ~170 queries a second; 5 min is ~33.
+ACCOUNT_RECHECK_SECONDS = 300
 
 PRESENCE_KEY = "flatmate:presence:{user_id}"
 LAST_SEEN_KEY = "flatmate:last_seen:{user_id}"

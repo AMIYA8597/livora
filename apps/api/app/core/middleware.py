@@ -12,6 +12,7 @@ from app.core.client_version import is_exempt, upgrade_required
 from app.core.exceptions import AppException
 from app.core.logging import clean_request_id, cloud_trace, logger, request_id_var, trace_var
 from app.core.observability import tag_request
+from app.core.overload import busy_response
 
 # Maximum allowed request body size in bytes (10 Megabytes)
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
@@ -91,6 +92,11 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
         except AppException as app_exc:
             return app_exc.to_problem_response(request)
         except Exception as exc:
+            # Out of database connections, or the database is overloaded: "busy, retry", not a bug.
+            busy = busy_response(exc, request.url.path, request_id)
+            if busy is not None:
+                busy.headers["X-Request-ID"] = request_id
+                return busy
             # Logged with the traceback; with Sentry on, this is what reports the error.
             logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {type(exc).__name__}")
             return JSONResponse(

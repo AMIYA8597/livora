@@ -7,7 +7,7 @@
  *   platform stats, listing approval, user management, role requests and payment events stay
  *   admin-only.
  */
-export type ConsoleTab = "stats" | "moderation" | "properties" | "applications" | "users" | "roles" | "payments";
+export type ConsoleTab = "stats" | "traffic" | "moderation" | "properties" | "applications" | "users" | "roles" | "payments";
 
 export const STAFF_ROLES = ["moderator", "admin", "super_admin"] as const;
 
@@ -26,7 +26,7 @@ export const ALL_ROLES = [
 /** Roles only a super admin can grant, and accounts only a super admin can change. */
 const SUPER_ADMIN_ONLY = ["admin", "super_admin"];
 
-const ADMIN_TABS: ConsoleTab[] = ["stats", "moderation", "properties", "applications", "users", "roles", "payments"];
+const ADMIN_TABS: ConsoleTab[] = ["stats", "traffic", "moderation", "properties", "applications", "users", "roles", "payments"];
 const MODERATOR_TABS: ConsoleTab[] = ["moderation", "applications"];
 
 export function isAdminRoles(roles: readonly string[]): boolean {

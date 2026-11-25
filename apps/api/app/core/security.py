@@ -13,6 +13,8 @@ through its ecdsa dependency, PYSEC-2026-1325).
 import hashlib
 import hmac
 
+import anyio
+import anyio.to_thread
 import bcrypt
 import time
 import httpx
@@ -50,6 +52,7 @@ def require_signing_key() -> None:
 
 _JWKS_CACHE: Dict[str, Any] = {"keys": {}, "last_fetched": 0.0}
 _JWKS_CACHE_TTL = 3600  # 1 hour TTL
+_JWKS_MIN_REFETCH_SECONDS = 60
 
 def _get_jwks_key(kid: Optional[str]) -> Optional[Any]:
     global _JWKS_CACHE
@@ -62,6 +65,11 @@ def _get_jwks_key(kid: Optional[str]) -> Optional[Any]:
 
     if kid in _JWKS_CACHE["keys"] and (now - _JWKS_CACHE["last_fetched"]) < _JWKS_CACHE_TTL:
         return _JWKS_CACHE["keys"][kid]
+    # An unknown key id triggers a refetch (keys rotate), but at most once a minute: the fetch
+    # blocks, and tokens with made-up key ids must not turn every request into one.
+    if now - _JWKS_CACHE.get("last_attempt", 0.0) < _JWKS_MIN_REFETCH_SECONDS:
+        return _JWKS_CACHE["keys"].get(kid)
+    _JWKS_CACHE["last_attempt"] = now
 
     try:
         with httpx.Client(timeout=5.0) as client:
@@ -98,6 +106,21 @@ def get_password_hash(password: str) -> str:
     """Derives a bcrypt password hash with cost factor 12."""
     salt = bcrypt.gensalt(rounds=12)
     return bcrypt.hashpw(password.encode("utf-8")[:72], salt).decode("utf-8")
+
+
+# bcrypt at cost 12 is ~250 ms of CPU. Run on the event loop it stalls every other request on
+# the process, so async code uses these: worker threads (bcrypt releases the GIL), a few at a
+# time so a burst of sign-ins queues here instead of starving everything else.
+_PASSWORD_THREADS = anyio.CapacityLimiter(4)
+
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    return await anyio.to_thread.run_sync(
+        verify_password, plain_password, hashed_password, limiter=_PASSWORD_THREADS)
+
+
+async def get_password_hash_async(password: str) -> str:
+    return await anyio.to_thread.run_sync(get_password_hash, password, limiter=_PASSWORD_THREADS)
 
 def create_access_token(
     subject: str,

@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.infrastructure.cache import init_redis, close_redis
@@ -16,6 +18,15 @@ async def lifespan(app: FastAPI):
     init_email_provider()
     init_sms_provider()
     await warn_if_overprivileged()
+    from app.core.metrics import publish_forever, watch_loop_lag
+
+    # The admin Traffic tab's fleet view, and the event-loop delay it shows.
+    background = [asyncio.create_task(publish_forever()), asyncio.create_task(watch_loop_lag())]
     yield
     # Shutdown: gracefully close connections
+    for task in background:
+        task.cancel()
+    for task in background:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
     await close_redis()

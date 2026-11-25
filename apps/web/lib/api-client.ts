@@ -65,6 +65,46 @@ export interface RequestOptions extends RequestInit {
   timeoutMs?: number;
   skipAuthRefresh?: boolean;
   token?: string | null;
+  /** Internal: how many times this request was already retried because the server was busy. */
+  busyAttempt?: number;
+}
+
+/** Retries after a "busy" 503 before the error is shown. */
+export const BUSY_RETRIES = 2;
+const MAX_BUSY_WAIT_MS = 5000;
+
+/**
+ * How long to wait before retrying a 503 the server sent because it was busy, or null to give up.
+ *
+ * SERVER_BUSY means the request was refused before any work, so any method may retry.
+ * SERVICE_BUSY (the database was out of connections) is retried only for reads: a write may
+ * have got partway. Waits Retry-After (capped), with jitter so clients don't return together.
+ */
+export function busyRetryDelayMs(
+  method: string,
+  status: number,
+  errorCode: string | undefined,
+  retryAfter: string | null,
+  attempt: number,
+  random: () => number = Math.random,
+): number | null {
+  if (status !== 503 || attempt >= BUSY_RETRIES) return null;
+  const read = ["GET", "HEAD"].includes(method.toUpperCase());
+  if (errorCode !== "SERVER_BUSY" && !(errorCode === "SERVICE_BUSY" && read)) return null;
+  const seconds = Number(retryAfter);
+  const base = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 1000;
+  return Math.round(Math.min(base, MAX_BUSY_WAIT_MS) * (0.5 + random()));
+}
+
+function wait(ms: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    }, { once: true });
+  });
 }
 
 let refreshInFlight: Promise<string | null> | null = null;
@@ -123,6 +163,7 @@ export async function apiClient<T>(
     skipAuthRefresh = false,
     token: explicitToken,
     signal: callerSignal,
+    busyAttempt = 0,
     ...customConfig
   } = options;
 
@@ -217,6 +258,17 @@ export async function apiClient<T>(
         errorData = await response.json();
       } catch {
         errorData = { detail: response.statusText };
+      }
+
+      // The server was too busy and said when to come back: wait and try again, quietly.
+      const delay = busyRetryDelayMs(
+        customConfig.method || "GET", response.status, errorData.error_code,
+        response.headers.get("Retry-After"), busyAttempt,
+      );
+      if (delay !== null) {
+        clearTimeout(timeoutId);
+        await wait(delay, callerSignal);
+        return apiClient<T>(endpoint, { ...options, busyAttempt: busyAttempt + 1 });
       }
 
       // RFC 7807 Problem Details parsing:

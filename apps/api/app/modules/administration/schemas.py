@@ -4,7 +4,7 @@ Administration Schemas
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 class AdminUserListItem(BaseModel):
@@ -101,3 +101,62 @@ class RoleRequestDecision(BaseModel):
     # Required when declining: the person sees it.
     note: Optional[str] = Field(default=None, max_length=500)
 
+
+
+# ---------------------------------------------------------------- live traffic (GET /admin/traffic)
+
+class TrafficLatency(BaseModel):
+    p50: Optional[float] = None
+    p95: Optional[float] = None
+    p99: Optional[float] = None
+
+
+class TrafficStatus(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    ok: int = Field(0, alias="2xx")
+    redirect: int = Field(0, alias="3xx")
+    client_error: int = Field(0, alias="4xx")
+    server_error: int = Field(0, alias="5xx")
+
+
+class TrafficPool(BaseModel):
+    checked_out: int = 0
+    limit: int = 0
+
+
+class TrafficRoute(BaseModel):
+    route: str
+    requests: int
+    errors: int
+    p95_ms: Optional[float] = None
+
+
+class TrafficInstance(BaseModel):
+    instance: Optional[str] = None
+    uptime_seconds: Optional[int] = None
+    requests: int = 0
+    in_flight: int = 0
+    websockets: int = 0
+    loop_lag_ms: float = 0.0
+    db_pool: Dict[str, int] = {}
+
+
+class TrafficSnapshot(BaseModel):
+    scope: Literal["all_instances", "this_instance"]
+    window_seconds: int
+    instances: int
+    requests: int
+    requests_per_second: float
+    status: TrafficStatus
+    error_rate: float
+    latency_ms: TrafficLatency
+    shed: int
+    timeouts: int
+    unavailable: int
+    in_flight: int
+    websockets: int
+    loop_lag_ms: float = 0.0
+    db_pool: TrafficPool
+    routes: List[TrafficRoute]
+    per_instance: List[TrafficInstance]

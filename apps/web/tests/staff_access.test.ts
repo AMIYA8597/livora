@@ -13,7 +13,7 @@ import {
 test("admins and super admins see every console tab", () => {
   for (const roles of [["admin"], ["super_admin"], ["seeker", "admin"]]) {
     assert.deepStrictEqual(consoleTabs(roles), [
-      "stats", "moderation", "properties", "applications", "users", "roles", "payments",
+      "stats", "traffic", "moderation", "properties", "applications", "users", "roles", "payments",
     ]);
     assert.ok(isAdminRoles(roles));
     assert.ok(isStaffRoles(roles));

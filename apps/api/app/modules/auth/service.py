@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.core.security import (
-    get_password_hash, verify_password, create_access_token, create_refresh_token,
+    get_password_hash_async, verify_password_async, create_access_token, create_refresh_token,
     decode_token, create_password_reset_token, password_fingerprint
 )
 from app.core.exceptions import BadRequestException, UnauthorizedException
@@ -33,7 +33,7 @@ class AuthService:
 
         new_user = User(
             email=data.email,
-            hashed_password=get_password_hash(data.password),
+            hashed_password=await get_password_hash_async(data.password),
             full_name=data.full_name,
             phone_number=data.phone_number,
             role=data.role,
@@ -79,7 +79,7 @@ class AuthService:
         query = select(User).options(selectinload(User.roles)).where(User.email == data.email)
         user = (await self.db.execute(query)).scalar_one_or_none()
 
-        if not user or not verify_password(data.password, user.hashed_password):
+        if not user or not await verify_password_async(data.password, user.hashed_password):
             logger.warning("Failed login attempt")  # no email: logs must not hold personal data
             raise UnauthorizedException("Invalid email or password")
         restored = False
@@ -184,7 +184,7 @@ class AuthService:
         if payload.get("email") != user.email:
             raise invalid
 
-        user.hashed_password = get_password_hash(req.new_password)
+        user.hashed_password = await get_password_hash_async(req.new_password)
         await self.db.commit()
 
         logger.info(f"Password reset successfully completed for user {user.id}")

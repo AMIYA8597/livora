@@ -91,6 +91,16 @@ async def reset_rate_limits():
     await rate_limit.reset()
     yield
 
+
+@pytest.fixture(autouse=True)
+def reset_hot_cache():
+    """Cached reads (app/core/hot_cache.py) don't carry over between tests."""
+    from app.core import hot_cache
+
+    hot_cache.clear()
+    yield
+    hot_cache.clear()
+
 @pytest.fixture(scope="session")
 def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()

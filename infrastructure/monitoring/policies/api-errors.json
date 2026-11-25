@@ -1,0 +1,20 @@
+{
+  "displayName": "Flatmate API: more than 2% of requests failing",
+  "documentation": {
+    "content": "More than 2% of API requests returned 5xx for 5 minutes. Open the admin console's Traffic tab for the failing routes, then Cloud Logging for `severity>=ERROR` on flatmate-api. If 503s dominate, the service is overloaded: see docs/CAPACITY_PLAN.md (raise max instances or the database plan). Roll back with the command in the last deploy's summary if it started after a release.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "5xx share above 2% (5 min)",
+      "conditionPrometheusQueryLanguage": {
+        "query": "sum(rate(run_googleapis_com:request_count{monitored_resource=\"cloud_run_revision\",service_name=\"flatmate-api\",response_code_class=\"5xx\"}[5m])) / sum(rate(run_googleapis_com:request_count{monitored_resource=\"cloud_run_revision\",service_name=\"flatmate-api\"}[5m])) > 0.02",
+        "duration": "300s",
+        "evaluationInterval": "60s"
+      }
+    }
+  ],
+  "alertStrategy": {"autoClose": "1800s"},
+  "severity": "CRITICAL"
+}

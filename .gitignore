@@ -88,3 +88,7 @@ apps/api/uploads/
 apps/web/test-results/
 apps/web/playwright-report/
 apps/web/blob-report/
+
+# Load tests (loadtests/): minted tokens and run output
+loadtests/.tokens.json
+loadtests/results/

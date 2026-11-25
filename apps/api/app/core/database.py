@@ -20,8 +20,11 @@ def engine_options(database_url: str) -> Dict[str, Any]:
         "echo": False,
         "future": True,
         "pool_pre_ping": True,
-        "pool_size": 10,
-        "max_overflow": 20,
+        "pool_size": settings.DB_POOL_SIZE,
+        "max_overflow": settings.DB_MAX_OVERFLOW,
+        # Fail fast when the pool is exhausted: the request gets a 503 with Retry-After
+        # (app/core/overload.py) instead of hanging for SQLAlchemy's default 30 seconds.
+        "pool_timeout": settings.DB_POOL_TIMEOUT_SECONDS,
     }
     if uses_transaction_pooler(database_url):
         options["connect_args"] = {

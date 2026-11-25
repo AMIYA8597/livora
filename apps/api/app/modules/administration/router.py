@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.dependencies import require_roles, role_names
 from app.modules.users.models import User
 from app.modules.administration.schemas import (
+    TrafficSnapshot,
     AdminApplicationListItem,
     AdminBillingEventItem,
     AdminUserListItem,
@@ -106,6 +107,18 @@ def _role_request_item(req, user: User) -> AdminRoleRequestItem:
         user_roles=sorted(role_names(user)), role=req.role, status=req.status, note=req.note,
         decision_note=req.decision_note, created_at=req.created_at, decided_at=req.decided_at,
     )
+
+
+@router.get("/traffic", response_model=TrafficSnapshot)
+async def get_traffic(
+    _: User = Depends(require_roles(["admin", "super_admin"])),
+):
+    """Live traffic over the last minute: requests per second, errors, latency, refusals under
+    load, connections in use, open sockets, the busiest routes and each instance. Added up over
+    every running instance when Redis is connected, else this instance only (`scope`)."""
+    from app.core.metrics import fleet_snapshot
+
+    return await fleet_snapshot()
 
 
 @router.get("/stats", response_model=PlatformStatsResponse)

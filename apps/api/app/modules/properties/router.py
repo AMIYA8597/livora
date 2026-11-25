@@ -2,10 +2,12 @@ from typing import List, Optional
 from uuid import UUID
 from decimal import Decimal
 from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core import hot_cache
 from app.core.database import get_db
 from app.core.roles import LISTING_ROLES
 from app.core.dependencies import require_roles, get_current_user, get_optional_user, has_admin_role
@@ -23,6 +25,12 @@ from app.modules.properties.service import PropertyService
 from app.modules.billing.service import feature_listing
 
 router = APIRouter(prefix="/properties", tags=["Properties"])
+
+# Browse pages are the same for everyone unless they're ranked for a signed-in viewer or around
+# a point, and they're the busiest read (the browse page's server render asks for the anonymous
+# "recommended" order, which is the same for every visitor and records nothing). Cached that briefly, a new or changed listing shows within
+# seconds while a crowd on one city page costs one query instead of one each.
+LIST_CACHE_SECONDS = 20
 
 @router.get("", response_model=List[PropertyResponse], include_in_schema=False)
 @router.get("/", response_model=List[PropertyResponse])
@@ -48,23 +56,37 @@ async def list_properties(
     if (near_lat is None) != (near_lng is None):
         raise BadRequestException("Send both near_lat and near_lng, or neither.")
     service = PropertyService(db)
-    return await service.list_properties(
-        near=(near_lat, near_lng) if near_lat is not None else None,
-        radius_km=radius_km,
-        sort=sort,
-        viewer_id=viewer.id if viewer else None,
-        q=q,
-        locality=locality,
-        furnishing_status=furnishing_status,
-        city=city,
-        min_rent=min_rent,
-        max_rent=max_rent,
-        property_category=property_category,
-        configuration=configuration,
-        bedrooms=bedrooms,
-        limit=limit,
-        offset=offset
-    )
+
+    async def load():
+        return await service.list_properties(
+            near=(near_lat, near_lng) if near_lat is not None else None,
+            radius_km=radius_km,
+            sort=sort,
+            viewer_id=viewer.id if viewer else None,
+            q=q,
+            locality=locality,
+            furnishing_status=furnishing_status,
+            city=city,
+            min_rent=min_rent,
+            max_rent=max_rent,
+            property_category=property_category,
+            configuration=configuration,
+            bedrooms=bedrooms,
+            limit=limit,
+            offset=offset
+        )
+
+    if (sort == "recommended" and viewer is not None) or near_lat is not None:
+        return await load()
+    key = hot_cache.key_for(
+        "properties:list", sort=sort, q=q, locality=locality, furnishing_status=furnishing_status,
+        city=city, min_rent=min_rent, max_rent=max_rent, property_category=property_category,
+        configuration=configuration, bedrooms=bedrooms, limit=limit, offset=offset)
+
+    async def load_json():
+        return jsonable_encoder(await load())
+
+    return await hot_cache.cached(key, LIST_CACHE_SECONDS, load_json)
 
 class ListingInteractionIn(BaseModel):
     action: Literal["view", "save", "unsave"]

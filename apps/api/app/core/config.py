@@ -35,6 +35,24 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = True
     TRUSTED_PROXY_HOPS: int = 0
 
+    # Capacity (docs/CAPACITY_PLAN.md). The pool is per process: instances x workers x
+    # (DB_POOL_SIZE + DB_MAX_OVERFLOW) must fit the database pooler's client limit. A request
+    # that can't get a connection within DB_POOL_TIMEOUT_SECONDS gets a 503 with Retry-After.
+    # 15 per process: one process is CPU-bound near ~100-200 requests/s with a few ms of
+    # queries each, so more connections only queue behind the CPU (loadtests/README.md).
+    DB_POOL_SIZE: int = Field(default=10, ge=1, le=200)
+    DB_MAX_OVERFLOW: int = Field(default=5, ge=0, le=200)
+    DB_POOL_TIMEOUT_SECONDS: float = Field(default=10, gt=0, le=60)
+    # Requests one process handles at once; past that it answers 503 at once instead of
+    # queueing until everything is slow. 0 turns it off. WebSockets and health checks don't count.
+    # Just above Cloud Run's per-instance concurrency (80), so the platform limits first and this
+    # is the safety net; in a local flood test 80 instead of 200 halved the event-loop delay.
+    MAX_IN_FLIGHT_REQUESTS: int = Field(default=100, ge=0, le=10000)
+    # A request still running after this gets 504 (uploads excepted). Under Cloud Run's timeout.
+    REQUEST_TIMEOUT_SECONDS: float = Field(default=30, gt=0, le=600)
+    # Bearer token for GET /metrics (Prometheus text). Unset: /metrics doesn't exist.
+    METRICS_TOKEN: str = ""
+
     # Upload virus scanning through clamd (off when CLAMAV_HOST is empty). With
     # VIRUS_SCAN_REQUIRED, uploads are refused while the scanner is missing or unreachable.
     CLAMAV_HOST: str = ""

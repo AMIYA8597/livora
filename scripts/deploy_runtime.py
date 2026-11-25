@@ -14,8 +14,10 @@ variable RUNTIME_ENV, e.g. CORS_ORIGINS, EMAIL_PROVIDER, WEB_BASE_URL). They are
 YAML env-vars files, so values may contain commas. A secret's name there is refused: secrets
 belong in Secret Manager.
 
-Writes DIR/api-env.yaml, DIR/worker-env.yaml and DIR/outputs (secrets=..., redis=true|false,
-missing_optional=...) for $GITHUB_OUTPUT.
+Writes DIR/api-env.yaml, DIR/realtime-env.yaml, DIR/worker-env.yaml and DIR/outputs
+(secrets=..., redis=true|false, missing_optional=...) for $GITHUB_OUTPUT. The API runs
+--api-workers uvicorn processes (one per vCPU); the realtime service (sockets only) runs one and
+refuses ordinary requests sooner, since its slots are for sockets.
 """
 from __future__ import annotations
 
@@ -131,6 +133,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--available-secrets-file", type=Path, required=True)
     p.add_argument("--extra-env-file", type=Path)
     p.add_argument("--worker-concurrency", default="2")
+    p.add_argument("--api-workers", default="1", help="uvicorn processes per API instance (its vCPUs)")
     p.add_argument("--out-dir", type=Path, required=True)
     args = p.parse_args(argv)
     try:
@@ -143,7 +146,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    (args.out_dir / "api-env.yaml").write_text(to_yaml(env), encoding="utf-8")
+    if not args.api_workers.isdigit() or not 1 <= int(args.api_workers) <= 8:
+        print("::error::--api-workers must be 1-8", file=sys.stderr)
+        return 1
+    (args.out_dir / "api-env.yaml").write_text(
+        to_yaml({**env, "WEB_CONCURRENCY": args.api_workers}), encoding="utf-8")
+    (args.out_dir / "realtime-env.yaml").write_text(
+        to_yaml({**env, "WEB_CONCURRENCY": "1", "MAX_IN_FLIGHT_REQUESTS": "100",
+                 # Sockets need a connection only to sign in and on typing; 10 per instance.
+                 "DB_POOL_SIZE": "5", "DB_MAX_OVERFLOW": "5"}), encoding="utf-8")
     (args.out_dir / "worker-env.yaml").write_text(
         to_yaml({**env, "WORKER_CONCURRENCY": args.worker_concurrency}), encoding="utf-8"
     )
