@@ -13,9 +13,11 @@ name: Free-tier Deployment
 #   6. checks the live API from outside.
 #
 # Secrets: FREE_TIER_HOST, FREE_TIER_SSH_KEY, FREE_TIER_SSH_KNOWN_HOSTS (provision-azure.sh sets
-# these), PRODUCTION_DATABASE_URL (owner, for migrations and backups), PRODUCTION_APP_DATABASE_URL,
-# PRODUCTION_SECRET_KEY, PRODUCTION_SUPABASE_SECRET_KEY, and optional ones such as
-# PRODUCTION_SMTP_PASSWORD and PRODUCTION_SENTRY_DSN.
+# these), PRODUCTION_DATABASE_URL (owner, for migrations and backups), PRODUCTION_SECRET_KEY,
+# PRODUCTION_SUPABASE_SECRET_KEY, the API's own login as PRODUCTION_APP_DB_PASSWORD (this
+# workflow then creates the flatmate_api login and its URL) or a full PRODUCTION_APP_DATABASE_URL,
+# and optional ones such as PRODUCTION_SMTP_PASSWORD and PRODUCTION_SENTRY_DSN.
+# scripts/production_setup.py sets them all from the git-ignored .env.free-tier.
 # Variables: FREE_TIER_ENABLED, API_DOMAIN, ACME_EMAIL, RUNTIME_ENV.
 # The web app deploys itself through Vercel's GitHub integration.
 
@@ -63,12 +65,16 @@ jobs:
           PRODUCTION_APP_DATABASE_URL: ${{ secrets.PRODUCTION_APP_DATABASE_URL }}
           PRODUCTION_SECRET_KEY: ${{ secrets.PRODUCTION_SECRET_KEY }}
           PRODUCTION_SUPABASE_SECRET_KEY: ${{ secrets.PRODUCTION_SUPABASE_SECRET_KEY }}
+          PRODUCTION_APP_DB_PASSWORD: ${{ secrets.PRODUCTION_APP_DB_PASSWORD }}
         run: |
           missing=()
           for name in FREE_TIER_HOST FREE_TIER_SSH_KEY FREE_TIER_SSH_KNOWN_HOSTS PRODUCTION_DATABASE_URL \
-                      PRODUCTION_APP_DATABASE_URL PRODUCTION_SECRET_KEY PRODUCTION_SUPABASE_SECRET_KEY; do
+                      PRODUCTION_SECRET_KEY PRODUCTION_SUPABASE_SECRET_KEY; do
             [ -n "${!name}" ] || missing+=("secret $name")
           done
+          if [ -z "$PRODUCTION_APP_DATABASE_URL" ] && [ -z "$PRODUCTION_APP_DB_PASSWORD" ]; then
+            missing+=("secret PRODUCTION_APP_DB_PASSWORD (or PRODUCTION_APP_DATABASE_URL)")
+          fi
           [ -n "$API_DOMAIN" ] || missing+=("variable API_DOMAIN")
           [ -n "$ACME_EMAIL" ] || missing+=("variable ACME_EMAIL")
           if [ ${#missing[@]} -gt 0 ]; then
@@ -76,7 +82,7 @@ jobs:
             echo "See docs/FREE_TIER_LAUNCH.md, step 6."
             exit 1
           fi
-          if [ "$PRODUCTION_APP_DATABASE_URL" = "$PRODUCTION_DATABASE_URL" ]; then
+          if [ -n "$PRODUCTION_APP_DATABASE_URL" ] && [ "$PRODUCTION_APP_DATABASE_URL" = "$PRODUCTION_DATABASE_URL" ]; then
             echo "::error::PRODUCTION_APP_DATABASE_URL must be the least-privilege login, not the owner (docs/FREE_TIER_LAUNCH.md, step 3)"
             exit 1
           fi
@@ -135,11 +141,27 @@ jobs:
           python -m alembic upgrade head
           python -m alembic current
 
+      - name: Make sure the API's own database login exists
+        # Least privilege (no schema changes, no bypassing row-level security), made from
+        # PRODUCTION_APP_DB_PASSWORD unless a full PRODUCTION_APP_DATABASE_URL is given.
+        env:
+          OWNER_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          APP_DB_PASSWORD: ${{ secrets.PRODUCTION_APP_DB_PASSWORD }}
+          APP_URL_GIVEN: ${{ secrets.PRODUCTION_APP_DATABASE_URL != '' }}
+        run: |
+          if [ "$APP_URL_GIVEN" = "true" ]; then
+            echo "Using the PRODUCTION_APP_DATABASE_URL secret."
+            exit 0
+          fi
+          url=$(python scripts/app_db_login.py)
+          echo "::add-mask::$url"
+          echo "DERIVED_APP_DATABASE_URL=$url" >> "$GITHUB_ENV"
+
       - name: Write the app's settings
         # Each secret the app reads (scripts/deploy_runtime.py SECRETS), by name, and nothing else.
         env:
           RUNTIME_ENV: ${{ vars.RUNTIME_ENV }}
-          PRODUCTION_APP_DATABASE_URL: ${{ secrets.PRODUCTION_APP_DATABASE_URL }}
+          PRODUCTION_APP_DATABASE_URL: ${{ secrets.PRODUCTION_APP_DATABASE_URL || env.DERIVED_APP_DATABASE_URL }}
           PRODUCTION_SECRET_KEY: ${{ secrets.PRODUCTION_SECRET_KEY }}
           PRODUCTION_SUPABASE_SECRET_KEY: ${{ secrets.PRODUCTION_SUPABASE_SECRET_KEY }}
           PRODUCTION_EMAIL_API_KEY: ${{ secrets.PRODUCTION_EMAIL_API_KEY }}

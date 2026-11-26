@@ -96,31 +96,29 @@ says why.
 ## 3. Lock down Supabase first (You, 10 minutes)
 
 These are the still-open launch items E1 (steps 2 and 4) and E2b. A key and the database
-password were pasted into chats, so replace them before going live. Never paste the new values
-into chat, email or a file in this repository: they go straight into GitHub secrets in step 6.
+password were pasted into chats, so replace them before going live. The new values go only into
+your git-ignored `.env.free-tier` (step 6), never into a chat, email or tracked file.
 
 1. **New secret key** (E1 step 2):
    1. Go to Supabase dashboard → Project Settings → API Keys.
-   2. Create a new secret key, then delete the old `sb_secret_...` one.
-   3. Keep the new key's tab open for step 6.
+   2. Create a new secret key and put it in `SUPABASE_SECRET_KEY`.
+   3. Delete the old `sb_secret_...` key once the first deploy is live.
 2. **New database password** (E1 step 4):
    1. Go to Project Settings → Database → Reset database password.
-   2. Use the generator.
-3. **Find the pooler addresses:** Project Settings → Database → Connect → "Transaction pooler"
-   and "Session pooler". On the free plan the direct address (`db.<ref>.supabase.co`) works
-   only over IPv6, which GitHub and Azure don't use. Always use the pooler host
-   (`aws-0-<region>.pooler.supabase.com`).
+   2. Use the generator, and put the password in `SUPABASE_DB_PASSWORD`.
+   3. Also update `apps/api/.env` if you still use it.
+3. **The pooler host:** go to Project Settings → Database → Connect → "Session pooler" and put
+   the host (`aws-N-<region>.pooler.supabase.com`) in `SUPABASE_POOLER_HOST`.
+   - On the free plan the direct address (`db.<ref>.supabase.co`) works only over IPv6, which
+     GitHub and Azure don't use.
 
-You'll build three connection URLs from these:
+`scripts/production_setup.py` builds the connection URLs from these and percent-encodes the
+password:
 
 | Used for | GitHub secret | User | Port |
 |---|---|---|---|
 | Migrations, backups, making the first admin (owner) | `PRODUCTION_DATABASE_URL`, `BACKUP_DATABASE_URL` | `postgres.<ref>` | 5432 (session pooler) |
-| The running API and worker (least privilege) | `PRODUCTION_APP_DATABASE_URL` | `flatmate_api.<ref>` | 6543 (transaction pooler) |
-
-The format is `postgresql+asyncpg://<user>:<password>@aws-0-<region>.pooler.supabase.com:<port>/postgres`.
-Percent-encode special characters in passwords, for example `@` → `%40` and `#` → `%23`. The
-`flatmate_api` login is created in step 4.
+| The running API and worker (least privilege) | built by each deploy from `PRODUCTION_APP_DB_PASSWORD` | `flatmate_api.<ref>` | 6543 (transaction pooler) |
 
 ## 4. Create the server, backups and the API's database login (You start it; the script does the rest)
 
@@ -160,30 +158,13 @@ already signed in to Azure. Nothing needs installing on your computer.
    If it says no region allowed the VM, run it again with the regions your subscription allows
    (Azure portal → Policy → "Allowed locations"), for example
    `REGIONS="eastus westeurope" DNS_LABEL=... bash ...`.
-4. Create the API's own database login (E2b). It can read and write app data through
-   row-level security, but can't change the schema or bypass security. It's still in Cloud
-   Shell, which has `psql`:
-
-   ```bash
-   read -rsp "Owner URL (session pooler, postgresql://...:5432/postgres): " OWNER_URL; echo
-   APP_PW=$(openssl rand -hex 24)
-   psql "${OWNER_URL/+asyncpg/}" -v app_user=flatmate_api -v app_password="$APP_PW" \
-        -f scripts/create_app_db_user.sql
-   ```
-
-   Then save both URLs as GitHub secrets without them ever showing on screen. Replace `<ref>`
-   and `<region>` in the second command with the values from Supabase:
-
-   ```bash
-   printf '%s' "${OWNER_URL/postgresql:/postgresql+asyncpg:}" | gh secret set PRODUCTION_DATABASE_URL
-   printf '%s' "${OWNER_URL/postgresql:/postgresql+asyncpg:}" | gh secret set BACKUP_DATABASE_URL
-   printf '%s' "postgresql+asyncpg://flatmate_api.<ref>:${APP_PW}@aws-0-<region>.pooler.supabase.com:6543/postgres" \
-     | gh secret set PRODUCTION_APP_DATABASE_URL
-   unset OWNER_URL APP_PW
-   ```
-
-   If your owner URL already starts with `postgresql+asyncpg://`, the replacements do nothing
-   and it's saved as is.
+4. The API's own database login (E2b) is automatic.
+   - **What it is:** it can read and write app data through row-level security, but it can't
+     change the schema or bypass security.
+   - **How it's made:** every deploy creates or updates it from `PRODUCTION_APP_DB_PASSWORD`
+     (`scripts/app_db_login.py`), which step 6 generates.
+   - **The password stays out of logs:** it's sent to the database only as a SCRAM hash, so it
+     never appears in a SQL statement or the database's logs.
 
 ## 5. A domain for the API (optional, You)
 
@@ -197,44 +178,36 @@ already signed in to Azure. Nothing needs installing on your computer.
 
 Then `API_DOMAIN` (step 6) is `api.<your-domain>`.
 
-## 6. GitHub settings (You run the commands; nothing is typed into files)
+## 6. GitHub settings (You fill one file; one command sets everything)
 
-Run these in Cloud Shell, in the `livora` folder. `gh secret set NAME` with no value asks for it
-without showing it.
+1. Copy `infrastructure/free-tier/free-tier.env.example` to `.env.free-tier` at the repository
+   root. Git ignores that name.
+2. Fill it in: the Supabase values from step 3, the API address from step 4 or 5, the website
+   address from step 9, and Brevo from step 7. Never paste these values into a chat.
+3. On your computer, signed in with `gh auth login`, run:
 
-**Secrets:**
+   ```bash
+   python scripts/production_setup.py --dry-run   # names only: what it would set
+   python scripts/production_setup.py
+   ```
 
-```bash
-openssl rand -hex 32 | gh secret set PRODUCTION_SECRET_KEY        # signs the app's sign-in tokens
-gh secret set PRODUCTION_SUPABASE_SECRET_KEY                       # paste the new sb_secret_... from step 3
-gh secret set PRODUCTION_SMTP_PASSWORD                             # Brevo SMTP key (step 7)
-gh secret set PRODUCTION_SENTRY_DSN                                # optional: Sentry project DSN
-```
+It sets these, printing names only. Values go to `gh` over stdin:
+- **Secrets:**
+  - `PRODUCTION_DATABASE_URL` and `BACKUP_DATABASE_URL`: the owner login, on the session pooler.
+  - `PRODUCTION_SUPABASE_SECRET_KEY`.
+  - `PRODUCTION_SMTP_PASSWORD`, `PRODUCTION_SENTRY_DSN` and `PRODUCTION_ANTHROPIC_API_KEY`, when
+    you fill them in.
+  - `PRODUCTION_SECRET_KEY` and `PRODUCTION_APP_DB_PASSWORD`: generated. Nobody ever needs to
+    know them.
+- **Variables:**
+  - `API_DOMAIN`, `ACME_EMAIL`, `UPTIME_API_URL` and `UPTIME_WEB_URL`.
+  - `RUNTIME_ENV`, the app's non-secret settings: the website address and CORS, the Supabase
+    URLs, and the Brevo login and sender.
 
-**Variables:** these aren't secret. Replace the example addresses with yours.
-
-```bash
-gh variable set API_DOMAIN -b "livora-api.centralindia.cloudapp.azure.com"   # or api.<your-domain>
-gh variable set ACME_EMAIL -b "you@example.com"                              # Let's Encrypt expiry notices
-gh variable set UPTIME_API_URL -b "https://livora-api.centralindia.cloudapp.azure.com"
-gh variable set UPTIME_WEB_URL -b "https://livora.vercel.app"                # after step 9
-gh variable set RUNTIME_ENV < runtime.env
-```
-
-`runtime.env` is the app's non-secret settings. Write it in Cloud Shell with
-`nano runtime.env`, using your own addresses:
-
-```
-WEB_BASE_URL=https://livora.vercel.app
-CORS_ORIGINS=["https://livora.vercel.app"]
-SUPABASE_URL=https://<ref>.supabase.co
-SUPABASE_JWKS_URL=https://<ref>.supabase.co/auth/v1/.well-known/jwks.json
-SMTP_HOST=smtp-relay.brevo.com
-SMTP_USERNAME=<your Brevo SMTP login>
-EMAIL_FROM_ADDRESS=<the sender you verified in Brevo>
-EMAIL_FROM_NAME=Flatmate
-SENTRY_TRACES_SAMPLE_RATE=0.05
-```
+Run it again after changing the file:
+- It keeps the two generated secrets, so nobody is signed out.
+- `--rotate` makes new ones.
+- Empty lines are skipped, not cleared.
 
 The deploy adds the free-tier defaults by itself (scripts/compose_env.py), and anything in
 RUNTIME_ENV overrides them:
@@ -312,8 +285,8 @@ curl https://<API_DOMAIN>/api/v1/meta/app-config  # "features":{"phone_verificat
    site's security policy allows exactly that address.
 4. Click Deploy. From now on Vercel deploys the website on every push to `main`.
 5. **With a domain:** Vercel → Project → Settings → Domains → add it, and create the DNS record
-   Vercel shows. Then update `NEXT_PUBLIC_APP_URL`, `WEB_BASE_URL` and `CORS_ORIGINS` (step 6)
-   to the domain.
+   Vercel shows. Then set `NEXT_PUBLIC_APP_URL`, and `WEB_URL` in `.env.free-tier`, to the
+   domain, and rerun step 6.
 
 ## 10. First admin (You, 5 minutes)
 
