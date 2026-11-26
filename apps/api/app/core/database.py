@@ -28,9 +28,13 @@ def engine_options(database_url: str) -> Dict[str, Any]:
     }
     if uses_transaction_pooler(database_url):
         options["connect_args"] = {
-            # Disable asyncpg's statement cache and use unique names so statements never
-            # collide across pooled server connections (SQLAlchemy asyncpg + PgBouncer guidance).
+            # No prepared statement may outlive its transaction: the pooler hands the next
+            # transaction to any server connection, where the statement doesn't exist
+            # ("prepared statement ... does not exist"). Both caches are off, asyncpg's
+            # (statement_cache_size) and SQLAlchemy's own (prepared_statement_cache_size), and
+            # names are unique so statements never collide (SQLAlchemy asyncpg + PgBouncer guidance).
             "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
             "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
         }
     return options

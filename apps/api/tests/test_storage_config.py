@@ -95,8 +95,46 @@ def test_transaction_pooler_disables_prepared_statement_cache():
     assert not uses_transaction_pooler(session)
     args = engine_options(pooled)["connect_args"]
     assert args["statement_cache_size"] == 0
+    # SQLAlchemy's own cache too: with it on, a statement prepared on one server connection is
+    # reused after the pooler moved us to another, and fails ("does not exist").
+    assert args["prepared_statement_cache_size"] == 0
     assert args["prepared_statement_name_func"]() != args["prepared_statement_name_func"]()
     assert "connect_args" not in engine_options(session)
+
+
+def test_pooler_options_survive_statements_disappearing():
+    """What the transaction pooler does: the next transaction runs on a server connection where
+    earlier prepared statements don't exist. DEALLOCATE ALL makes that happen on one connection.
+    Without SQLAlchemy's cache turned off the repeat fails; with the options it runs."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.core.database import engine_options
+    from tests.conftest import TEST_DATABASE_URL
+
+    fixed = engine_options("postgresql+asyncpg://u:p@h:6543/db")["connect_args"]
+    old = {k: v for k, v in fixed.items() if k != "prepared_statement_cache_size"}
+
+    async def repeat_after_deallocate(connect_args) -> None:
+        engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool, connect_args=connect_args)
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("select 1 where 1 = :x"), {"x": 1})
+                await conn.exec_driver_sql("DEALLOCATE ALL")
+                await conn.execute(text("select 1 where 1 = :x"), {"x": 1})
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(repeat_after_deallocate(fixed))
+    except OSError:
+        pytest.skip("needs the test database")
+    with pytest.raises(DBAPIError, match="does not exist"):
+        asyncio.run(repeat_after_deallocate(old))
 
 
 # --- Supabase bucket verification at startup -----------------------------------------------
