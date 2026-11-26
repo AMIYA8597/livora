@@ -123,7 +123,7 @@ start_stack() {
   if [ "$(get_env COMPOSE_PROFILES)" != web ]; then compose --profile web rm -sf web >/dev/null 2>&1 || true; fi
   # Caddy reads its files only at start; restart it when they changed.
   local sum
-  sum=$(cat Caddyfile sites/*.caddy 2>/dev/null | sha256sum | cut -d' ' -f1)
+  sum=$( { cat Caddyfile; cat sites/*.caddy 2>/dev/null || true; } | sha256sum | cut -d' ' -f1)
   if [ "$sum" != "$(cat .caddyfile.sha256 2>/dev/null || true)" ]; then
     compose restart caddy
     echo "$sum" > .caddyfile.sha256

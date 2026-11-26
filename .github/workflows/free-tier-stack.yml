@@ -281,6 +281,21 @@ jobs:
           curl -fsS -k --resolve localhost:443:127.0.0.1 https://localhost/health/ready >/dev/null
           echo "The stack is healthy after the load test."
 
+      - name: The website can be turned off (a deploy without WEB_DOMAIN)
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          API_IMAGE=localhost:5000/flatmate-api:good WEB_IMAGE= WEB_DOMAIN= HEALTH_INSECURE_TLS=1 WAIT_SECONDS=90 \
+            bash "$APP_DIR/deploy.sh" </dev/null
+          if [ -n "$(docker ps -aq --filter label=com.docker.compose.project=flatmate --filter label=com.docker.compose.service=web)" ]; then
+            echo "::error::the web container is still there"; exit 1
+          fi
+          [ ! -e sites/web.caddy ] || { echo "::error::sites/web.caddy is still there"; exit 1; }
+          if curl -fsS -k --max-time 5 --resolve web.localhost:443:127.0.0.1 -o /dev/null https://web.localhost/; then
+            echo "::error::Caddy still serves the website"; exit 1
+          fi
+          curl -fsS -k --resolve localhost:443:127.0.0.1 https://localhost/health/ready >/dev/null
+          echo "Website off, API serving."
+
       - name: Logs on failure
         if: failure()
         working-directory: ${{ env.APP_DIR }}
