@@ -17,8 +17,16 @@ SELECT format('CREATE ROLE %I LOGIN IN ROLE flatmate_app', :'app_user')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_user')
 \gexec
 
-SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS INHERIT PASSWORD %L',
-              :'app_user', :'app_password')
+-- A new role is NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS by default. Those words aren't
+-- written here because Supabase's owner isn't a superuser, and Postgres refuses even NOSUPERUSER
+-- from a non-superuser; the next statement checks them instead.
+SELECT format('ALTER ROLE %I WITH LOGIN INHERIT PASSWORD %L', :'app_user', :'app_password')
+\gexec
+
+SELECT format('DO $check$ BEGIN RAISE EXCEPTION %L; END $check$',
+              'the ' || rolname || ' login can bypass security or manage roles; fix it by hand')
+FROM pg_roles
+WHERE rolname = :'app_user' AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb)
 \gexec
 
 SELECT format('GRANT flatmate_app TO %I', :'app_user')

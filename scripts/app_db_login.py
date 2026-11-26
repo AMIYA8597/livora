@@ -62,12 +62,20 @@ async def ensure_login(owner_url: str, user: str, password: str) -> None:
             raise SystemExit("The flatmate_app role is missing: run the migrations first.")
         async with conn.transaction():
             if not await conn.fetchval("SELECT 1 FROM pg_roles WHERE rolname = $1", user):
+                # A new role is NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS by default. Those
+                # words aren't written out: on Supabase the owner isn't a superuser, and Postgres
+                # refuses even NOSUPERUSER from a non-superuser. They're checked below instead.
                 await conn.execute(await conn.fetchval(
                     "SELECT format('CREATE ROLE %I LOGIN IN ROLE flatmate_app', $1::text)", user))
                 print(f"Created the {user} login.", file=sys.stderr)
             await conn.execute(await conn.fetchval(
-                "SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
-                " INHERIT PASSWORD %L', $1::text, $2::text)", user, scram_verifier(password)))
+                "SELECT format('ALTER ROLE %I WITH LOGIN INHERIT PASSWORD %L', $1::text, $2::text)",
+                user, scram_verifier(password)))
+            attrs = await conn.fetchrow(
+                "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = $1", user)
+            if any(attrs.values()):
+                raise SystemExit(f"The {user} login has more power than an API needs "
+                                 f"({', '.join(k for k, v in attrs.items() if v)}): fix it by hand.")
             await conn.execute(await conn.fetchval("SELECT format('GRANT flatmate_app TO %I', $1::text)", user))
             for setting, value in (("statement_timeout", "15s"), ("idle_in_transaction_session_timeout", "30s")):
                 await conn.execute(await conn.fetchval(
