@@ -25,5 +25,5 @@
 
 # One address for the site: www goes to the bare domain.
 www.{$WEB_DOMAIN} {
-	redir https://{$WEB_DOMAIN}{uri} permanent
+	redir https://{$WEB_DOMAIN}{uri} 308
 }
