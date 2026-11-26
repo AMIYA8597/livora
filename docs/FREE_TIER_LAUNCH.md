@@ -41,9 +41,10 @@ flowchart LR
 **What it can carry.** The code is the same as the 10,000-user design (docs/CAPACITY_PLAN.md):
 overload gets a quick "busy, retry" answer instead of a crash, and the web app retries for you.
 The hardware is not, though:
-- **Expect a few hundred people at once** on this setup. Section 15 has the measured numbers.
-- **Supabase Free** (shared CPU, 500 MB RAM, 500 MB data) is the first limit.
-- **The VM** (2 vCPU, 1 GiB) is the second.
+- **The VM's stack was measured with 600 people at once** (section 15): no errors, the slowest
+  5% of requests within 21 ms, using about 660 MiB of its 1 GiB.
+- **Supabase Free** (shared CPU, 500 MB RAM, 500 MB data) will run out first. Plan on a few
+  hundred to about a thousand people at once, then upgrade it.
 
 10,000 people at once needs the paid plan in docs/CAPACITY_PLAN.md: no free plan anywhere can
 do that.
@@ -439,8 +440,19 @@ These are all free and run on the VM:
 ## 15. Capacity, and when to upgrade
 
 The **Free-tier Stack Test** measures the stack on every change with the VM's limits
-(2 vCPU, 1 GiB) and writes the results in its run summary. It uses a small local database, so
-the real limit is set earlier by Supabase Free's shared CPU.
+(2 vCPU, 1 GiB) and writes the results in its run summary. To try more people, run it by hand
+(Actions → Free-tier Stack Test → Run workflow) with a higher `users`.
+
+Measured on 2026-11-26. Each run lasts 3 minutes of real browsing (visitors, signed-in members
+and sign-ins), through HTTPS and Caddy:
+
+| People at once | Requests | Failed | Median | Slowest 5% | Slowest 1% | Peak memory: API, worker, Caddy, Redis |
+|---|---|---|---|---|---|---|
+| 150 | 4,293 (24 a second) | 0 | 8 ms | 33 ms | 190 ms | 384, 214, 36, 12 MiB |
+| 600 | 15,147 (85 a second) | 0 | 5 ms | 21 ms | 64 ms | 403, 150, 61, 12 MiB |
+
+The test's database is a container on GitHub's machine, not Supabase Free. Supabase Free's shared
+CPU and 500 MB RAM will be the limit before the VM is.
 
 Upgrade when the Traffic tab shows the stack under strain for long stretches:
 - **"Strained" or "Busy":** many 503s, the slowest 5% of requests above 1 s, or database

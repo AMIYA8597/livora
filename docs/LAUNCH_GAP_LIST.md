@@ -20,8 +20,8 @@ change like this:
 - **E6:** payments stay off.
 - **E8:** ClamAV doesn't fit the 1 GiB VM; uploads are type- and size-checked only.
 - **E12:** guide step 10.
-- **E13:** replaced by the free sizing: a few hundred people at once, measured by
-  `free-tier-stack.yml`.
+- **E13:** replaced by the free sizing. The VM's stack served 600 people at once with no errors
+  (`free-tier-stack.yml`); Supabase Free is the limit after that.
 
 Still open on that path:
 - E1 step 6 (the history-scan finding);
