@@ -10,7 +10,7 @@
 #            website WEB_IMAGE, WEB_DOMAIN and COMPOSE_PROFILES=web (all written by deploy.sh;
 #            REDIS_PASSWORD is generated on the VM by cloud-init and never leaves it)
 #   api.env  the app's settings and secrets, written by the deploy (scripts/compose_env.py)
-#   sites/   web.caddy when the website runs here (deploy.sh manages it)
+#   sites/   web.caddy (and web-www.caddy) when the website runs here (deploy.sh manages them)
 #
 # Deployed by .github/workflows/free-tier-deploy.yml. The whole procedure is in
 # docs/FREE_TIER_LAUNCH.md.

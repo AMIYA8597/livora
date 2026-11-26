@@ -77,6 +77,23 @@ def web_domain(values: Dict[str, str]) -> str:
     return "" if host.endswith(".vercel.app") else host
 
 
+# Second-level names under which people register domains (example.co.in, example.com.au).
+_SECOND_LEVEL = {"co", "com", "net", "org", "ac", "edu", "gov", "gen", "firm", "ind"}
+
+
+def www_redirect(values: Dict[str, str]) -> bool:
+    """Whether www.<site> should exist and redirect: yes for a registered domain (example.com,
+    example.co.in), no for a host inside someone else's domain (x.eastasia.cloudapp.azure.com),
+    which has no www. WEB_WWW_REDIRECT=true/false in the file decides instead."""
+    explicit = values.get("WEB_WWW_REDIRECT", "").strip().lower()
+    if explicit in ("true", "false"):
+        return explicit == "true"
+    labels = web_domain(values).split(".")
+    if len(labels) == 2:
+        return True
+    return len(labels) == 3 and len(labels[-1]) == 2 and labels[-2] in _SECOND_LEVEL
+
+
 def runtime_env(values: Dict[str, str]) -> Optional[str]:
     """The app's non-secret settings (the RUNTIME_ENV variable), once the website address is known."""
     web = values.get("WEB_URL", "").rstrip("/")
@@ -118,6 +135,8 @@ def validate(values: Dict[str, str]) -> List[str]:
             problems.append("WEB_URL is the site's https:// address and nothing else, like https://example.com")
         elif parts.hostname.startswith("www."):
             problems.append("WEB_URL is the bare domain (https://example.com); www. redirects to it by itself")
+    if values.get("WEB_WWW_REDIRECT", "").strip().lower() not in ("", "true", "false"):
+        problems.append("WEB_WWW_REDIRECT is true, false, or empty (decided from WEB_URL)")
     domain = values.get("API_DOMAIN", "")
     if domain and ("/" in domain or ":" in domain):
         problems.append("API_DOMAIN is a bare host name, like api.example.com")
@@ -156,6 +175,7 @@ def plan(values: Dict[str, str], existing: set, rotate: bool) -> Tuple[Dict[str,
     if web_domain(values):
         # The deploy builds the website and serves it from the VM under this name.
         variables["WEB_DOMAIN"] = web_domain(values)
+        variables["WEB_WWW_REDIRECT"] = "true" if www_redirect(values) else "false"
     env = runtime_env(values)
     if env:
         variables["RUNTIME_ENV"] = env

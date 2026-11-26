@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Runs on the free-tier VM, called over SSH by .github/workflows/free-tier-deploy.yml after it has
-# copied docker-compose.yml, Caddyfile, web.caddy, api.env and this file to /opt/flatmate.
+# copied docker-compose.yml, Caddyfile, web.caddy, web-www.caddy, api.env and this file to
+# /opt/flatmate.
 #
 #   API_IMAGE=ghcr.io/owner/flatmate-api:<sha> API_DOMAIN=api.example.com ACME_EMAIL=you@example.com \
-#   [WEB_IMAGE=ghcr.io/owner/flatmate-web:<tag> WEB_DOMAIN=example.com] \
+#   [WEB_IMAGE=ghcr.io/owner/flatmate-web:<tag> WEB_DOMAIN=example.com [WEB_WWW=0]] \
 #     bash /opt/flatmate/deploy.sh  < registry-token-on-stdin (optional)
 #
 # Starts the new images, waits until the API (and the website, when WEB_IMAGE and WEB_DOMAIN are
 # given) answer through Caddy over HTTPS, and otherwise puts the previous images back and fails.
-# Without WEB_IMAGE and WEB_DOMAIN the website is not run here. A registry token on stdin is used
+# Without WEB_IMAGE and WEB_DOMAIN the website is not run here. www.<WEB_DOMAIN> redirects to the
+# bare name unless WEB_WWW=0. A registry token on stdin is used
 # for the pull and then forgotten (docker logout), so no long-lived credential stays on the VM.
 set -euo pipefail
 
@@ -16,7 +18,7 @@ APP_DIR=${APP_DIR:-/opt/flatmate}
 : "${API_IMAGE:?API_IMAGE is required}"
 : "${API_DOMAIN:?API_DOMAIN is required}"
 : "${ACME_EMAIL:?ACME_EMAIL is required}"
-WEB_IMAGE=${WEB_IMAGE:-} WEB_DOMAIN=${WEB_DOMAIN:-}
+WEB_IMAGE=${WEB_IMAGE:-} WEB_DOMAIN=${WEB_DOMAIN:-} NEW_WEB_WWW=${WEB_WWW:-1}
 if { [ -n "$WEB_IMAGE" ] && [ -z "$WEB_DOMAIN" ]; } || { [ -z "$WEB_IMAGE" ] && [ -n "$WEB_DOMAIN" ]; }; then
   echo "::error::Give both WEB_IMAGE and WEB_DOMAIN, or neither"; exit 1
 fi
@@ -24,7 +26,7 @@ fi
 # so leaving them exported would make a rollback silently start the new images again.
 NEW_IMAGE=$API_IMAGE NEW_DOMAIN=$API_DOMAIN NEW_ACME_EMAIL=$ACME_EMAIL
 NEW_WEB_IMAGE=$WEB_IMAGE NEW_WEB_DOMAIN=$WEB_DOMAIN
-unset API_IMAGE API_DOMAIN ACME_EMAIL REDIS_PASSWORD WEB_IMAGE WEB_DOMAIN COMPOSE_PROFILES
+unset API_IMAGE API_DOMAIN ACME_EMAIL REDIS_PASSWORD WEB_IMAGE WEB_DOMAIN WEB_WWW COMPOSE_PROFILES
 REGISTRY=${REGISTRY:-ghcr.io}
 REGISTRY_USER=${REGISTRY_USER:-}
 WAIT_SECONDS=${WAIT_SECONDS:-180}
@@ -62,11 +64,17 @@ if [ -n "$NEW_WEB_IMAGE" ]; then
   set_env WEB_IMAGE "$NEW_WEB_IMAGE"
   set_env COMPOSE_PROFILES web
   install -m 0644 web.caddy sites/web.caddy
+  if [ "$NEW_WEB_WWW" = 0 ]; then
+    rm -f sites/web-www.caddy
+  else
+    [ -f web-www.caddy ] || { echo "::error::$APP_DIR/web-www.caddy is missing"; exit 1; }
+    install -m 0644 web-www.caddy sites/web-www.caddy
+  fi
   services=(api worker web)
 else
   set_env WEB_DOMAIN ""
   set_env COMPOSE_PROFILES ""
-  rm -f sites/web.caddy
+  rm -f sites/web.caddy sites/web-www.caddy
   services=(api worker)
 fi
 
@@ -78,7 +86,7 @@ restore_previous() {
     # The website's first release failed: go back to running without it.
     set_env WEB_DOMAIN ""
     set_env COMPOSE_PROFILES ""
-    rm -f sites/web.caddy
+    rm -f sites/web.caddy sites/web-www.caddy
     NEW_WEB_DOMAIN=""
   elif [ -n "$previous_web" ]; then
     set_env WEB_IMAGE "$previous_web"

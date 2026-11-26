@@ -97,7 +97,7 @@ jobs:
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
           install -d -m 0750 "$APP_DIR"
           cp infrastructure/free-tier/docker-compose.yml infrastructure/free-tier/Caddyfile \
-             infrastructure/free-tier/web.caddy infrastructure/free-tier/deploy.sh \
+             infrastructure/free-tier/web.caddy infrastructure/free-tier/web-www.caddy infrastructure/free-tier/deploy.sh \
              infrastructure/free-tier/ci/docker-compose.override.yml "$APP_DIR/"
           (umask 077; printf 'REDIS_PASSWORD=%s\nAPI_IMAGE=localhost:5000/flatmate-api:good\nAPI_DOMAIN=localhost\nACME_EMAIL=ci@example.com\n' \
             "$(openssl rand -hex 32)" > "$APP_DIR/.env")
@@ -281,6 +281,18 @@ jobs:
           curl -fsS -k --resolve localhost:443:127.0.0.1 https://localhost/health/ready >/dev/null
           echo "The stack is healthy after the load test."
 
+      - name: A name without www (WEB_WWW=0) gets no www site
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          API_IMAGE=localhost:5000/flatmate-api:good WEB_IMAGE=localhost:5000/flatmate-web:good WEB_WWW=0 \
+            HEALTH_INSECURE_TLS=1 WAIT_SECONDS=90 bash "$APP_DIR/deploy.sh" </dev/null
+          [ ! -e sites/web-www.caddy ] || { echo "::error::sites/web-www.caddy is still there"; exit 1; }
+          curl -fsS -k --resolve web.localhost:443:127.0.0.1 -o /dev/null https://web.localhost/
+          if curl -fsS -k --max-time 5 --resolve www.web.localhost:443:127.0.0.1 -o /dev/null https://www.web.localhost/; then
+            echo "::error::Caddy still serves www"; exit 1
+          fi
+          echo "Website without www, as asked."
+
       - name: The website can be turned off (a deploy without WEB_DOMAIN)
         working-directory: ${{ env.APP_DIR }}
         run: |
@@ -289,7 +301,7 @@ jobs:
           if [ -n "$(docker ps -aq --filter label=com.docker.compose.project=flatmate --filter label=com.docker.compose.service=web)" ]; then
             echo "::error::the web container is still there"; exit 1
           fi
-          [ ! -e sites/web.caddy ] || { echo "::error::sites/web.caddy is still there"; exit 1; }
+          [ ! -e sites/web.caddy ] && [ ! -e sites/web-www.caddy ] || { echo "::error::the website's Caddy files are still there"; exit 1; }
           if curl -fsS -k --max-time 5 --resolve web.localhost:443:127.0.0.1 -o /dev/null https://web.localhost/; then
             echo "::error::Caddy still serves the website"; exit 1
           fi

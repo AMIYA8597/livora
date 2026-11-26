@@ -187,8 +187,34 @@ address):
 Then in step 6, `API_DOMAIN` is `api.<your-domain>` and `WEB_URL` is `https://<your-domain>`.
 Caddy gets the certificates for all three names by itself on the next deploy.
 
-**Without a domain** the API still works at the `cloudapp.azure.com` address the script printed,
-but the VM serves no website.
+### Without a domain: a second Azure name for the website (₹0, 5 minutes)
+
+If you can't claim a domain yet (for example, GitHub's "Authorize" button for the Student Pack
+offer never turns clickable), give the website its own Azure name. The API keeps the name the
+script printed. In Cloud Shell:
+
+```bash
+RG=flatmate-rg NIC=flatmate-vmVMNic PRIV=10.0.0.5 LABEL=flatmate   # LABEL: unique in the region
+az network public-ip create -g $RG -n flatmate-web-ip --sku Standard --allocation-method Static \
+  --version IPv4 --dns-name $LABEL -o none
+az network nic ip-config create -g $RG --nic-name $NIC -n ipconfig-web \
+  --private-ip-address $PRIV --public-ip-address flatmate-web-ip -o none
+# Ubuntu needs to know about the second private address (a file cloud-init leaves alone):
+az vm run-command invoke -g $RG -n flatmate-vm --command-id RunShellScript --scripts \
+  "printf 'network:\n  version: 2\n  ethernets:\n    eth0:\n      addresses: [$PRIV/24]\n' > /etc/netplan/60-web-ip.yaml && chmod 600 /etc/netplan/60-web-ip.yaml && netplan apply"
+```
+
+- **Costs:** the second public IP uses about $3–4 a month of the student credit; nothing is
+  billed to you.
+- **Step 6:** `WEB_URL` is `https://<LABEL>.<region>.cloudapp.azure.com`. There's no `www.`
+  for such a name, so `production_setup.py` turns the www redirect off by itself
+  (`WEB_WWW_REDIRECT=false`).
+- **Moving to a real domain later:** change `WEB_URL` (and `API_DOMAIN`) in `.env.free-tier`,
+  point the domain's records at the VM, rerun step 6 and deploy. Then delete `flatmate-web-ip`
+  and `ipconfig-web` (and `/etc/netplan/60-web-ip.yaml`) to stop using the credit.
+
+Without a domain or a second name, the API still works at its `cloudapp.azure.com` address, but
+the VM serves no website.
 
 ## 6. GitHub settings (You fill one file; one command sets everything)
 
@@ -306,6 +332,8 @@ next to the API, behind the same Caddy:
 
 To change the domain later: update `WEB_URL` and `API_DOMAIN` in `.env.free-tier`, rerun step 6,
 and run the deploy. Without `WEB_DOMAIN`, the deploy runs no website on the VM.
+`www.<WEB_DOMAIN>` redirects to the site when `WEB_WWW_REDIRECT` isn't `false`
+(`production_setup.py` decides it from `WEB_URL`: on for `example.com`, off for an Azure name).
 
 ## 10. First admin (You, 5 minutes)
 

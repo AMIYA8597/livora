@@ -1,0 +1,6 @@
+# www.<WEB_DOMAIN> redirects to the bare name, so the site has one address. deploy.sh installs
+# this next to web.caddy unless WEB_WWW=0: a name like <label>.<region>.cloudapp.azure.com has
+# no www, and Caddy would keep failing to get a certificate for one.
+www.{$WEB_DOMAIN} {
+	redir https://{$WEB_DOMAIN}{uri} 308
+}

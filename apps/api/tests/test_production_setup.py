@@ -86,12 +86,32 @@ def test_a_own_domain_puts_the_website_on_the_vm():
     assert setup.validate(values) == []
     _, variables = setup.plan(values, existing=set(), rotate=False)
     assert variables["WEB_DOMAIN"] == "flatmate.live"
+    assert variables["WEB_WWW_REDIRECT"] == "true"
     assert variables["UPTIME_WEB_URL"] == "https://flatmate.live"
     env = dict(line.split("=", 1) for line in variables["RUNTIME_ENV"].splitlines())
     assert json.loads(env["CORS_ORIGINS"]) == ["https://flatmate.live"]
     for bad, expected in (("https://www.flatmate.live", "bare domain"), ("https://flatmate.live/app", "nothing else"),
                           ("https://api.flatmate.live", "different names")):
         assert any(expected in p for p in setup.validate({**values, "WEB_URL": bad})), bad
+
+
+def test_www_redirect_only_for_registered_domains():
+    def www(url, **extra):
+        return setup.www_redirect({"WEB_URL": url, **extra})
+
+    assert www("https://flatmate.tech")
+    assert www("https://flatmate.co.in")
+    assert not www("https://flatmate.eastasia.cloudapp.azure.com")  # Azure's name: no www exists
+    assert not www("https://app.flatmate.tech")
+    assert not www("https://flatmate.tech", WEB_WWW_REDIRECT="false")
+    assert www("https://app.flatmate.tech", WEB_WWW_REDIRECT="true")
+    values = {**FILLED, "API_DOMAIN": "livora-api.eastasia.cloudapp.azure.com",
+              "WEB_URL": "https://flatmate.eastasia.cloudapp.azure.com"}
+    assert setup.validate(values) == []
+    _, variables = setup.plan(values, existing=set(), rotate=False)
+    assert variables["WEB_DOMAIN"] == "flatmate.eastasia.cloudapp.azure.com"
+    assert variables["WEB_WWW_REDIRECT"] == "false"
+    assert any("WEB_WWW_REDIRECT" in p for p in setup.validate({**values, "WEB_WWW_REDIRECT": "yes"}))
 
 
 def test_main_sends_values_over_stdin_and_prints_names_only(tmp_path, monkeypatch, capsys):

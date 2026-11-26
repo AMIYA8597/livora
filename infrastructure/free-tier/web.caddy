@@ -1,5 +1,6 @@
 # The website, served from the `web` container. deploy.sh copies this file into sites/ when it is
 # given WEB_IMAGE and WEB_DOMAIN, and removes it otherwise; the Caddyfile imports it.
+# web-www.caddy (www.<domain> redirecting here) goes with it unless WEB_WWW=0.
 
 {$WEB_DOMAIN} {
 	encode zstd gzip
@@ -21,9 +22,4 @@
 			keepalive 60s
 		}
 	}
-}
-
-# One address for the site: www goes to the bare domain.
-www.{$WEB_DOMAIN} {
-	redir https://{$WEB_DOMAIN}{uri} 308
 }

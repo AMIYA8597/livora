@@ -20,7 +20,8 @@ name: Free-tier Deployment
 # and optional ones such as PRODUCTION_SMTP_PASSWORD and PRODUCTION_SENTRY_DSN.
 # scripts/production_setup.py sets them all from the git-ignored .env.free-tier.
 # Variables: FREE_TIER_ENABLED, API_DOMAIN, ACME_EMAIL, RUNTIME_ENV, and for the website
-# WEB_DOMAIN (the bare domain, e.g. example.com; www.<it> redirects to it) and optionally
+# WEB_DOMAIN (e.g. example.com) and optionally WEB_WWW_REDIRECT ("false" when the name has no
+# www, like <label>.<region>.cloudapp.azure.com; otherwise www.<it> redirects to it) and
 # WEB_SENTRY_DSN (Sentry's public browser DSN). Without WEB_DOMAIN the VM runs no website.
 
 on:
@@ -56,6 +57,7 @@ jobs:
       REF: ${{ inputs.ref || github.event.workflow_run.head_sha || github.sha }}
       API_DOMAIN: ${{ vars.API_DOMAIN }}
       WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
+      WEB_WWW: ${{ vars.WEB_WWW_REDIRECT == 'false' && '0' || '1' }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
       HAS_BACKUP: ${{ secrets.BACKUP_AZURE_SAS_URL != '' }}
     steps:
@@ -82,7 +84,7 @@ jobs:
           [ -n "$ACME_EMAIL" ] || missing+=("variable ACME_EMAIL")
           if [ -n "$WEB_DOMAIN" ]; then
             case "$WEB_DOMAIN" in
-              *://*|*/*|www.*) echo "::error::WEB_DOMAIN is the bare name, like example.com (no https://, no www.)"; exit 1 ;;
+              *://*|*/*|www.*) echo "::error::WEB_DOMAIN is the site's host name, like example.com (no https://, no www.)"; exit 1 ;;
             esac
             [ "$WEB_DOMAIN" != "$API_DOMAIN" ] || { echo "::error::WEB_DOMAIN and API_DOMAIN must differ"; exit 1; }
           fi
@@ -260,11 +262,12 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh_opts=(-i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20)
           scp "${ssh_opts[@]}" infrastructure/free-tier/docker-compose.yml infrastructure/free-tier/Caddyfile \
-            infrastructure/free-tier/web.caddy infrastructure/free-tier/deploy.sh "$RUNNER_TEMP/api.env" \
+            infrastructure/free-tier/web.caddy infrastructure/free-tier/web-www.caddy \
+            infrastructure/free-tier/deploy.sh "$RUNNER_TEMP/api.env" \
             "deploy@$HOST:/opt/flatmate/"
           # The registry token goes over stdin; deploy.sh logs out after pulling.
           printf '%s' "$GH_TOKEN" | ssh "${ssh_opts[@]}" "deploy@$HOST" \
-            "API_IMAGE='$IMAGE' API_DOMAIN='$API_DOMAIN' ACME_EMAIL='$ACME_EMAIL' WEB_IMAGE='$WEB_IMAGE' WEB_DOMAIN='$WEB_DOMAIN' REGISTRY_USER='$GITHUB_ACTOR' bash /opt/flatmate/deploy.sh"
+            "API_IMAGE='$IMAGE' API_DOMAIN='$API_DOMAIN' ACME_EMAIL='$ACME_EMAIL' WEB_IMAGE='$WEB_IMAGE' WEB_DOMAIN='$WEB_DOMAIN' WEB_WWW='$WEB_WWW' REGISTRY_USER='$GITHUB_ACTOR' bash /opt/flatmate/deploy.sh"
           rm -f ~/.ssh/deploy_key
 
       - name: Check the live site from outside
@@ -284,8 +287,10 @@ jobs:
               -H "Origin: https://$WEB_DOMAIN" -H 'Access-Control-Request-Method: GET' \
               "https://$API_DOMAIN/api/v1/properties/" | tr -d '\r' | sed -n 's/^access-control-allow-origin: //Ip')
             [ "$allowed" = "https://$WEB_DOMAIN" ] || { echo "::error::the API doesn't allow https://$WEB_DOMAIN (CORS_ORIGINS in RUNTIME_ENV)"; exit 1; }
-            code=$(curl -s --max-time 15 -o /dev/null -w '%{http_code} %{redirect_url}' "https://www.$WEB_DOMAIN/")
-            [ "$code" = "308 https://$WEB_DOMAIN/" ] || echo "::warning::https://www.$WEB_DOMAIN/ answered '$code' (is there a DNS record for www?)"
+            if [ "$WEB_WWW" = 1 ]; then
+              code=$(curl -s --max-time 15 -o /dev/null -w '%{http_code} %{redirect_url}' "https://www.$WEB_DOMAIN/")
+              [ "$code" = "308 https://$WEB_DOMAIN/" ] || echo "::warning::https://www.$WEB_DOMAIN/ answered '$code' (is there a DNS record for www?)"
+            fi
           fi
           {
             echo "### Free-tier deploy"
