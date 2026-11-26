@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import { originOf } from "@/lib/csp.mjs";
 import { fetchPublicListing } from "@/lib/server-api";
 import { jsonLdString, listingJsonLd, listingMetadata } from "@/lib/seo";
-import { serverApiBase, siteUrl } from "@/lib/site";
+import { publicApiBase, siteUrl } from "@/lib/site";
 import { PropertyDetail } from "./PropertyDetail";
 
 type Params = Promise<{ id: string }>;
 
-const apiOrigin = () => originOf(serverApiBase()) ?? "";
+// Links to uploaded photos go to the public API address, not the private one the server fetches from.
+const apiOrigin = () => originOf(publicApiBase()) ?? "";
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { id } = await params;

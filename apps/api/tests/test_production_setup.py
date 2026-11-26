@@ -78,6 +78,20 @@ def test_plan_generates_only_missing_keys_and_builds_runtime_env():
                    if len(secret) > 1)
     rotated, _ = setup.plan(values, existing={"PRODUCTION_SECRET_KEY", "PRODUCTION_APP_DB_PASSWORD"}, rotate=True)
     assert {"PRODUCTION_SECRET_KEY", "PRODUCTION_APP_DB_PASSWORD"} <= set(rotated)
+    assert "WEB_DOMAIN" not in variables  # a vercel.app site isn't served from the VM
+
+
+def test_a_own_domain_puts_the_website_on_the_vm():
+    values = {**FILLED, "API_DOMAIN": "api.flatmate.live", "WEB_URL": "https://flatmate.live", "ACME_EMAIL": "a@x.in"}
+    assert setup.validate(values) == []
+    _, variables = setup.plan(values, existing=set(), rotate=False)
+    assert variables["WEB_DOMAIN"] == "flatmate.live"
+    assert variables["UPTIME_WEB_URL"] == "https://flatmate.live"
+    env = dict(line.split("=", 1) for line in variables["RUNTIME_ENV"].splitlines())
+    assert json.loads(env["CORS_ORIGINS"]) == ["https://flatmate.live"]
+    for bad, expected in (("https://www.flatmate.live", "bare domain"), ("https://flatmate.live/app", "nothing else"),
+                          ("https://api.flatmate.live", "different names")):
+        assert any(expected in p for p in setup.validate({**values, "WEB_URL": bad})), bad
 
 
 def test_main_sends_values_over_stdin_and_prints_names_only(tmp_path, monkeypatch, capsys):

@@ -1,27 +1,62 @@
-FROM node:20-alpine AS base
+# The web app as a small, self-contained Node server (Next.js standalone output).
+#
+#   docker build -f infrastructure/docker/Dockerfile.web \
+#     --build-arg NEXT_PUBLIC_API_URL=https://api.example.com/api/v1 \
+#     --build-arg NEXT_PUBLIC_APP_URL=https://example.com \
+#     --build-arg ENVIRONMENT=production -t flatmate-web .
+#
+# NEXT_PUBLIC_* values are compiled into the browser code, so they are build arguments, not
+# runtime settings. At runtime the server reads API_INTERNAL_URL (optional: a private address of
+# the API for server-side fetches) and PORT. It runs as the unprivileged `node` user and writes only
+# to /app/apps/web/.next/cache, so the root filesystem can be read-only.
 
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+ARG NODE_IMAGE=node:24-alpine
 
-FROM base AS builder
-WORKDIR /app
+FROM ${NODE_IMAGE} AS deps
+RUN npm install -g pnpm@9.1.0 --no-fund --no-audit --loglevel=error
+WORKDIR /repo
+# Manifests first: the dependency layer is reused until one of them changes.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/web/package.json apps/web/
+COPY packages/config/package.json packages/config/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/ui/package.json packages/ui/
+RUN pnpm install --frozen-lockfile --filter "@flatmate/web..."
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
-COPY packages ./packages
-COPY apps/web ./apps/web
-
-RUN pnpm install --frozen-lockfile || pnpm install
+FROM deps AS build
+COPY packages packages
+COPY apps/web apps/web
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+ARG NEXT_PUBLIC_WS_URL=
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ARG NEXT_PUBLIC_APP_RELEASE=
+ARG NEXT_PUBLIC_SENTRY_DSN=
+ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT=
+ARG ENVIRONMENT=development
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL \
+    NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL \
+    NEXT_PUBLIC_APP_RELEASE=$NEXT_PUBLIC_APP_RELEASE \
+    NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT \
+    ENVIRONMENT=$ENVIRONMENT \
+    NEXT_OUTPUT=standalone \
+    NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @flatmate/web build
 
-FROM base AS runner
+FROM ${NODE_IMAGE} AS run
 WORKDIR /app
-
-ENV NODE_ENV=production
-ENV PORT=3000
-
-COPY --from=builder /app ./
-
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0 \
+    NEXT_TELEMETRY_DISABLED=1
+COPY --from=build /repo/apps/web/.next/standalone ./
+COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /repo/apps/web/public ./apps/web/public
+# The one writable place (image optimizer and fetch cache); a tmpfs on a read-only container.
+RUN install -d -o node -g node /app/apps/web/.next/cache
+USER node
 EXPOSE 3000
-
-CMD ["pnpm", "--filter", "@flatmate/web", "start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:3000/robots.txt || exit 1
+CMD ["node", "apps/web/server.js"]

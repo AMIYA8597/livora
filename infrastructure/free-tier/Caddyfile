@@ -1,5 +1,6 @@
-# HTTPS in front of the API. Caddy gets and renews the Let's Encrypt certificate for
-# API_DOMAIN by itself; ports 80 and 443 must be open to the internet (provision-azure.sh does it).
+# HTTPS in front of the API (and the website, when it runs here). Caddy gets and renews the Let's
+# Encrypt certificates by itself; ports 80 and 443 must be open to the internet
+# (provision-azure.sh does it).
 {
 	email {$ACME_EMAIL}
 	admin off
@@ -28,3 +29,6 @@
 		}
 	}
 }
+
+# The website's site blocks (web.caddy), present only when deploy.sh was given WEB_DOMAIN.
+import /etc/caddy/sites/*.caddy

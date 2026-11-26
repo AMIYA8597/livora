@@ -1,7 +1,7 @@
 # Used only by .github/workflows/free-tier-stack.yml, which copies it next to docker-compose.yml so
 # Compose merges it in. It adds a throwaway PostGIS database (Supabase's role on the VM), sets CPU
-# limits that add up to the VM's 2 vCPUs, and gives local file storage (allowed only in the `ci`
-# environment) somewhere to write on the read-only filesystem.
+# limits that add up to the VM's 2 vCPUs (website included), and gives local file storage (allowed
+# only in the `ci` environment) somewhere to write on the read-only filesystem.
 services:
   db:
     image: postgis/postgis:17-3.5
@@ -19,7 +19,7 @@ services:
     depends_on:
       db: { condition: service_healthy }
     tmpfs: ["/tmp:size=64m", "/app/uploads"]
-    cpus: 1.5
+    cpus: 1.25
 
   worker:
     depends_on:
@@ -32,3 +32,6 @@ services:
 
   caddy:
     cpus: 0.15
+
+  web:
+    cpus: 0.25

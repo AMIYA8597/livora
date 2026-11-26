@@ -1,14 +1,16 @@
-# Free-tier production: one small VM runs HTTPS, the API, the background worker and Redis.
-# The database, sign-in and file storage stay on Supabase; the web app is on Vercel.
+# Free-tier production: one small VM runs HTTPS, the website, the API, the background worker and
+# Redis. The database, sign-in and file storage stay on Supabase.
 #
 # Sized for an Azure for Students B2ats v2 VM (2 vCPU, 1 GiB RAM, plus 2 GiB swap from
 # cloud-init.yaml). Every container has a memory cap, so one that misbehaves is restarted on its
 # own instead of the kernel killing something at random.
 #
 # Files next to this one on the VM (/opt/flatmate), none of them in git:
-#   .env     compose settings: API_IMAGE, API_DOMAIN, ACME_EMAIL, REDIS_PASSWORD
-#            (REDIS_PASSWORD is generated on the VM by cloud-init and never leaves it)
+#   .env     compose settings: API_IMAGE, API_DOMAIN, ACME_EMAIL, REDIS_PASSWORD, and for the
+#            website WEB_IMAGE, WEB_DOMAIN and COMPOSE_PROFILES=web (all written by deploy.sh;
+#            REDIS_PASSWORD is generated on the VM by cloud-init and never leaves it)
 #   api.env  the app's settings and secrets, written by the deploy (scripts/compose_env.py)
+#   sites/   web.caddy when the website runs here (deploy.sh manages it)
 #
 # Deployed by .github/workflows/free-tier-deploy.yml. The whole procedure is in
 # docs/FREE_TIER_LAUNCH.md.
@@ -40,12 +42,33 @@ services:
     environment:
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      WEB_DOMAIN: ${WEB_DOMAIN:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on: [api]
     mem_limit: 96m
+
+  # The website (Next.js standalone server, infrastructure/docker/Dockerfile.web). Only with
+  # COMPOSE_PROFILES=web; its public addresses are compiled into the image at build time.
+  web:
+    <<: *service
+    profiles: [web]
+    image: ${WEB_IMAGE:-flatmate-web:not-deployed}
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+      # Rendered pages, fetched data and resized images; rebuilt after a restart.
+      - /app/apps/web/.next/cache:size=96m,uid=1000,gid=1000
+    environment:
+      # Server-side fetches (listing pages, sitemap) go straight to the API container.
+      API_INTERNAL_URL: http://api:8000/api/v1
+      NODE_OPTIONS: --max-old-space-size=160
+    expose: ["3000"]
+    stop_grace_period: 10s
+    mem_limit: ${WEB_MEM_LIMIT:-256m}
 
   api:
     <<: *app

@@ -19,3 +19,14 @@ coverage
 htmlcov
 uploads
 *.log
+
+# The same anywhere in the tree (the patterns above match only at the top level): local settings
+# and build output must never end up in an image.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/.next
+**/test-results
+**/playwright-report
+**/tsconfig.tsbuildinfo

@@ -19,6 +19,11 @@ export function indexable(env: Record<string, string | undefined> = process.env)
   return env.NODE_ENV === "production" && env.ENVIRONMENT === "production";
 }
 
+/** The API base browsers use (and links in pages must use): never the private address. */
+export function publicApiBase(env: Record<string, string | undefined> = process.env): string {
+  return (env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(/\/+$/, "");
+}
+
 /** The API base for server-side fetches: a private URL when there is one, else the public one. */
 export function serverApiBase(env: Record<string, string | undefined> = process.env): string {
   return (env.API_INTERNAL_URL || env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(/\/+$/, "");

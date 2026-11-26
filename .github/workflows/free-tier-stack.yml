@@ -1,17 +1,21 @@
 name: Free-tier Stack Test
 
-# Runs the free-tier production stack (infrastructure/free-tier: Caddy, API, worker, Redis) on the
-# runner the way the VM runs it, with CPU and memory limits that add up to the VM's 2 vCPU / 1 GiB.
+# Runs the free-tier production stack (infrastructure/free-tier: Caddy, website, API, worker, Redis)
+# on the runner the way the VM runs it, with CPU and memory limits that add up to the VM's
+# 2 vCPU / 1 GiB.
 # A throwaway PostGIS database stands in for Supabase, so the app runs in the `ci` environment
 # (local file storage); every other setting comes from scripts/compose_env.py like production.
 #
 # It checks:
 #   - deploy.sh brings a release up through HTTPS, and rolls back from one that never gets healthy;
+#   - the website answers on its own name (www redirects to it), with its security headers, and
+#     renders listing pages from the API over the private network;
 #   - HTTPS works, HTTP redirects to it, and HSTS is sent;
 #   - nothing but 80/443 is published (no Redis, no API port);
 #   - the containers are read-only and unprivileged;
 #   - the worker connects;
-#   - under a short load test, no container is OOM-killed, and nothing answers 500.
+#   - under a short load test (API and website at once), no container is OOM-killed, and nothing
+#     answers 500.
 # The load numbers and memory use go to the run summary.
 
 on:
@@ -19,6 +23,9 @@ on:
     paths:
       - "infrastructure/free-tier/**"
       - "apps/api/**"
+      - "apps/web/**"
+      - "packages/**"
+      - "infrastructure/docker/Dockerfile.web"
       - "scripts/compose_env.py"
       - "scripts/deploy_runtime.py"
       - "loadtests/**"
@@ -28,6 +35,9 @@ on:
     paths:
       - "infrastructure/free-tier/**"
       - "apps/api/**"
+      - "apps/web/**"
+      - "packages/**"
+      - "infrastructure/docker/Dockerfile.web"
       - "scripts/compose_env.py"
       - "scripts/deploy_runtime.py"
       - "loadtests/**"
@@ -49,10 +59,11 @@ jobs:
   stack:
     name: Free-tier stack (deploy, rollback, security, load)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       USERS: ${{ inputs.users || '150' }}
       API_DOMAIN: localhost
+      WEB_DOMAIN: web.localhost
       ACME_EMAIL: ci@example.com
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +83,13 @@ jobs:
           printf 'FROM localhost:5000/flatmate-api:good\nCMD ["sleep", "infinity"]\n' \
             | docker build -q -t localhost:5000/flatmate-api:broken -
           docker push -q localhost:5000/flatmate-api:broken
+          # The website, built for these names as the deploy workflow builds it for the real ones.
+          docker build -q -f infrastructure/docker/Dockerfile.web \
+            --build-arg NEXT_PUBLIC_API_URL=https://localhost/api/v1 \
+            --build-arg NEXT_PUBLIC_APP_URL=https://web.localhost \
+            --build-arg ENVIRONMENT=production \
+            -t localhost:5000/flatmate-web:good .
+          docker push -q localhost:5000/flatmate-web:good
 
       - name: Prepare the app folder the way cloud-init does
         run: |
@@ -79,7 +97,8 @@ jobs:
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
           install -d -m 0750 "$APP_DIR"
           cp infrastructure/free-tier/docker-compose.yml infrastructure/free-tier/Caddyfile \
-             infrastructure/free-tier/deploy.sh infrastructure/free-tier/ci/docker-compose.override.yml "$APP_DIR/"
+             infrastructure/free-tier/web.caddy infrastructure/free-tier/deploy.sh \
+             infrastructure/free-tier/ci/docker-compose.override.yml "$APP_DIR/"
           (umask 077; printf 'REDIS_PASSWORD=%s\nAPI_IMAGE=localhost:5000/flatmate-api:good\nAPI_DOMAIN=localhost\nACME_EMAIL=ci@example.com\n' \
             "$(openssl rand -hex 32)" > "$APP_DIR/.env")
 
@@ -109,8 +128,8 @@ jobs:
 
       - name: Deploy the good release with deploy.sh
         run: |
-          API_IMAGE=localhost:5000/flatmate-api:good HEALTH_INSECURE_TLS=1 WAIT_SECONDS=150 \
-            bash "$APP_DIR/deploy.sh" </dev/null
+          API_IMAGE=localhost:5000/flatmate-api:good WEB_IMAGE=localhost:5000/flatmate-web:good \
+            HEALTH_INSECURE_TLS=1 WAIT_SECONDS=150 bash "$APP_DIR/deploy.sh" </dev/null
 
       - name: Check HTTPS, headers, exposure and hardening
         working-directory: ${{ env.APP_DIR }}
@@ -121,16 +140,16 @@ jobs:
           c -o /dev/null https://localhost/api/v1/properties/
           c -D - -o /dev/null https://localhost/health/live | tee headers.txt
           grep -qi '^strict-transport-security: max-age=31536000' headers.txt
-          ! grep -qi '^server:' headers.txt
+          if grep -qi '^server:' headers.txt; then echo '::error::server header is sent'; exit 1; fi
           code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: localhost' http://127.0.0.1/health/live)
           [ "$code" = 308 ] || { echo "::error::HTTP should redirect to HTTPS, got $code"; exit 1; }
           for port in 6379 8000 8080; do
             if nc -z -w 2 127.0.0.1 $port; then echo "::error::port $port is reachable from outside"; exit 1; fi
           done
-          for svc in api worker; do
-            id=$(docker compose ps -q $svc)
+          for svc in api:flatmate worker:flatmate web:node; do
+            id=$(docker compose ps -q ${svc%%:*})
             docker inspect "$id" -f '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.Config.User}} {{.HostConfig.SecurityOpt}}' | tee inspect.txt
-            grep -q '^true \[ALL\] flatmate \[no-new-privileges:true\]' inspect.txt
+            grep -q "^true \[ALL\] ${svc#*:} \[no-new-privileges:true\]" inspect.txt
           done
           for _ in $(seq 1 40); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q worker)")" = healthy ] && break
@@ -139,14 +158,37 @@ jobs:
           docker compose ps
           [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q worker)")" = healthy ]
 
+      - name: Check the website
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          w() { curl -fsS -k --resolve web.localhost:443:127.0.0.1 "$@"; }
+          w -D headers.txt -o home.html https://web.localhost/
+          cat headers.txt
+          grep -qi '^content-security-policy: .*connect-src [^;]*https://localhost' headers.txt
+          grep -qi '^strict-transport-security: max-age=31536000' headers.txt
+          grep -qi '^x-frame-options: DENY' headers.txt
+          if grep -qi '^x-powered-by:' headers.txt; then echo '::error::x-powered-by header is sent'; exit 1; fi
+          if grep -qi '^server:' headers.txt; then echo '::error::server header is sent'; exit 1; fi
+          grep -qi '<html' home.html
+          for page in /properties /login /robots.txt /sitemap.xml /manifest.webmanifest; do
+            w -o /dev/null "https://web.localhost$page" || { echo "::error::$page failed"; exit 1; }
+          done
+          # Static files are cached for a year.
+          asset=$(grep -o '/_next/static/[^"]*\.js' home.html | head -1)
+          w -D - -o /dev/null "https://web.localhost$asset" | grep -qi '^cache-control: public, max-age=31536000, immutable'
+          code=$(curl -s -k -o /dev/null -w '%{http_code} %{redirect_url}' --resolve www.web.localhost:443:127.0.0.1 https://www.web.localhost/x)
+          [ "$code" = "308 https://web.localhost/x" ] || { echo "::error::www should redirect to the bare name, got $code"; exit 1; }
+          if nc -z -w 2 127.0.0.1 3000; then echo "::error::port 3000 is reachable from outside"; exit 1; fi
+
       - name: A release that never gets healthy is rolled back
         run: |
-          if API_IMAGE=localhost:5000/flatmate-api:broken HEALTH_INSECURE_TLS=1 WAIT_SECONDS=45 \
-              bash "$APP_DIR/deploy.sh" </dev/null; then
+          if API_IMAGE=localhost:5000/flatmate-api:broken WEB_IMAGE=localhost:5000/flatmate-web:good \
+              HEALTH_INSECURE_TLS=1 WAIT_SECONDS=45 bash "$APP_DIR/deploy.sh" </dev/null; then
             echo "::error::deploy.sh accepted a release that never became healthy"; exit 1
           fi
           grep -q '^API_IMAGE=localhost:5000/flatmate-api:good$' "$APP_DIR/.env"
           curl -fsS -k --resolve localhost:443:127.0.0.1 https://localhost/health/ready >/dev/null
+          curl -fsS -k --resolve web.localhost:443:127.0.0.1 -o /dev/null https://web.localhost/
           echo "Rolled back to the good release and serving."
 
       - name: Seed load-test data
@@ -155,6 +197,16 @@ jobs:
           cd apps/api
           DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:55432/flatmate SECRET_KEY="$SECRET_KEY" \
             ENVIRONMENT=ci python ../../loadtests/seed_load.py --members 400 --owners 80 --listings 800
+
+      - name: The website renders a listing from the API
+        run: |
+          # Server-side, through the API container (API_INTERNAL_URL); photo links stay public.
+          id=$(curl -fsS -k --resolve localhost:443:127.0.0.1 'https://localhost/api/v1/properties/?limit=1' | jq -r '.[0].id')
+          { [ -n "$id" ] && [ "$id" != null ]; } || { echo "::error::the API listed no listings"; exit 1; }
+          curl -fsS -k --resolve web.localhost:443:127.0.0.1 "https://web.localhost/properties/$id" -o listing.html
+          grep -q 'application/ld+json' listing.html || { echo "::error::the listing page has no listing data"; exit 1; }
+          if grep -q 'api:8000' listing.html; then echo "::error::the page links to the private API address"; exit 1; fi
+          echo "Listing $id renders on the website."
 
       - name: Load test (${{ env.USERS }} users, 3 minutes)
         working-directory: ${{ env.APP_DIR }}
@@ -170,10 +222,20 @@ jobs:
           set +e
           ( while sleep 15; do docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' >> "$RUNNER_TEMP/stats.txt"; done ) &
           watcher=$!
+          # Visitors on the website at the same time: pages, a listing search and the sitemap.
+          ( while true; do
+              for page in / /properties '/properties?city=Bengaluru' /sitemap.xml /login; do
+                curl -s -o /dev/null --cacert "$RUNNER_TEMP/caddy-root.crt" --resolve web.localhost:443:127.0.0.1 \
+                  -w '%{http_code}\n' "https://web.localhost$page" >> "$RUNNER_TEMP/web_codes.txt"
+              done
+            done ) &
+          browsing=$!
           LOAD_CA_BUNDLE="$RUNNER_TEMP/caddy-root.crt" MAX_FAIL_RATIO=1 MAX_P95_MS=100000 \
             python -m locust -f "$GITHUB_WORKSPACE/loadtests/locustfile.py" --host https://localhost --headless \
               -u "$USERS" -r 10 -t 3m --only-summary --csv "$RUNNER_TEMP/load" > "$RUNNER_TEMP/locust.txt" 2>&1
-          kill $watcher
+          kill $watcher $browsing
+          echo "Website answers during the load test:"; sort "$RUNNER_TEMP/web_codes.txt" | uniq -c
+          if grep -qv '^200$' "$RUNNER_TEMP/web_codes.txt"; then echo "::error::the website failed during the load test"; exit 1; fi
           set -e
           tail -30 "$RUNNER_TEMP/locust.txt"
 
@@ -211,7 +273,7 @@ jobs:
           print(f"- passed: {ratio:.2%} of requests failed, all of them busy answers")
           PY
           cat "$GITHUB_STEP_SUMMARY"
-          for svc in caddy api worker redis; do
+          for svc in caddy web api worker redis; do
             id=$(docker compose ps -aq $svc)
             [ "$(docker inspect -f '{{.State.OOMKilled}}' "$id")" = false ] || { echo "::error::$svc was OOM-killed"; exit 1; }
             [ "$(docker inspect -f '{{.RestartCount}}' "$id")" = 0 ] || { echo "::error::$svc restarted"; docker compose logs --tail 50 $svc; exit 1; }

@@ -1,16 +1,17 @@
 name: Free-tier Deployment
 
-# Deploys the API and worker to the free-tier VM (docs/FREE_TIER_LAUNCH.md) after CI passes on
-# main, or by hand. Off until the repository variable FREE_TIER_ENABLED is "true".
+# Deploys the website, API and worker to the free-tier VM (docs/FREE_TIER_LAUNCH.md) after CI
+# passes on main, or by hand. Off until the repository variable FREE_TIER_ENABLED is "true".
 #
-#   1. builds the API image and pushes it to GitHub's container registry (ghcr.io);
+#   1. builds the API image, and the website's image when WEB_DOMAIN is set, and pushes them to
+#      GitHub's container registry (ghcr.io);
 #   2. backs up the database (verified restore) when BACKUP_AZURE_SAS_URL is set;
 #   3. applies database migrations with the owner login;
 #   4. writes the app's settings (scripts/compose_env.py) from PRODUCTION_* secrets and the
 #      RUNTIME_ENV variable;
 #   5. copies the stack to the VM and runs deploy.sh, which rolls back if the release isn't
 #      healthy;
-#   6. checks the live API from outside.
+#   6. checks the live API (and website) from outside.
 #
 # Secrets: FREE_TIER_HOST, FREE_TIER_SSH_KEY, FREE_TIER_SSH_KNOWN_HOSTS (provision-azure.sh sets
 # these), PRODUCTION_DATABASE_URL (owner, for migrations and backups), PRODUCTION_SECRET_KEY,
@@ -18,8 +19,9 @@ name: Free-tier Deployment
 # workflow then creates the flatmate_api login and its URL) or a full PRODUCTION_APP_DATABASE_URL,
 # and optional ones such as PRODUCTION_SMTP_PASSWORD and PRODUCTION_SENTRY_DSN.
 # scripts/production_setup.py sets them all from the git-ignored .env.free-tier.
-# Variables: FREE_TIER_ENABLED, API_DOMAIN, ACME_EMAIL, RUNTIME_ENV.
-# The web app deploys itself through Vercel's GitHub integration.
+# Variables: FREE_TIER_ENABLED, API_DOMAIN, ACME_EMAIL, RUNTIME_ENV, and for the website
+# WEB_DOMAIN (the bare domain, e.g. example.com; www.<it> redirects to it) and optionally
+# WEB_SENTRY_DSN (Sentry's public browser DSN). Without WEB_DOMAIN the VM runs no website.
 
 on:
   workflow_run:
@@ -53,6 +55,7 @@ jobs:
     env:
       REF: ${{ inputs.ref || github.event.workflow_run.head_sha || github.sha }}
       API_DOMAIN: ${{ vars.API_DOMAIN }}
+      WEB_DOMAIN: ${{ vars.WEB_DOMAIN }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
       HAS_BACKUP: ${{ secrets.BACKUP_AZURE_SAS_URL != '' }}
     steps:
@@ -77,6 +80,12 @@ jobs:
           fi
           [ -n "$API_DOMAIN" ] || missing+=("variable API_DOMAIN")
           [ -n "$ACME_EMAIL" ] || missing+=("variable ACME_EMAIL")
+          if [ -n "$WEB_DOMAIN" ]; then
+            case "$WEB_DOMAIN" in
+              *://*|*/*|www.*) echo "::error::WEB_DOMAIN is the bare name, like example.com (no https://, no www.)"; exit 1 ;;
+            esac
+            [ "$WEB_DOMAIN" != "$API_DOMAIN" ] || { echo "::error::WEB_DOMAIN and API_DOMAIN must differ"; exit 1; }
+          fi
           if [ ${#missing[@]} -gt 0 ]; then
             printf '::error::Missing %s\n' "${missing[@]}"
             echo "See docs/FREE_TIER_LAUNCH.md, step 6."
@@ -118,6 +127,59 @@ jobs:
           docker logout ghcr.io >/dev/null
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Name the website image
+        id: web
+        if: env.WEB_DOMAIN != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENTRY_DSN: ${{ vars.WEB_SENTRY_DSN }}
+        run: |
+          # Its public addresses are compiled in, so the tag carries a hash of them: a new domain
+          # gets a new image, the same commit and settings reuse the old one.
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          sha=${{ steps.image.outputs.sha }}
+          args=$(printf '%s\n' \
+            "NEXT_PUBLIC_API_URL=https://$API_DOMAIN/api/v1" \
+            "NEXT_PUBLIC_APP_URL=https://$WEB_DOMAIN" \
+            "NEXT_PUBLIC_APP_RELEASE=$sha" \
+            "NEXT_PUBLIC_SENTRY_DSN=$SENTRY_DSN" \
+            "NEXT_PUBLIC_SENTRY_ENVIRONMENT=production" \
+            "ENVIRONMENT=production")
+          image="ghcr.io/$owner/flatmate-web:$sha-$(printf '%s' "$args" | sha256sum | cut -c1-10)"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          exists=false
+          docker manifest inspect "$image" >/dev/null 2>&1 && exists=true
+          docker logout ghcr.io >/dev/null
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+          { echo "args<<ARGS_END"; echo "$args"; echo "ARGS_END"; } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+        if: env.WEB_DOMAIN != '' && steps.web.outputs.exists != 'true'
+
+      - uses: docker/login-action@v3
+        if: env.WEB_DOMAIN != '' && steps.web.outputs.exists != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push the website image
+        if: env.WEB_DOMAIN != '' && steps.web.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/Dockerfile.web
+          push: true
+          tags: ${{ steps.web.outputs.image }}
+          build-args: ${{ steps.web.outputs.args }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.image.outputs.sha }}
+          cache-from: type=gha,scope=free-tier-web
+          cache-to: type=gha,mode=max,scope=free-tier-web
+          provenance: false
 
       - name: Back up the database (verified) before migrating
         if: env.HAS_BACKUP == 'true'
@@ -190,6 +252,7 @@ jobs:
           KNOWN_HOSTS: ${{ secrets.FREE_TIER_SSH_KNOWN_HOSTS }}
           GH_TOKEN: ${{ github.token }}
           IMAGE: ${{ steps.image.outputs.image }}
+          WEB_IMAGE: ${{ steps.web.outputs.image }}
         run: |
           umask 077
           mkdir -p ~/.ssh
@@ -197,13 +260,14 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh_opts=(-i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ConnectTimeout=20)
           scp "${ssh_opts[@]}" infrastructure/free-tier/docker-compose.yml infrastructure/free-tier/Caddyfile \
-            infrastructure/free-tier/deploy.sh "$RUNNER_TEMP/api.env" "deploy@$HOST:/opt/flatmate/"
+            infrastructure/free-tier/web.caddy infrastructure/free-tier/deploy.sh "$RUNNER_TEMP/api.env" \
+            "deploy@$HOST:/opt/flatmate/"
           # The registry token goes over stdin; deploy.sh logs out after pulling.
           printf '%s' "$GH_TOKEN" | ssh "${ssh_opts[@]}" "deploy@$HOST" \
-            "API_IMAGE='$IMAGE' API_DOMAIN='$API_DOMAIN' ACME_EMAIL='$ACME_EMAIL' REGISTRY_USER='$GITHUB_ACTOR' bash /opt/flatmate/deploy.sh"
+            "API_IMAGE='$IMAGE' API_DOMAIN='$API_DOMAIN' ACME_EMAIL='$ACME_EMAIL' WEB_IMAGE='$WEB_IMAGE' WEB_DOMAIN='$WEB_DOMAIN' REGISTRY_USER='$GITHUB_ACTOR' bash /opt/flatmate/deploy.sh"
           rm -f ~/.ssh/deploy_key
 
-      - name: Check the live API from outside
+      - name: Check the live site from outside
         run: |
           for _ in $(seq 1 20); do
             if curl -fsS --max-time 10 "https://$API_DOMAIN/health/ready" >/dev/null; then break; fi
@@ -212,8 +276,20 @@ jobs:
           curl -fsS --max-time 10 "https://$API_DOMAIN/health/ready"
           echo
           curl -fsS --max-time 10 "https://$API_DOMAIN/api/v1/meta/app-config"
+          echo
+          if [ -n "$WEB_DOMAIN" ]; then
+            curl -fsS --max-time 15 -o /dev/null -w 'website: %{http_code} in %{time_total}s\n' "https://$WEB_DOMAIN/"
+            # The browser may call the API from the website: CORS must allow exactly that origin.
+            allowed=$(curl -sS --max-time 10 -o /dev/null -D - -X OPTIONS \
+              -H "Origin: https://$WEB_DOMAIN" -H 'Access-Control-Request-Method: GET' \
+              "https://$API_DOMAIN/api/v1/properties/" | tr -d '\r' | sed -n 's/^access-control-allow-origin: //Ip')
+            [ "$allowed" = "https://$WEB_DOMAIN" ] || { echo "::error::the API doesn't allow https://$WEB_DOMAIN (CORS_ORIGINS in RUNTIME_ENV)"; exit 1; }
+            code=$(curl -s --max-time 15 -o /dev/null -w '%{http_code} %{redirect_url}' "https://www.$WEB_DOMAIN/")
+            [ "$code" = "308 https://$WEB_DOMAIN/" ] || echo "::warning::https://www.$WEB_DOMAIN/ answered '$code' (is there a DNS record for www?)"
+          fi
           {
             echo "### Free-tier deploy"
+            [ -z "$WEB_DOMAIN" ] || echo "- website: https://$WEB_DOMAIN"
             echo "- release \`${{ steps.image.outputs.sha }}\` is live at https://$API_DOMAIN"
             echo "- roll back: run this workflow by hand with an older commit as \`ref\`"
           } >> "$GITHUB_STEP_SUMMARY"

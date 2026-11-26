@@ -24,7 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FILE = ROOT / ".env.free-tier"
@@ -71,6 +71,12 @@ def owner_url(values: Dict[str, str]) -> str:
     return f"postgresql+asyncpg://postgres.{ref}:{password}@{host}:5432/postgres"
 
 
+def web_domain(values: Dict[str, str]) -> str:
+    """The website's host when the VM serves it (WEB_DOMAIN); empty for a *.vercel.app address."""
+    host = urlsplit(values.get("WEB_URL", "")).hostname or ""
+    return "" if host.endswith(".vercel.app") else host
+
+
 def runtime_env(values: Dict[str, str]) -> Optional[str]:
     """The app's non-secret settings (the RUNTIME_ENV variable), once the website address is known."""
     web = values.get("WEB_URL", "").rstrip("/")
@@ -105,12 +111,18 @@ def validate(values: Dict[str, str]) -> List[str]:
     key = values.get("SUPABASE_SECRET_KEY", "")
     if key and not key.startswith("sb_secret_"):
         problems.append("SUPABASE_SECRET_KEY should be a new sb_secret_... key (Project Settings → API Keys)")
-    for name in ("WEB_URL",):
-        if values.get(name) and not values[name].startswith("https://"):
-            problems.append(f"{name} should start with https://")
+    web = values.get("WEB_URL", "")
+    if web:
+        parts = urlsplit(web)
+        if parts.scheme != "https" or not parts.hostname or parts.path.strip("/") or parts.query or parts.port:
+            problems.append("WEB_URL is the site's https:// address and nothing else, like https://example.com")
+        elif parts.hostname.startswith("www."):
+            problems.append("WEB_URL is the bare domain (https://example.com); www. redirects to it by itself")
     domain = values.get("API_DOMAIN", "")
     if domain and ("/" in domain or ":" in domain):
-        problems.append("API_DOMAIN is a bare host name, like livora-api.centralindia.cloudapp.azure.com")
+        problems.append("API_DOMAIN is a bare host name, like api.example.com")
+    if domain and web and urlsplit(web).hostname == domain:
+        problems.append("WEB_URL and API_DOMAIN need different names, like example.com and api.example.com")
     for name in ("ACME_EMAIL", "EMAIL_FROM_ADDRESS"):
         if values.get(name) and "@" not in values[name]:
             problems.append(f"{name} should be an email address")
@@ -141,6 +153,9 @@ def plan(values: Dict[str, str], existing: set, rotate: bool) -> Tuple[Dict[str,
         variables["ACME_EMAIL"] = values["ACME_EMAIL"]
     if values.get("WEB_URL"):
         variables["UPTIME_WEB_URL"] = values["WEB_URL"].rstrip("/")
+    if web_domain(values):
+        # The deploy builds the website and serves it from the VM under this name.
+        variables["WEB_DOMAIN"] = web_domain(values)
     env = runtime_env(values)
     if env:
         variables["RUNTIME_ENV"] = env

@@ -11,10 +11,11 @@ Read section 1 first: it says honestly what this setup can and can't do.
 
 ```mermaid
 flowchart LR
-    U[People's browsers] -->|HTTPS| V[Vercel Hobby<br/>Next.js website]
-    U -->|HTTPS + WebSocket| C
+    U[People's browsers] -->|"HTTPS: your-domain (website), api.your-domain (API + WebSocket)"| C
     subgraph VM [Azure VM, 2 vCPU / 1 GiB, free for 12 months]
-        C[Caddy<br/>automatic HTTPS] --> A[API<br/>2 processes]
+        C[Caddy<br/>automatic HTTPS] --> N[Website<br/>Next.js server]
+        C --> A[API<br/>2 processes]
+        N -->|listing pages, private network| A
         W[Worker<br/>jobs + weekly ML training] --> R[(Redis<br/>queue, cache, limits)]
         A --> R
     end
@@ -27,15 +28,14 @@ flowchart LR
 
 | Part | Service and plan | Cost | Free for |
 |---|---|---|---|
-| API, worker, Redis, HTTPS | Azure for Students: B2ats v2 VM, 64 GB SSD | ₹0 (12-month free VM; the $100 credit covers the public IP) | 12 months, renewable yearly while a student |
+| Website, API, worker, Redis, HTTPS | Azure for Students: B2ats v2 VM, 64 GB SSD | ₹0 (12-month free VM; the $100 credit covers the public IP) | 12 months, renewable yearly while a student |
 | Database, file storage | Supabase Free | ₹0 | Always (paused after 7 days with no traffic; the uptime check prevents that) |
-| Website | Vercel Hobby | ₹0 | Always (non-commercial use only, see below) |
 | Images (Docker) | GitHub Container Registry | ₹0 | Always for a public repository |
 | CI/CD, uptime checks | GitHub Actions | ₹0 | Always for a public repository |
 | Backups | Azure Blob (private) | ₹0 (5 GB free) | 12 months |
 | Email | Brevo Free (300 emails a day) | ₹0 | Always |
 | Error tracking | Sentry (Student Pack) | ₹0 | 1 year, renewable |
-| Domain (optional) | Name.com, .TECH or Namecheap .me (Student Pack) | ₹0 | 1 year (then about ₹800–1,500 a year) |
+| Domain | Name.com (.live, .studio, ...), .TECH or Namecheap .me (Student Pack) | ₹0 | 1 year (then about ₹800–2,500 a year) |
 | Search and matching AI | Built in (local embeddings, ranking models trained weekly) | ₹0 | Always |
 
 **What it can carry.** The code is the same as the 10,000-user design (docs/CAPACITY_PLAN.md):
@@ -58,9 +58,7 @@ do that.
 | AI moderation and smart replies (Claude) | They need a paid Anthropic key. Rule-based moderation still runs. | Set `PRODUCTION_ANTHROPIC_API_KEY`. |
 | Virus scanning of uploads (ClamAV) | It needs about 1 GB more RAM than the VM has. Uploads are still checked for type and size. | You move to a bigger server (E8). |
 
-**Two rules to keep:**
-- **Vercel Hobby is for non-commercial projects.** When you start charging, move to Vercel Pro
-  or another host.
+**One rule to keep:**
 - **Free offers expire:**
   - the Azure free VM after 12 months;
   - the domain after 1 year;
@@ -85,13 +83,14 @@ says why.
    - It has a spending limit: when the $100 credit is used up, things stop. Nothing is ever
      billed to you.
 3. **Supabase:** you already have the project. Keep it on the Free plan.
-4. **Vercel:** <https://vercel.com/signup>, "Continue with GitHub", Hobby plan.
-5. **Brevo** (email): <https://www.brevo.com>, free plan, no card.
-6. **Sentry** (optional, recommended): through the GitHub Student Pack offer page.
-7. **A domain** (optional, recommended):
-   - claim one through the Student Pack (Name.com, .TECH or Namecheap .me);
-   - without one, the API's address is `<name>.<region>.cloudapp.azure.com` and the website's is
-     `<project>.vercel.app`, and both work.
+4. **Brevo** (email): <https://www.brevo.com>, free plan, no card.
+5. **Sentry** (optional, recommended): through the GitHub Student Pack offer page.
+6. **A domain:** claim one free for a year through the Student Pack:
+   - Name.com: <https://www.name.com/partner/github-students> (.live, .studio, .app, ...);
+   - get.tech (.tech) or Namecheap (.me) through the pack's offer pages.
+
+   The website and the API both run on the VM under it: `<your-domain>` and
+   `api.<your-domain>`.
 
 ## 3. Lock down Supabase first (You, 10 minutes)
 
@@ -166,24 +165,37 @@ already signed in to Azure. Nothing needs installing on your computer.
    - **The password stays out of logs:** it's sent to the database only as a SCRAM hash, so it
      never appears in a SQL statement or the database's logs.
 
-## 5. A domain for the API (optional, You)
+## 5. Point the domain at the server (You, 5 minutes)
 
-- **Without a domain:** skip this step. The API is at the `cloudapp.azure.com` address the
-  script printed, with a real HTTPS certificate.
-- **With a domain:**
-  1. In your domain's DNS settings, add an `A` record `api` → the IP address the script printed.
-  2. If you use Cloudflare, keep the record **DNS only** (grey cloud), so Caddy can get its
-     certificate and sees real client addresses.
-  3. Wait until `nslookup api.<your-domain>` shows the IP.
+In your registrar's DNS settings (Name.com → My Domains → the domain → Manage DNS Records), add
+three `A` records, each to the IP address the script printed (Azure portal → the VM → Public IP
+address):
 
-Then `API_DOMAIN` (step 6) is `api.<your-domain>`.
+| Type | Host | Answer | TTL |
+|---|---|---|---|
+| A | *(empty, or `@`)* | the VM's IP | 300 |
+| A | `www` | the VM's IP | 300 |
+| A | `api` | the VM's IP | 300 |
+
+- Delete any parking records the registrar added for the same names (an `ALIAS`, `CNAME` or `A`
+  for `@` or `www`).
+- With Cloudflare instead, keep the records **DNS only** (grey cloud), so Caddy can get its
+  certificates and sees real client addresses.
+- Wait until `nslookup <your-domain>`, `nslookup www.<your-domain>` and
+  `nslookup api.<your-domain>` all show the IP (minutes, sometimes an hour).
+
+Then in step 6, `API_DOMAIN` is `api.<your-domain>` and `WEB_URL` is `https://<your-domain>`.
+Caddy gets the certificates for all three names by itself on the next deploy.
+
+**Without a domain** the API still works at the `cloudapp.azure.com` address the script printed,
+but the VM serves no website.
 
 ## 6. GitHub settings (You fill one file; one command sets everything)
 
 1. Copy `infrastructure/free-tier/free-tier.env.example` to `.env.free-tier` at the repository
    root. Git ignores that name.
-2. Fill it in: the Supabase values from step 3, the API address from step 4 or 5, the website
-   address from step 9, and Brevo from step 7. Never paste these values into a chat.
+2. Fill it in: the Supabase values from step 3, the addresses from step 5, and Brevo from
+   step 7. Never paste these values into a chat.
 3. On your computer, signed in with `gh auth login`, run:
 
    ```bash
@@ -200,7 +212,8 @@ It sets these, printing names only. Values go to `gh` over stdin:
   - `PRODUCTION_SECRET_KEY` and `PRODUCTION_APP_DB_PASSWORD`: generated. Nobody ever needs to
     know them.
 - **Variables:**
-  - `API_DOMAIN`, `ACME_EMAIL`, `UPTIME_API_URL` and `UPTIME_WEB_URL`.
+  - `API_DOMAIN`, `WEB_DOMAIN` (from `WEB_URL`), `ACME_EMAIL`, `UPTIME_API_URL` and
+    `UPTIME_WEB_URL`.
   - `RUNTIME_ENV`, the app's non-secret settings: the website address and CORS, the Supabase
     URLs, and the Brevo login and sender.
 
@@ -243,50 +256,56 @@ gh run watch
 ```
 
 The **Free-tier Deployment** workflow:
-1. builds the API image and pushes it to `ghcr.io`;
+1. builds the API image and the website's image and pushes them to `ghcr.io`. The website's
+   addresses are compiled into it, so its tag includes a hash of them;
 2. takes a verified backup of the database (dump, restore into a throwaway database, compare)
    and stores it in your private Azure container;
 3. applies the database migrations;
 4. writes the app's settings from your secrets (it prints names only, never values);
-5. copies the stack to the VM and starts it. Caddy gets the HTTPS certificate, and if the
-   new release isn't healthy within 3 minutes, the previous one is put back and the run fails;
-6. checks `https://<API_DOMAIN>/health/ready` from outside.
+5. copies the stack to the VM and starts it. Caddy gets the HTTPS certificates, and if the
+   new release (API and website) isn't healthy within 3 minutes, the previous one is put back
+   and the run fails;
+6. checks from outside: `https://<API_DOMAIN>/health/ready`, the website, that the API's CORS
+   allows exactly the website, and that `www.` redirects to the bare domain.
 
 After this, **every push to `main` that passes CI deploys itself.** Every change to the server
 setup is also tested first by **Free-tier Stack Test**, which runs the same stack on GitHub's
 machines with the VM's limits:
 - deploy, and rollback from a broken release;
-- HTTPS and the security headers;
+- HTTPS and the security headers, for the API and the website;
+- the website rendering a listing from the API;
 - the ports that are reachable from outside;
-- a 3-minute load test, with no out-of-memory and no server errors allowed.
+- a 3-minute load test on the API while people browse the website, with no out-of-memory and
+  no server errors allowed.
 
 Check it yourself:
 
 ```bash
 curl https://<API_DOMAIN>/health/ready          # {"status":"ready", ... "database":{"status":"ok"}, "redis":{"status":"ok"}}
 curl https://<API_DOMAIN>/api/v1/meta/app-config  # "features":{"phone_verification":false,"payments":false}
+curl -I https://<your-domain>/                     # 200, with Content-Security-Policy and Strict-Transport-Security
+curl -I https://www.<your-domain>/                 # 308 to https://<your-domain>/
 ```
 
-## 9. The website on Vercel (You, 5 minutes)
+## 9. The website (automatic)
 
-1. Go to Vercel → Add New → Project → import the GitHub repository.
-2. Set **Root Directory** to `apps/web`. The framework is detected as Next.js, and pnpm is
-   detected from the repository.
-3. Add **Environment Variables** (Production):
+The VM serves the website (`infrastructure/docker/Dockerfile.web`, a standalone Next.js server)
+next to the API, behind the same Caddy:
+- **Built per deploy** with the public addresses compiled in:
+  - `NEXT_PUBLIC_API_URL=https://<API_DOMAIN>/api/v1`;
+  - `NEXT_PUBLIC_APP_URL=https://<WEB_DOMAIN>`;
+  - `ENVIRONMENT=production`, which lets search engines index it.
+- **Listing pages and the sitemap** fetch from the API container directly (`API_INTERNAL_URL`),
+  never over the internet.
+- **Locked down the same way as the API:** read-only, unprivileged, no Linux capabilities, a
+  256 MB memory cap, and reachable only through Caddy.
+- **Chat** connects to `wss://<API_DOMAIN>`; the site's security policy allows exactly the
+  API's address.
+- **Browser error tracking (optional):** set the repository variable `WEB_SENTRY_DSN` to a
+  Sentry project's public DSN.
 
-   | Name | Value |
-   |---|---|
-   | `NEXT_PUBLIC_API_URL` | `https://<API_DOMAIN>/api/v1` |
-   | `NEXT_PUBLIC_APP_URL` | `https://<your-project>.vercel.app` or your domain |
-   | `ENVIRONMENT` | `production` (allows search engines to index the site) |
-   | `NEXT_PUBLIC_SENTRY_DSN` | optional, a separate Sentry project for the browser |
-
-   `NEXT_PUBLIC_WS_URL` isn't needed: chat connects to the API's address over `wss://`. The
-   site's security policy allows exactly that address.
-4. Click Deploy. From now on Vercel deploys the website on every push to `main`.
-5. **With a domain:** Vercel → Project → Settings → Domains → add it, and create the DNS record
-   Vercel shows. Then set `NEXT_PUBLIC_APP_URL`, and `WEB_URL` in `.env.free-tier`, to the
-   domain, and rerun step 6.
+To change the domain later: update `WEB_URL` and `API_DOMAIN` in `.env.free-tier`, rerun step 6,
+and run the deploy. Without `WEB_DOMAIN`, the deploy runs no website on the VM.
 
 ## 10. First admin (You, 5 minutes)
 
@@ -358,8 +377,8 @@ These are all free and run on the VM:
 - **Backups:** nightly and verified by a real restore, kept 30 days in private storage.
 
 **You must:**
-1. **Turn on two-factor sign-in** for GitHub, Microsoft (Azure), Supabase, Vercel, Brevo and
-   your domain registrar. Whoever gets into one of these gets into production.
+1. **Turn on two-factor sign-in** for GitHub, Microsoft (Azure), Supabase, Brevo and your
+   domain registrar. Whoever gets into one of these gets into production.
 2. **Protect `main`:**
    - GitHub → Settings → Branches → add a rule for `main`;
    - require the CI checks to pass;
@@ -381,8 +400,8 @@ These are all free and run on the VM:
 | Deploy | Push to `main`. CI runs, then the deploy runs. |
 | Roll back | Actions → Free-tier Deployment → Run workflow, with an older commit as `ref` |
 | See live traffic | Admin console → Traffic, or Azure portal → the VM → Monitoring |
-| Read logs | `ssh -i ~/.ssh/flatmate_deploy deploy@<host> 'cd /opt/flatmate && docker compose logs --tail 200 api worker'` |
-| Restart | `ssh ... 'cd /opt/flatmate && docker compose restart api worker'` |
+| Read logs | `ssh -i ~/.ssh/flatmate_deploy deploy@<host> 'cd /opt/flatmate && docker compose logs --tail 200 web api worker'` |
+| Restart | `ssh ... 'cd /opt/flatmate && docker compose restart web api worker'` |
 | Uptime alerts | Automatic: the Uptime workflow checks every 10 minutes, and GitHub emails you when it fails |
 | Error alerts | Sentry emails you new errors (set an alert rule in Sentry) |
 | Backups | Nightly at 03:00 IST (Database Backup workflow). To restore, see `scripts/db_backup.py restore`; it only restores into a new, empty database. |
@@ -393,8 +412,8 @@ These are all free and run on the VM:
   - the free VM ends at 12 months: renew Azure for Students, then decide whether to keep the
     VM on credit or move it;
   - run `provision-azure.sh` again to renew the 1-year backup link.
-- **after 11 months, if you have a domain:** renew it, or move to a `.vercel.app` and
-  `cloudapp.azure.com` address.
+- **after 11 months:** renew the domain (Name.com sends a reminder), or the site goes offline
+  when it expires.
 - **every year:** renew Azure for Students and Sentry's student plan, and re-verify the
   GitHub pack when asked.
 
@@ -408,7 +427,7 @@ These are all free and run on the VM:
 - **Don't add services by clicking around in the portal**, unless the page says it's free.
 - **Supabase Free:**
   - watch Database size (500 MB) and Egress (5 GB a month) in Reports;
-  - most egress is photos: Vercel caches resized images, which keeps it low.
+  - most egress is photos: the website caches resized images, which keeps it low.
 
 ## 15. Capacity, and when to upgrade
 

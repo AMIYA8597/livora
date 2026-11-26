@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   absoluteImage, formatRent, jsonLdString, listingHeadline, listingJsonLd, listingMetadata, truncate,
 } from "../lib/seo.ts";
-import { indexable, serverApiBase, siteUrl } from "../lib/site.ts";
+import { indexable, publicApiBase, serverApiBase, siteUrl } from "../lib/site.ts";
 import { optimizable, remotePatterns } from "../lib/image-hosts.mjs";
 
 const listing = {
@@ -80,6 +80,9 @@ test("site settings come from the environment", () => {
   assert.equal(indexable({ NODE_ENV: "production", ENVIRONMENT: "staging" }), false);
   assert.equal(serverApiBase({ API_INTERNAL_URL: "http://api.internal/api/v1/", NEXT_PUBLIC_API_URL: "https://x" }),
     "http://api.internal/api/v1");
+  // Photo links in pages never use the private address.
+  assert.equal(publicApiBase({ API_INTERNAL_URL: "http://api:8000/api/v1", NEXT_PUBLIC_API_URL: "https://api.x.in/api/v1/" }),
+    "https://api.x.in/api/v1");
 });
 
 test("the optimizer only gets hosts it's configured for", () => {

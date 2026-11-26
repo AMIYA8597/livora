@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { buildCsp } from "./lib/csp.mjs";
 import { isLocalHost, remotePatterns } from "./lib/image-hosts.mjs";
@@ -23,9 +24,17 @@ const cspHeader = process.env.CSP_REPORT_ONLY === "true" ? "Content-Security-Pol
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // NEXT_OUTPUT=standalone (the container image, infrastructure/docker/Dockerfile.web) builds a
+  // self-contained server with only the files it uses. The repository root is the tracing root so
+  // the workspace packages are included.
+  ...(process.env.NEXT_OUTPUT === "standalone"
+    ? { output: "standalone", outputFileTracingRoot: fileURLToPath(new URL("../../", import.meta.url)) }
+    : {}),
   // Dev only: let http://127.0.0.1:3000 (the host in .env.local) load dev resources such as HMR.
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
+  // No "X-Powered-By: Next.js": it only helps someone looking for a framework to attack.
+  poweredByHeader: false,
   transpilePackages: ["@flatmate/ui", "@flatmate/contracts"],
   images: {
     // Listing photos: AVIF/WebP at the sizes each layout asks for, cached for a day.
