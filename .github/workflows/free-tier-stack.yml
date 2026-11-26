@@ -170,7 +170,7 @@ jobs:
           set +e
           ( while sleep 15; do docker stats --no-stream --format '{{.Name}} {{.MemUsage}} {{.CPUPerc}}' >> "$RUNNER_TEMP/stats.txt"; done ) &
           watcher=$!
-          REQUESTS_CA_BUNDLE="$RUNNER_TEMP/caddy-root.crt" MAX_FAIL_RATIO=1 MAX_P95_MS=100000 \
+          LOAD_CA_BUNDLE="$RUNNER_TEMP/caddy-root.crt" MAX_FAIL_RATIO=1 MAX_P95_MS=100000 \
             python -m locust -f "$GITHUB_WORKSPACE/loadtests/locustfile.py" --host https://localhost --headless \
               -u "$USERS" -r 10 -t 3m --only-summary --csv "$RUNNER_TEMP/load" > "$RUNNER_TEMP/locust.txt" 2>&1
           kill $watcher

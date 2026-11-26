@@ -48,6 +48,20 @@ def _next_member() -> dict | None:
     return member
 
 
+# A CA file for a test server's own certificate (e.g. Caddy's local CA in CI). Locust's HTTP
+# session ignores REQUESTS_CA_BUNDLE, so it's set on each client.
+CA_BUNDLE = os.environ.get("LOAD_CA_BUNDLE")
+
+
+class _User(HttpUser):
+    abstract = True
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if CA_BUNDLE:
+            self.client.verify = CA_BUNDLE
+
+
 class Browsing:
     """Listing pages shared by visitors and members."""
 
@@ -84,7 +98,7 @@ class Browsing:
         self.client.get(f"{API}/properties/{listing}", name=f"{API}/properties/{{id}}")
 
 
-class Visitor(Browsing, HttpUser):
+class Visitor(Browsing, _User):
     weight = 6
     wait_time = between(3, 10)
 
@@ -123,7 +137,7 @@ class Visitor(Browsing, HttpUser):
         self.client.get(f"{API}/locations/states", name=f"{API}/locations/states")
 
 
-class Member(Browsing, HttpUser):
+class Member(Browsing, _User):
     weight = 3
     wait_time = between(3, 10)
 
@@ -180,7 +194,7 @@ class Member(Browsing, HttpUser):
                 res.failure(f"HTTP {res.status_code}")
 
 
-class SignIn(HttpUser):
+class SignIn(_User):
     """Real sign-ins, paced under the per-IP limit (60 per 5 minutes) from one load generator."""
 
     fixed_count = 1
