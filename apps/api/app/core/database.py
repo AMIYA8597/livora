@@ -1,11 +1,48 @@
 import logging
-from typing import Any, AsyncGenerator, Dict
+import time
+from contextvars import ContextVar
+from typing import Any, AsyncGenerator, Dict, Optional
 from urllib.parse import urlparse
-from uuid import uuid4
 from datetime import datetime, timezone
+from sqlalchemy import event
+from sqlalchemy.exc import InvalidatePoolError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.util import await_
 from app.core.config import settings
+
+
+class QueryStats:
+    """Statements one request ran and the time they took (reported as X-DB-Queries and
+    X-DB-Time-Ms by the request middleware). The database is a long round trip from the API
+    server, so the count is what decides how fast a request is."""
+
+    __slots__ = ("count", "seconds")
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.seconds = 0.0
+
+
+query_stats_var: ContextVar[Optional[QueryStats]] = ContextVar("query_stats", default=None)
+
+
+def _before_execute(conn, cursor, statement, parameters, context, executemany) -> None:
+    conn.info["query_started"] = time.perf_counter()
+
+
+def _after_execute(conn, cursor, statement, parameters, context, executemany) -> None:
+    began = conn.info.pop("query_started", None)
+    stats = query_stats_var.get()
+    if stats is not None:
+        stats.count += 1
+        if began is not None:
+            stats.seconds += time.perf_counter() - began
+
+
+def install_query_stats(target) -> None:
+    event.listen(target, "before_cursor_execute", _before_execute)
+    event.listen(target, "after_cursor_execute", _after_execute)
 
 def uses_transaction_pooler(database_url: str) -> bool:
     """Supabase Supavisor / PgBouncer in transaction mode (port 6543) cannot keep per-connection
@@ -19,7 +56,9 @@ def engine_options(database_url: str) -> Dict[str, Any]:
         # SQL echo goes through the app's log handler (below), not a second handler of its own.
         "echo": False,
         "future": True,
-        "pool_pre_ping": True,
+        # No pool_pre_ping: SQLAlchemy's asyncpg ping is BEGIN, prepare, execute, ROLLBACK, four
+        # round trips to the database on every checkout. The API engine pings with one instead
+        # (ping_on_checkout below); the worker's NullPool engine only ever has new connections.
         "pool_size": settings.DB_POOL_SIZE,
         "max_overflow": settings.DB_MAX_OVERFLOW,
         # Fail fast when the pool is exhausted: the request gets a 503 with Retry-After
@@ -31,19 +70,55 @@ def engine_options(database_url: str) -> Dict[str, Any]:
             # No prepared statement may outlive its transaction: the pooler hands the next
             # transaction to any server connection, where the statement doesn't exist
             # ("prepared statement ... does not exist"). Both caches are off, asyncpg's
-            # (statement_cache_size) and SQLAlchemy's own (prepared_statement_cache_size), and
-            # names are unique so statements never collide (SQLAlchemy asyncpg + PgBouncer guidance).
+            # (statement_cache_size) and SQLAlchemy's own (prepared_statement_cache_size).
             "statement_cache_size": 0,
             "prepared_statement_cache_size": 0,
-            "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4()}__",
+            # The unnamed statement, as asyncpg itself uses with its cache off: each one replaces
+            # the last, so nothing collides and nothing is left to close. A named statement cost
+            # a third round trip per query, the Close asyncpg sends before the next one.
+            "prepared_statement_name_func": unnamed_statement,
         }
     return options
+
+
+def unnamed_statement() -> str:
+    return ""
+
+
+PING_TIMEOUT_SECONDS = 5
+
+
+def mark_fresh(dbapi_connection, connection_record) -> None:
+    connection_record.info["fresh"] = True
+
+
+def ping_on_checkout(dbapi_connection, connection_record, connection_proxy) -> None:
+    """Pessimistic disconnect check in one round trip: an empty simple query (";"), which the
+    transaction pooler runs as a transaction of its own. A connection opened for this checkout
+    is not pinged. A failed ping invalidates the pool, as pool_pre_ping did, and the pool
+    retries with a new connection."""
+    if connection_record.info.pop("fresh", False):
+        return
+    driver = getattr(dbapi_connection, "driver_connection", None)
+    if driver is None or not hasattr(driver, "execute"):
+        return
+    try:
+        await_(driver.execute(";", timeout=PING_TIMEOUT_SECONDS))
+    except Exception as error:  # noqa: BLE001 - any failure means "don't use this connection"
+        raise InvalidatePoolError(f"ping failed: {type(error).__name__}") from error
+
+
+def install_ping(target) -> None:
+    event.listen(target, "connect", mark_fresh)
+    event.listen(target, "checkout", ping_on_checkout)
 
 
 if settings.DEBUG and settings.ENVIRONMENT == "development":
     logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 
 engine = create_async_engine(settings.DATABASE_URL, **engine_options(settings.DATABASE_URL))
+install_ping(engine.sync_engine)
+install_query_stats(engine.sync_engine)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

@@ -8,7 +8,7 @@ from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.core.exceptions import UnauthorizedException, ForbiddenException
@@ -33,9 +33,11 @@ async def get_current_user(
     except (ValueError, TypeError):
         raise UnauthorizedException("Invalid user identity claim in token")
 
-    query = select(User).options(selectinload(User.roles)).where(User.id == user_uuid)
+    # One statement for the user and their roles (a join), not two: every signed-in request
+    # runs this, and each statement is a round trip to a database in another region.
+    query = select(User).options(joinedload(User.roles)).where(User.id == user_uuid)
     result = await db.execute(query)
-    user = result.scalar_one_or_none()
+    user = result.unique().scalar_one_or_none()
 
     if not user:
         raise UnauthorizedException("User account does not exist")

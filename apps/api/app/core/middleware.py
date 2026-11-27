@@ -9,6 +9,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from app.core.client_version import is_exempt, upgrade_required
+from app.core.database import QueryStats, query_stats_var
 from app.core.exceptions import AppException
 from app.core.logging import clean_request_id, cloud_trace, logger, request_id_var, trace_var
 from app.core.observability import tag_request
@@ -35,9 +36,16 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
         trace_token = trace_var.set(cloud_trace(request.headers.get("X-Cloud-Trace-Context")))
         tag_request(request_id)
         start_time = time.perf_counter()
+        # Shared by reference with the endpoint's task, which runs in a copy of this context.
+        stats = QueryStats()
+        stats_token = query_stats_var.set(stats)
         try:
-            return await self._handle(request, call_next, request_id, start_time)
+            response = await self._handle(request, call_next, request_id, start_time)
+            response.headers["X-DB-Queries"] = str(stats.count)
+            response.headers["X-DB-Time-Ms"] = str(round(stats.seconds * 1000, 2))
+            return response
         finally:
+            query_stats_var.reset(stats_token)
             request_id_var.reset(rid_token)
             trace_var.reset(trace_token)
 

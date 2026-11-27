@@ -53,7 +53,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID", "X-Process-Time-Ms"],
+    expose_headers=["X-Request-ID", "X-Process-Time-Ms", "X-DB-Queries", "X-DB-Time-Ms"],
 )
 
 # Root Health & Readiness Checks

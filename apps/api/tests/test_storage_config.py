@@ -98,8 +98,11 @@ def test_transaction_pooler_disables_prepared_statement_cache():
     # SQLAlchemy's own cache too: with it on, a statement prepared on one server connection is
     # reused after the pooler moved us to another, and fails ("does not exist").
     assert args["prepared_statement_cache_size"] == 0
-    assert args["prepared_statement_name_func"]() != args["prepared_statement_name_func"]()
+    # The unnamed statement: nothing to collide with, nothing left to close (a round trip each).
+    assert args["prepared_statement_name_func"]() == ""
     assert "connect_args" not in engine_options(session)
+    # The four-round-trip pre-ping is gone; the API engine pings with one (install_ping).
+    assert "pool_pre_ping" not in engine_options(pooled)
 
 
 def test_pooler_options_survive_statements_disappearing():
@@ -113,11 +116,14 @@ def test_pooler_options_survive_statements_disappearing():
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
 
+    from uuid import uuid4
+
     from app.core.database import engine_options
     from tests.conftest import TEST_DATABASE_URL
 
     fixed = engine_options("postgresql+asyncpg://u:p@h:6543/db")["connect_args"]
     old = {k: v for k, v in fixed.items() if k != "prepared_statement_cache_size"}
+    old["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid4()}__"
 
     async def repeat_after_deallocate(connect_args) -> None:
         engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool, connect_args=connect_args)
