@@ -98,14 +98,12 @@ export default function ProfilePage() {
           <>
             {activeTab === "profile" && (
               <ProfileDetailsForm
-                key={profile?.id ?? "new"}
                 initial={profile}
                 onSaved={(p) => data.profile.setData(p)}
               />
             )}
             {activeTab === "lifestyle" && (
               <LifestyleForm
-                key={data.lifestyle.data?.id ?? "new"}
                 initial={data.lifestyle.data ?? null}
                 onSaved={(l) => data.lifestyle.setData(l)}
               />
@@ -119,7 +117,6 @@ export default function ProfilePage() {
             )}
             {activeTab === "privacy" && (
               <PrivacySettingsForm
-                key={data.privacy.data?.id ?? "new"}
                 initial={data.privacy.data ?? null}
                 onSaved={(p) => data.privacy.setData(p)}
               />

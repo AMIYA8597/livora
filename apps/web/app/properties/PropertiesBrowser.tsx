@@ -467,9 +467,11 @@ function PropertiesListContent({ initial }: { initial?: InitialListings }) {
               <option value="">All Configurations</option>
               <option value="1RK">1RK</option>
               <option value="1BHK">1BHK</option>
+              <option value="2RK">2RK</option>
               <option value="2BHK">2BHK</option>
               <option value="3BHK">3BHK</option>
               <option value="4BHK_plus">4BHK+</option>
+              <option value="studio">Studio</option>
             </select>
           </div>
 

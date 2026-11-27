@@ -171,7 +171,6 @@ function DashboardPageContent() {
         {activeTab === "profile" &&
           profileTabState(me.profile, () => (
             <ProfileDetailsForm
-              key={me.profile.data?.id ?? "new"}
               initial={me.profile.data ?? null}
               onSaved={(p) => me.profile.setData(p)}
             />
@@ -179,7 +178,6 @@ function DashboardPageContent() {
         {activeTab === "quiz" &&
           profileTabState(me.lifestyle, () => (
             <LifestyleForm
-              key={me.lifestyle.data?.id ?? "new"}
               initial={me.lifestyle.data ?? null}
               onSaved={(l) => me.lifestyle.setData(l)}
             />
