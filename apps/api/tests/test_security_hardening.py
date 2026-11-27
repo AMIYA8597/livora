@@ -114,3 +114,23 @@ async def test_rate_limiter_dependency_blocks():
     assert res.headers["Retry-After"] is not None
 
 
+
+
+@pytest.mark.parametrize("environment", ["production", "Production", " prod "])
+def test_api_docs_hidden_in_production(environment):
+    """Production must not publish Swagger UI, ReDoc or the OpenAPI schema."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.main import docs_urls
+
+    assert docs_urls(environment) == {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    client = TestClient(FastAPI(**docs_urls(environment)))
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404
+
+
+@pytest.mark.parametrize("environment", ["development", "staging", "test", None])
+def test_api_docs_available_outside_production(environment):
+    from app.main import docs_urls
+
+    assert docs_urls(environment) == {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}

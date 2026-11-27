@@ -18,13 +18,21 @@ from app.api.v1.router import api_router
 
 init_sentry("api")
 
+
+def docs_urls(environment: str | None) -> dict:
+    """Swagger UI, ReDoc and the OpenAPI schema are public everywhere except production, where
+    they would hand anyone a map of every endpoint. The schema is still built in code
+    (`app.openapi()`) for the contract checks; only the URLs go away."""
+    if (environment or "").strip().lower() in {"production", "prod"}:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="India-First Flatmate Compatibility & Rental Marketplace API",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    **docs_urls(settings.ENVIRONMENT),
     lifespan=lifespan,
 )
 
