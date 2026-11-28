@@ -176,7 +176,7 @@ class MatchingService:
         rows = (await self.db.execute(
             select(ContentEmbedding.entity_id, ContentEmbedding.embedding).where(
                 ContentEmbedding.entity_type == "profile",
-                ContentEmbedding.model == get_embedder().model_id,
+                ContentEmbedding.model == get_embedder("profile").model_id,
                 ContentEmbedding.entity_id.in_(user_ids),
             )
         )).all()

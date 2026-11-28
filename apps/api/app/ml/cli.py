@@ -28,8 +28,8 @@ async def _backfill(entity: str) -> None:
     from app.ml.embeddings import get_embedder
     from app.ml.indexing import backfill
 
-    embedder = get_embedder()
     for entity_type in (["property", "profile"] if entity == "all" else [entity]):
+        embedder = get_embedder(entity_type)
         async with AsyncSessionLocal() as db:
             result = await backfill(db, entity_type, embedder)
         print(f"{entity_type}: {result} (model {embedder.model_id})")

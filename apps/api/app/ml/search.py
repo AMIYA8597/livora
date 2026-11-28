@@ -185,7 +185,7 @@ async def rank_profiles(
     db: AsyncSession, query: str, eligible_user_ids: Select, embedder: Optional[Embedder] = None
 ) -> SearchRanking:
     """"About me" search over bios, occupation and lifestyle. Ids are user ids."""
-    embedder = embedder or get_embedder()
+    embedder = embedder or get_embedder("profile")
     doc = func.to_tsvector(
         "english",
         func.coalesce(Profile.bio, "") + " " + func.coalesce(Profile.occupation, ""),

@@ -124,6 +124,6 @@ def test_runtime_env_can_keep_local_search_with_a_voyage_key():
 
 def test_the_deploy_embeds_what_is_missing_without_failing():
     deploy = (_SCRIPTS.parent / "infrastructure" / "free-tier" / "deploy.sh").read_text(encoding="utf-8")
-    line = next(l for l in deploy.splitlines() if "backfill-embeddings" in l)
+    line = next(row for row in deploy.splitlines() if "backfill-embeddings" in row)
     following = deploy[deploy.index(line):].splitlines()[1]
     assert following.strip().startswith("||")  # a failed backfill only warns

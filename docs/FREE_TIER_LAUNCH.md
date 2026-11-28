@@ -372,7 +372,9 @@ These are all free and run on the VM:
   switch on when you set `PRODUCTION_ANTHROPIC_API_KEY` (paid).
 - **Semantic search (Voyage AI):** add the GitHub secret `PRODUCTION_VOYAGE_API_KEY` and the
   next deploy switches `EMBEDDING_PROVIDER` to `voyage` (model `voyage-4-lite`, 200M free tokens
-  per account) and embeds every listing and profile again. Put `EMBEDDING_PROVIDER=local` in
+  per account) and embeds every listing again. Profiles ("about me" text) stay on the in-process
+  embedder unless `EXTERNAL_PROFILE_EMBEDDINGS=true`, which only makes sense once the Voyage
+  account has opted out of training (the privacy notice says bios are not sent). Put `EMBEDDING_PROVIDER=local` in
   `RUNTIME_ENV` to keep the in-process vectors with a key set. Without a payment method on the
   Voyage account, rate limits are low and Voyage may keep the text sent (listing text, "about
   me" bios, searches) for training; adding a card lets you opt out in its dashboard (Terms of

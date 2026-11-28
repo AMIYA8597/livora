@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           <span>DPDP Act 2023 Compliance</span>
         </Badge>
         <h1 className="text-3xl font-extrabold text-charcoal">Digital Privacy & Data Protection Notice</h1>
-        <p className="text-xs text-charcoal-muted">Last updated: November 13, 2026</p>
+        <p className="text-xs text-charcoal-muted">Last updated: November 28, 2026</p>
       </div>
 
       <Card className="p-8 space-y-6 border-warm-200">
@@ -57,7 +57,17 @@ export default function PrivacyPage() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-lg font-bold text-charcoal">5. Data Retention & Account Deletion Requests</h2>
+          <h2 className="text-lg font-bold text-charcoal">5. AI-Powered Search</h2>
+          <p className="text-sm text-charcoal-muted leading-relaxed">
+            To understand searches like &quot;quiet furnished room near the metro&quot;, listing text (title, locality, amenities
+            and description) and the words you type into listing search are sent to our search provider, Voyage AI, which turns
+            them into numbers that capture their meaning. Never your name, phone number, email or exact address. Your profile&apos;s
+            &quot;about me&quot; text, occupation and lifestyle answers are not sent: flatmate search and matching run on our own servers.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-lg font-bold text-charcoal">6. Data Retention & Account Deletion Requests</h2>
           <p className="text-sm text-charcoal-muted leading-relaxed">
             You hold the right to request a copy of your personal data or request permanent deletion of your account.
             When an account is deleted, personal data and questionnaire vectors are purged within 30 days, except records

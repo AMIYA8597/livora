@@ -146,8 +146,17 @@ class VoyageEmbedder:
         return out
 
 
-@lru_cache(maxsize=1)
-def get_embedder() -> Embedder:
+@lru_cache(maxsize=4)
+def get_embedder(entity_type: str = "property") -> Embedder:
+    """The embedder for listings (and listing searches), or for people's profiles.
+
+    Profiles hold personal "about me" text, so they stay on the in-process embedder unless
+    EXTERNAL_PROFILE_EMBEDDINGS is on: an outside provider may keep what it is sent (Voyage does,
+    for training, unless the account has opted out). Vectors are tagged with their model, so the
+    two kinds never get compared with each other.
+    """
+    if entity_type == "profile" and not settings.EXTERNAL_PROFILE_EMBEDDINGS:
+        return LocalHashingEmbedder()
     provider = (settings.EMBEDDING_PROVIDER or "local").lower()
     if provider == "voyage":
         if settings.VOYAGE_API_KEY:

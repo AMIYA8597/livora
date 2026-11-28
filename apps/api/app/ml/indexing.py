@@ -57,7 +57,7 @@ async def refresh_embedding(
     db: AsyncSession, entity_type: str, entity_id: UUID, embedder: Optional[Embedder] = None
 ) -> str:
     """Returns "updated", "unchanged", "removed" or "empty". Commits."""
-    embedder = embedder or get_embedder()
+    embedder = embedder or get_embedder(entity_type)
     source = await _source_text(db, entity_type, entity_id)
     existing = (await db.execute(select(ContentEmbedding).where(
         ContentEmbedding.entity_type == entity_type, ContentEmbedding.entity_id == entity_id,
@@ -99,7 +99,7 @@ class BackfillResult:
 
 
 async def backfill(db: AsyncSession, entity_type: str, embedder: Optional[Embedder] = None) -> BackfillResult:
-    embedder = embedder or get_embedder()
+    embedder = embedder or get_embedder(entity_type)
     if entity_type == "property":
         ids = (await db.execute(select(Property.id).where(Property.is_active.is_(True)))).scalars().all()
     else:

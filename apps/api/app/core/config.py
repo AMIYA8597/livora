@@ -173,6 +173,9 @@ class Settings(BaseSettings):
     VOYAGE_API_KEY: Optional[str] = None
     EMBEDDING_MODEL: str = "voyage-4-lite"  # 200M free tokens per account; 3.5-lite has none
     EMBEDDING_TIMEOUT_SECONDS: float = 8.0
+    # Send profiles' "about me" text to the embedding provider too. Off: profiles use the
+    # in-process embedder, since a provider may keep what it is sent (Voyage, unless opted out).
+    EXTERNAL_PROFILE_EMBEDDINGS: bool = False
     # The learned ranker needs this many labelled like/pass interactions before training.
     RANKER_MIN_TRAINING_ROWS: int = 200
 
