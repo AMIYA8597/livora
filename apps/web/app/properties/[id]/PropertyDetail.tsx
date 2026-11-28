@@ -44,6 +44,8 @@ function DetailSkeleton() {
   );
 }
 
+const LISTING_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * The listing view. The server page renders it with the listing already fetched (so the HTML
  * carries the content for search engines and a fast first paint); when the server couldn't see it
@@ -52,12 +54,14 @@ function DetailSkeleton() {
 export function PropertyDetail({ initialProperty }: { initialProperty?: PropertyDTO | null }) {
   const params = useParams<{ id: string }>();
   const propertyId = params.id;
+  // A mistyped link (/properties/new, a cut-off id) is "not found", not an error to retry.
+  const wellFormedId = !!propertyId && LISTING_ID.test(propertyId);
   const router = useRouter();
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const { isSaved, toggle } = useSavedProperties();
 
   const query = useApiQuery<PropertyDTO | null>(
-    propertyId && !initialProperty ? `/properties/${propertyId}` : null,
+    wellFormedId && !initialProperty ? `/properties/${propertyId}` : null,
     undefined,
     { allowNotFound: true },
   );

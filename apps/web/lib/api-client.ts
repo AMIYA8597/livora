@@ -26,6 +26,23 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * The API's `detail` as one sentence. Usually a string; a request that failed validation gets
+ * FastAPI's list of problems instead, which would otherwise show as "[object Object]".
+ */
+export function readableDetail(detail: unknown): string | undefined {
+  if (typeof detail === "string") return detail || undefined;
+  if (Array.isArray(detail)) {
+    const first = detail.find((item) => item && typeof item.msg === "string");
+    if (!first) return detail.length ? "Some of the details sent weren't valid." : undefined;
+    return String(first.msg).replace(/^Value error, /, "");
+  }
+  if (detail && typeof detail === "object" && typeof (detail as { message?: unknown }).message === "string") {
+    return (detail as { message: string }).message;
+  }
+  return undefined;
+}
+
 export class ApiError extends Error {
   status: number;
   title: string;
@@ -39,14 +56,14 @@ export class ApiError extends Error {
   constructor(data: {
     status: number;
     title?: string;
-    detail?: string;
+    detail?: unknown;
     errorCode?: string;
     instance?: string;
     invalidParams?: any[];
     requestId?: string;
     raw?: any;
   }) {
-    const message = data.detail || data.title || `API error: ${data.status}`;
+    const message = readableDetail(data.detail) || data.title || `API error: ${data.status}`;
     super(message);
     this.name = "ApiError";
     this.status = data.status;

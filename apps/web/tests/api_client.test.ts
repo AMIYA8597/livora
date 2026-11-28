@@ -321,3 +321,16 @@ test('apiClient shows the busy error once the retries are used up', async () => 
     (globalThis as any).setTimeout = originalTimeout;
   }
 });
+
+test('a validation error reads as a sentence, never "[object Object]"', () => {
+  const fastapi422 = [{ type: 'uuid_parsing', loc: ['path', 'property_id'], msg: 'Input should be a valid UUID' }];
+  assert.strictEqual(new ApiError({ status: 422, detail: fastapi422 }).message, 'Input should be a valid UUID');
+  assert.strictEqual(
+    new ApiError({ status: 422, detail: [{ msg: "Value error, Move-in date can't be in the past" }] }).message,
+    "Move-in date can't be in the past",
+  );
+  assert.strictEqual(new ApiError({ status: 422, detail: [{ odd: true }] }).message, "Some of the details sent weren't valid.");
+  assert.strictEqual(new ApiError({ status: 400, detail: { message: 'Nope' } }).message, 'Nope');
+  assert.strictEqual(new ApiError({ status: 500, detail: {}, title: 'Server Error' }).message, 'Server Error');
+  assert.strictEqual(new ApiError({ status: 409, detail: 'Already applied' }).message, 'Already applied');
+});
