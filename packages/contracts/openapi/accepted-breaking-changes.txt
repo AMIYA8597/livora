@@ -13,3 +13,11 @@ POST /api/v1/auth/register request.additional_roles: maxItems tightened from Non
 # sentences; no client sends documents yet), and the web app is the only client in this repo.
 POST /api/v1/applications/ request.documents: maxItems tightened from None to 10
 POST /api/v1/applications/ request.introduction: maxLength tightened from None to 2000
+
+# Group checks (2026-11-28): a 300-character group name failed with a 500 (the column holds 120).
+# The limits match the database columns, so anything they refuse could never have been stored;
+# the budget cap is ₹1 crore a month. The web form carries the same limits.
+POST /api/v1/groups/ request.description: maxLength tightened from None to 2000
+POST /api/v1/groups/ request.name: maxLength tightened from None to 120
+POST /api/v1/groups/ request.target_budget_total: maximum tightened from None to 10000000.0
+POST /api/v1/groups/ request.target_city: maxLength tightened from None to 100

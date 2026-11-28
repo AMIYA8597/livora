@@ -2,9 +2,9 @@
 Group Matching & Shared Requirements Schemas
 """
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, List, Dict
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class GroupMemberResponse(BaseModel):
     id: uuid.UUID
@@ -30,8 +30,39 @@ class GroupBase(BaseModel):
     target_city: str
     target_move_in: Optional[date] = None
 
+MAX_GROUP_BUDGET = 10_000_000  # ₹1 crore a month
+MAX_MOVE_IN_DAYS_AHEAD = 730
+
+
 class GroupCreate(GroupBase):
-    pass
+    """What a new group may say. The checks live here, not on GroupBase, because GroupResponse
+    shares that base and must still read groups stored earlier. Lengths match the columns."""
+
+    name: str = Field(..., max_length=120, description="e.g. Bangalore Tech Flatshare 3BHK")
+    description: Optional[str] = Field(None, max_length=2000)
+    target_budget_total: int = Field(..., gt=0, le=MAX_GROUP_BUDGET, description="Total cumulative group budget in INR")
+    target_city: str = Field(..., max_length=100)
+
+    @field_validator("name", "target_city")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Can't be blank")
+        return value
+
+    @field_validator("target_move_in")
+    @classmethod
+    def _move_in_ahead(cls, value: Optional[date]) -> Optional[date]:
+        if value is None:
+            return value
+        # A day of slack: the person's "today" (India) can be a day ahead of the server's (UTC).
+        today = datetime.now(timezone.utc).date()
+        if value < today - timedelta(days=1):
+            raise ValueError("Move-in date can't be in the past")
+        if value > today + timedelta(days=MAX_MOVE_IN_DAYS_AHEAD):
+            raise ValueError("Move-in date must be within two years")
+        return value
 
 class GroupResponse(GroupBase):
     """Members, the creator and the wishlist (whose votes are keyed by user) are shown only to

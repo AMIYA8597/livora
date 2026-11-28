@@ -71,6 +71,7 @@ export function CreateGroupModal({ isOpen, onClose, onCreated }: CreateGroupModa
           </label>
           <textarea
             id="group-description"
+            maxLength={2000}
             rows={3}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -79,13 +80,14 @@ export function CreateGroupModal({ isOpen, onClose, onCreated }: CreateGroupModa
           />
         </div>
         <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
-          <Input label="City" required list="group-city-suggestions" value={city} onChange={(e) => setCity(e.target.value)} />
+          <Input label="City" required maxLength={100} list="group-city-suggestions" value={city} onChange={(e) => setCity(e.target.value)} />
           <CityDatalist id="group-city-suggestions" cities={cities} />
           <Input
             label="Combined budget (₹/month)"
             type="number"
             inputMode="numeric"
             min={1}
+            max={10000000}
             required
             value={budget}
             onChange={(e) => setBudget(e.target.value)}

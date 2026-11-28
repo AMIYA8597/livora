@@ -27,6 +27,26 @@ def body_limit_for(path: str) -> int:
     return MAX_UPLOAD_BODY_BYTES if path.rstrip("/").endswith(UPLOAD_PATH_SUFFIXES) else MAX_REQUEST_BODY_BYTES
 
 
+def data_error_code(exc: BaseException) -> str | None:
+    """The SQLSTATE of a database error anywhere in the exception's chain, if any."""
+    seen = 0
+    current: BaseException | None = exc
+    while current is not None and seen < 5:
+        code = getattr(getattr(current, "orig", None), "sqlstate", None) or getattr(current, "sqlstate", None)
+        if isinstance(code, str):
+            return code
+        current = current.__cause__ or current.__context__
+        seen += 1
+    return None
+
+
+def is_data_error(exc: BaseException) -> bool:
+    """Postgres class 22, "data exception": a value too long for its column (22001), a number
+    out of range (22003), an impossible date (22008) and the like. The caller sent it."""
+    code = data_error_code(exc)
+    return bool(code) and code.startswith("22")
+
+
 class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # 1. Correlation ID: reuse the caller's only if it's safe to put in a log line.
@@ -105,6 +125,24 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
             if busy is not None:
                 busy.headers["X-Request-ID"] = request_id
                 return busy
+            # A value the database refused (too long for its column, a number out of range):
+            # the request was wrong, so say so with a 422, not a 500.
+            if is_data_error(exc):
+                logger.warning(f"Rejected value on {request.method} {request.url.path}: {data_error_code(exc)}")
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "type": "https://errors.flatmate.platform/invalid_value",
+                        "title": "Invalid Value",
+                        "status": 422,
+                        "detail": "One of the values sent is too long or out of range.",
+                        "error_code": "INVALID_VALUE",
+                        "instance": request.url.path,
+                        "request_id": request_id,
+                    },
+                    media_type="application/problem+json",
+                    headers={"X-Request-ID": request_id},
+                )
             # Logged with the traceback; with Sentry on, this is what reports the error.
             logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {type(exc).__name__}")
             return JSONResponse(

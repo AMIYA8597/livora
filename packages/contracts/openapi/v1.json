@@ -2687,10 +2687,12 @@
         "type": "object"
       },
       "GroupCreate": {
+        "description": "What a new group may say. The checks live here, not on GroupBase, because GroupResponse\nshares that base and must still read groups stored earlier. Lengths match the columns.",
         "properties": {
           "description": {
             "anyOf": [
               {
+                "maxLength": 2000,
                 "type": "string"
               },
               {
@@ -2701,16 +2703,19 @@
           },
           "name": {
             "description": "e.g. Bangalore Tech Flatshare 3BHK",
+            "maxLength": 120,
             "title": "Name",
             "type": "string"
           },
           "target_budget_total": {
             "description": "Total cumulative group budget in INR",
-            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 10000000.0,
             "title": "Target Budget Total",
             "type": "integer"
           },
           "target_city": {
+            "maxLength": 100,
             "title": "Target City",
             "type": "string"
           },
