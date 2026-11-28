@@ -42,9 +42,10 @@ def data_error_code(exc: BaseException) -> str | None:
 
 def is_data_error(exc: BaseException) -> bool:
     """Postgres class 22, "data exception": a value too long for its column (22001), a number
-    out of range (22003), an impossible date (22008) and the like. The caller sent it."""
+    out of range (22003), an impossible date (22008) and the like. The caller sent it. Also
+    23503, a reference to a row that doesn't exist (a mistyped id)."""
     code = data_error_code(exc)
-    return bool(code) and code.startswith("22")
+    return bool(code) and (code.startswith("22") or code == "23503")
 
 
 class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
@@ -135,7 +136,8 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
                         "type": "https://errors.flatmate.platform/invalid_value",
                         "title": "Invalid Value",
                         "status": 422,
-                        "detail": "One of the values sent is too long or out of range.",
+                        "detail": ("One of the values sent refers to something that doesn't exist." if data_error_code(exc) == "23503"
+                                   else "One of the values sent is too long or out of range."),
                         "error_code": "INVALID_VALUE",
                         "instance": request.url.path,
                         "request_id": request_id,

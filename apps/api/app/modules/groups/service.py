@@ -97,6 +97,12 @@ class GroupService:
             if not (await self.db.execute(leader_q)).scalar_one_or_none():
                 raise ForbiddenException("Only the group creator or a leader can add members")
 
+        # The person must exist (and not be deactivated): a mistyped ID is "not found", not the
+        # foreign-key error (a 500) the insert would hit.
+        target = await self.db.get(User, user_id)
+        if target is None or not target.is_active:
+            raise NotFoundException("No user with that ID")
+
         # Check existing membership
         existing_q = select(GroupMember).where(
             GroupMember.group_id == group_id,

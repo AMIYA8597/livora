@@ -83,6 +83,10 @@ def _app() -> FastAPI:
     async def too_long():
         raise _DbError("22001")
 
+    @app.get("/missing-ref")
+    async def missing_ref():
+        raise _DbError("23503")
+
     @app.get("/other")
     async def other():
         raise _DbError("23505")
@@ -96,5 +100,31 @@ async def test_a_value_the_database_refuses_is_a_422_not_a_500():
         resp = await client.get("/too-long")
         assert resp.status_code == 422
         assert resp.json()["error_code"] == "INVALID_VALUE" and resp.headers["X-Request-ID"]
+        ref = await client.get("/missing-ref")
+        assert ref.status_code == 422 and "doesn't exist" in ref.json()["detail"]
         # Any other database error is still a server error.
         assert (await client.get("/other")).status_code == 500
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("found", [None, "inactive"])
+async def test_adding_an_unknown_or_deactivated_user_to_a_group_is_not_found(found):
+    """A mistyped user ID used to reach the insert and fail on the foreign key (a 500)."""
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+
+    from app.core.exceptions import NotFoundException
+    from app.modules.groups.models import Group
+    from app.modules.groups.service import GroupService
+    from app.modules.users.models import User
+
+    creator = uuid4()
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.get.return_value = None if found is None else User(id=uuid4(), is_active=False)
+    service = GroupService(db)
+    service.get_by_id = AsyncMock(return_value=Group(id=uuid4(), creator_id=creator, name="G", members=[]))
+
+    with pytest.raises(NotFoundException):
+        await service.add_member(uuid4(), uuid4(), requester_id=creator)
+    db.add.assert_not_called()

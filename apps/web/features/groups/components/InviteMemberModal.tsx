@@ -6,6 +6,8 @@ import { CheckCircle2 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import { InlineNotice } from "@/components/states/InlineNotice";
 
+const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface InviteMemberModalProps {
   groupId: string;
   groupName: string;
@@ -25,12 +27,17 @@ export function InviteMemberModal({ groupId, groupName, onClose, onAdded }: Invi
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const id = userId.trim();
+    if (!USER_ID.test(id)) {
+      setError("That doesn't look like a user ID. Ask them to copy it from their profile page.");
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
       await apiClient(`/groups/${groupId}/members`, {
         method: "POST",
-        body: JSON.stringify({ user_id: userId.trim(), role: "member" }),
+        body: JSON.stringify({ user_id: id, role: "member" }),
       });
       setDone(true);
       onAdded();
