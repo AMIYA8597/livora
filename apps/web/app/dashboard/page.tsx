@@ -70,6 +70,8 @@ function DashboardPageContent() {
   }
 
   const handleWithdraw = async (appId: string) => {
+    // One tap can't be undone: the owner stops seeing the application.
+    if (!confirm("Withdraw this application? The owner will no longer see it.")) return;
     setBusyId(appId);
     try {
       await apiClient(`/applications/${appId}/status`, { method: "PATCH", body: JSON.stringify({ status: "withdrawn" }) });
@@ -83,6 +85,7 @@ function DashboardPageContent() {
   };
 
   const handleCancelVisit = async (aptId: string) => {
+    if (!confirm("Cancel this visit? The host will be told.")) return;
     setBusyId(aptId);
     try {
       await apiClient(`/appointments/${aptId}/status`, {
