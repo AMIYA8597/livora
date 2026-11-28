@@ -27,7 +27,8 @@ import {
 
 export default function FlatmatesDirectoryPage() {
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const [city, setCity] = useState("Bengaluru");
+  // All cities until the person picks one: a fixed default hid every seeker living elsewhere.
+  const [city, setCity] = useState("");
   const { cities } = useCities();
   const [maxBudget, setMaxBudget] = useState("");
   const [sleepSchedule, setSleepSchedule] = useState("");
