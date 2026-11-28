@@ -449,12 +449,13 @@
         "type": "object"
       },
       "ApplicationCreate": {
+        "description": "What an applicant may send. The checks live here, not on ApplicationBase, because\nApplicationResponse shares that base and must still read applications stored earlier.",
         "properties": {
           "documents": {
-            "default": [],
             "items": {
               "type": "string"
             },
+            "maxItems": 10,
             "title": "Documents",
             "type": "array"
           },
@@ -471,6 +472,7 @@
             "title": "Group Id"
           },
           "introduction": {
+            "maxLength": 2000,
             "title": "Introduction",
             "type": "string"
           },
@@ -487,6 +489,8 @@
           "proposed_rent": {
             "anyOf": [
               {
+                "exclusiveMinimum": 0.0,
+                "maximum": 10000000.0,
                 "type": "number"
               },
               {
