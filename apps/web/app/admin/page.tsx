@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { apiClient } from "@/lib/api-client";
 import { Card, Button, Badge, Modal, Input, EmptyState, ErrorState, LoadingIndicator } from "@flatmate/ui";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatDate, formatCurrency, placeLabel } from "@/lib/utils";
 import { ApplicationsPanel } from "@/features/admin/ApplicationsPanel";
 import { BillingEventsPanel } from "@/features/admin/BillingEventsPanel";
 import { RoleRequestsPanel } from "@/features/admin/RoleRequestsPanel";
@@ -414,7 +414,7 @@ export default function AdminModerationPage() {
                     </div>
                     <p className="text-xs text-charcoal-muted flex items-center gap-1">
                       <MapPin className="w-3.5 h-3.5 text-forest" />
-                      <span>{p.address_display}, {p.city}</span>
+                      <span>{placeLabel(p.address_display, p.city)}</span>
                       <span className="mx-1">•</span>
                       <span className="font-semibold text-charcoal">{formatCurrency(p.monthly_rent, "INR")}/mo</span>
                     </p>

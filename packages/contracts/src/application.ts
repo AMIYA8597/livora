@@ -13,6 +13,9 @@ export interface ApplicationDTO {
   documents: string[];
   submitted_at: string;
   updated_at: string;
+  /** In the applicant's own list (GET /applications/me): the listing it is for. */
+  property_title?: string | null;
+  property_city?: string | null;
 }
 
 export interface ApplicationCreateInput {

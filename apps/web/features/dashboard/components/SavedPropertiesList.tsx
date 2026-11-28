@@ -8,7 +8,7 @@ import { Badge, Button, Card, EmptyState } from "@flatmate/ui";
 import { Heart, MapPin, Trash2 } from "lucide-react";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { useSavedProperties } from "@/hooks/useSavedProperties";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, placeLabel } from "@/lib/utils";
 
 function SavedPropertyCard({ id, onRemove }: { id: string; onRemove: (id: string) => void }) {
   const query = useApiQuery<PropertyDTO | null>(`/properties/${id}`, undefined, { allowNotFound: true });
@@ -52,7 +52,7 @@ function SavedPropertyCard({ id, onRemove }: { id: string; onRemove: (id: string
         <h3 className="font-bold text-charcoal text-base mb-1 break-words">{prop.title}</h3>
         <p className="text-xs text-charcoal-muted flex items-center gap-1 mb-3">
           <MapPin className="w-3.5 h-3.5 text-forest shrink-0" />
-          <span className="truncate">{[prop.address_display, prop.city].filter(Boolean).join(", ")}</span>
+          <span className="truncate">{placeLabel(prop.address_display, prop.city)}</span>
         </p>
         <div className="text-lg font-bold text-charcoal">
           {formatCurrency(prop.monthly_rent, "INR")}

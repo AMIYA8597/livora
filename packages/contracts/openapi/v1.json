@@ -394,6 +394,120 @@
         "title": "AppConfigResponse",
         "type": "object"
       },
+      "ApplicantApplicationResponse": {
+        "description": "An applicant's own application with the listing it is for, so their list can say which\nhome each one is (None when the listing has since been deleted).",
+        "properties": {
+          "applicant_id": {
+            "format": "uuid",
+            "title": "Applicant Id",
+            "type": "string"
+          },
+          "documents": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "introduction": {
+            "title": "Introduction",
+            "type": "string"
+          },
+          "move_in_target": {
+            "format": "date",
+            "title": "Move In Target",
+            "type": "string"
+          },
+          "property_city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property City"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "property_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Title"
+          },
+          "proposed_rent": {
+            "title": "Proposed Rent",
+            "type": "string"
+          },
+          "room_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_id",
+          "introduction",
+          "proposed_rent",
+          "move_in_target",
+          "id",
+          "applicant_id",
+          "status",
+          "submitted_at",
+          "updated_at"
+        ],
+        "title": "ApplicantApplicationResponse",
+        "type": "object"
+      },
       "ApplicantReviewCard": {
         "properties": {
           "applicant_avatar": {
@@ -8434,7 +8548,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/ApplicationResponse"
+                    "$ref": "#/components/schemas/ApplicantApplicationResponse"
                   },
                   "title": "Response List My Applications Api V1 Applications Me Get",
                   "type": "array"

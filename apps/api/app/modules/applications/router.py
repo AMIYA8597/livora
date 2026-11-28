@@ -6,7 +6,8 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user, is_staff
 from app.modules.users.models import User
 from app.modules.applications.schemas import (
-    ApplicationCreate, ApplicationResponse, ApplicationStatusUpdate, PartyStatusEventResponse,
+    ApplicantApplicationResponse, ApplicationCreate, ApplicationResponse, ApplicationStatusUpdate,
+    PartyStatusEventResponse,
 )
 from app.modules.applications.service import ApplicationService
 from app.modules.notifications import emails as notify
@@ -14,7 +15,7 @@ from app.modules.properties.models import Property
 
 router = APIRouter(prefix="/applications", tags=["Rental Applications"])
 
-@router.get("/me", response_model=List[ApplicationResponse])
+@router.get("/me", response_model=List[ApplicantApplicationResponse])
 async def list_my_applications(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

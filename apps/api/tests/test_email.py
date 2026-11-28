@@ -249,6 +249,14 @@ async def test_application_lifecycle_notifies_owner_then_applicant(async_client:
     assert resp.status_code == 201, resp.text
     application_id = resp.json()["id"]
 
+    # The applicant's list says which listing each application is for, in one statement.
+    mine = await async_client.get("/api/v1/applications/me", headers={"Authorization": f"Bearer {applicant_token}"})
+    assert mine.status_code == 200
+    assert [(a["id"], a["property_title"], a["property_city"]) for a in mine.json()] == [
+        (application_id, "Sunny <2BHK> & balcony", "Bengaluru")
+    ]
+    assert int(mine.headers["X-DB-Queries"]) == 2  # the signed-in user, then the list
+
     to_owner = [m for m in outbox if m.to == owner_listing["email"]]
     assert [m.tags["template"] for m in to_owner] == ["application_received"]
     assert "Sunny &lt;2BHK&gt; &amp; balcony" in to_owner[0].html

@@ -84,3 +84,10 @@ class ApplicationResponse(ApplicationBase):
     submitted_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class ApplicantApplicationResponse(ApplicationResponse):
+    """An applicant's own application with the listing it is for, so their list can say which
+    home each one is (None when the listing has since been deleted)."""
+    property_title: Optional[str] = None
+    property_city: Optional[str] = None

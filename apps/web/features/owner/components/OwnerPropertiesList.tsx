@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { Badge, Button, Card } from "@flatmate/ui";
 import { Eye, MapPin, PauseCircle, PlayCircle, Star } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, placeLabel } from "@/lib/utils";
 import type { OwnerProperty } from "../types";
 
 interface OwnerPropertiesListProps {
@@ -33,7 +33,7 @@ export function OwnerPropertiesList({ properties, busyId, onToggleStatus, onVaca
                 </div>
                 <p className="text-xs text-charcoal-muted mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <MapPin className="w-3.5 h-3.5 shrink-0" />
-                  <span>{prop.address_display}, {prop.city}</span>
+                  <span>{placeLabel(prop.address_display, prop.city)}</span>
                   <span aria-hidden>•</span>
                   <span className="font-semibold text-charcoal">{formatCurrency(prop.monthly_rent, "INR")}/mo</span>
                   <span aria-hidden>•</span>

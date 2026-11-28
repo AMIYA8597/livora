@@ -100,6 +100,19 @@ export function formatIndianCompactCurrency(
   return `${sign}₹${absAmount}`;
 }
 
+/**
+ * "Locality, City" for a listing, without saying the city twice when the locality already ends
+ * with it ("Baner, Pune" + "Pune" reads "Baner, Pune", not "Baner, Pune, Pune").
+ */
+export function placeLabel(locality?: string | null, city?: string | null): string {
+  const place = (locality || "").trim();
+  const town = (city || "").trim();
+  if (!place) return town;
+  if (!town) return place;
+  const last = place.split(",").pop()!.trim().toLowerCase();
+  return last === town.toLowerCase() ? place : `${place}, ${town}`;
+}
+
 export function formatDate(dateStr?: string | null): string {
   if (!dateStr) return "Flexible";
   try {

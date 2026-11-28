@@ -7,7 +7,7 @@ from app.modules.notifications import events as notification_events
 from app.modules.applications.models import Application, ApplicationStatusEvent
 from app.modules.users.models import User
 from app.modules.properties.models import Property
-from app.modules.applications.schemas import ApplicationCreate, ApplicationStatusUpdate
+from app.modules.applications.schemas import ApplicantApplicationResponse, ApplicationCreate, ApplicationStatusUpdate
 from app.core.exceptions import NotFoundException, ForbiddenException, ConflictException, BadRequestException
 
 ACTIVE_APPLICATION_STATUSES = {"submitted", "under_review", "reviewing", "accepted", "approved"}
@@ -44,14 +44,22 @@ class ApplicationService:
                 raise ForbiddenException("You are not authorized to view this application")
         return app
 
-    async def list_for_user(self, user_id: UUID) -> List[Application]:
+    async def list_for_user(self, user_id: UUID) -> List[ApplicantApplicationResponse]:
+        """The applicant's applications, newest first, each with its listing's title and city
+        (one statement: a join, not a lookup per application)."""
         query = (
-            select(Application)
+            select(Application, Property.title, Property.city)
+            .outerjoin(Property, Property.id == Application.property_id)
             .where(Application.applicant_id == user_id)
             .order_by(Application.submitted_at.desc())
         )
-        result = await self.db.execute(query)
-        return list(result.scalars().all())
+        rows = (await self.db.execute(query)).all()
+        return [
+            ApplicantApplicationResponse.model_validate(app).model_copy(
+                update={"property_title": title, "property_city": city}
+            )
+            for app, title, city in rows
+        ]
 
     async def create(self, applicant_id: UUID, data: ApplicationCreate) -> Application:
         # Check property exists

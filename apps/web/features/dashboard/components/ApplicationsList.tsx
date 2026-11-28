@@ -41,15 +41,21 @@ export function ApplicationsList({ items, onWithdraw, busyId }: ApplicationsList
       {items.map((app) => (
         <Card key={app.id} className="p-5 border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-charcoal-muted font-mono">#{app.id.slice(0, 8)}</span>
-              <Badge variant={statusVariant(app.status)} size="sm" className="capitalize">
+            <div className="flex items-center gap-2 min-w-0">
+              <Link
+                href={`/properties/${app.property_id}`}
+                className="font-semibold text-charcoal text-base truncate hover:underline"
+              >
+                {app.property_title || "Listing no longer available"}
+              </Link>
+              <Badge variant={statusVariant(app.status)} size="sm" className="capitalize shrink-0">
                 {app.status.replace(/_/g, " ")}
               </Badge>
             </div>
-            <h3 className="font-semibold text-charcoal text-base mt-1">
+            {app.property_city && <p className="text-xs text-charcoal-muted mt-0.5">{app.property_city}</p>}
+            <p className="text-sm text-charcoal mt-1">
               Offered rent: {formatCurrency(app.proposed_rent, "INR")}/mo
-            </h3>
+            </p>
             <p className="text-xs text-charcoal-muted mt-1">
               Move-in: {formatDate(app.move_in_target)} • Sent: {formatDate(app.submitted_at)}
             </p>
