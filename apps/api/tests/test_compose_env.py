@@ -108,3 +108,22 @@ def test_the_deploy_workflow_passes_every_secret_by_name_and_never_all_of_them()
         if setting != "REDIS_URL":
             name = f"PRODUCTION_{suffix}"
             assert f"{name}: ${{{{ secrets.{name} }}}}" in workflow, name
+
+
+def test_a_voyage_key_switches_search_to_voyage():
+    env, _ = compose_env.build_env("production", "abc", "PRODUCTION", [],
+                                   {**BASE, "PRODUCTION_VOYAGE_API_KEY": "pa-test"})
+    assert env["EMBEDDING_PROVIDER"] == "voyage" and env["VOYAGE_API_KEY"] == "pa-test"
+
+
+def test_runtime_env_can_keep_local_search_with_a_voyage_key():
+    env, _ = compose_env.build_env("production", "abc", "PRODUCTION", [("EMBEDDING_PROVIDER", "local")],
+                                   {**BASE, "PRODUCTION_VOYAGE_API_KEY": "pa-test"})
+    assert env["EMBEDDING_PROVIDER"] == "local"
+
+
+def test_the_deploy_embeds_what_is_missing_without_failing():
+    deploy = (_SCRIPTS.parent / "infrastructure" / "free-tier" / "deploy.sh").read_text(encoding="utf-8")
+    line = next(l for l in deploy.splitlines() if "backfill-embeddings" in l)
+    following = deploy[deploy.index(line):].splitlines()[1]
+    assert following.strip().startswith("||")  # a failed backfill only warns

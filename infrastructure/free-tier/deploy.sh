@@ -144,6 +144,12 @@ start_stack
 if wait_healthy; then
   echo "Live: https://${NEW_DOMAIN} is answering with $NEW_IMAGE"
   [ -n "$NEW_WEB_DOMAIN" ] && echo "Live: https://${NEW_WEB_DOMAIN} is answering with $NEW_WEB_IMAGE"
+  # Search vectors for anything not yet embedded with the current model (all of them after an
+  # embedding model change, otherwise none: unchanged text is skipped). Never fails the deploy;
+  # search falls back to keywords for whatever is missing.
+  timeout 600 docker compose --project-directory "$APP_DIR" exec -T worker \
+    python -m app.ml.cli backfill-embeddings \
+    || echo "::warning::Embedding backfill didn't finish; search uses keywords for what's missing"
   docker image prune -af --filter "until=168h" >/dev/null 2>&1 || true
   compose ps
   exit 0

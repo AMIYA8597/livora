@@ -171,7 +171,7 @@ class Settings(BaseSettings):
     # (`python -m app.ml.cli backfill-embeddings`).
     EMBEDDING_PROVIDER: str = "local"
     VOYAGE_API_KEY: Optional[str] = None
-    EMBEDDING_MODEL: str = "voyage-3.5-lite"
+    EMBEDDING_MODEL: str = "voyage-4-lite"  # 200M free tokens per account; 3.5-lite has none
     EMBEDDING_TIMEOUT_SECONDS: float = 8.0
     # The learned ranker needs this many labelled like/pass interactions before training.
     RANKER_MIN_TRAINING_ROWS: int = 200

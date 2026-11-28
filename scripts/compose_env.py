@@ -41,7 +41,7 @@ FREE_TIER_DEFAULTS: Dict[str, str] = {
     "SMTP_PORT": "587",
     "SMTP_USE_TLS": "true",
     "STORAGE_TYPE": "supabase",
-    "EMBEDDING_PROVIDER": "local",  # free, in-process
+    "EMBEDDING_PROVIDER": "local",  # free, in-process; "voyage" once PRODUCTION_VOYAGE_API_KEY is set
 }
 # Set by the pipeline or by Compose, never by RUNTIME_ENV.
 PIPELINE_KEYS = {"ENVIRONMENT", "APP_RELEASE"}
@@ -81,6 +81,9 @@ def build_env(environment: str, release: str, prefix: str, extra: List[Tuple[str
             missing_optional.append(name)
     if missing_required:
         raise ConfigError(f"missing required GitHub secrets: {', '.join(missing_required)}")
+    # Semantic search switches on with its key, unless RUNTIME_ENV chose a provider itself.
+    if env.get("VOYAGE_API_KEY") and not any(key == "EMBEDDING_PROVIDER" for key, _ in extra):
+        env["EMBEDDING_PROVIDER"] = "voyage"
     if env.get("SMS_PROVIDER") == "twilio" and not env.get("TWILIO_AUTH_TOKEN"):
         raise ConfigError(f"SMS_PROVIDER=twilio needs the {prefix}_TWILIO_ACCOUNT_SID and "
                           f"{prefix}_TWILIO_AUTH_TOKEN secrets")

@@ -370,9 +370,13 @@ These are all free and run on the VM:
   (`ml_models`), so a redeploy never loses them.
 - **Moderation:** rule-based checks always run. Claude-based moderation and smart replies
   switch on when you set `PRODUCTION_ANTHROPIC_API_KEY` (paid).
-- **Better semantic search, later:** `EMBEDDING_PROVIDER=voyage` with
-  `PRODUCTION_VOYAGE_API_KEY`. Its free tokens come with low rate limits, so keep `local`
-  until you can pay.
+- **Semantic search (Voyage AI):** add the GitHub secret `PRODUCTION_VOYAGE_API_KEY` and the
+  next deploy switches `EMBEDDING_PROVIDER` to `voyage` (model `voyage-4-lite`, 200M free tokens
+  per account) and embeds every listing and profile again. Put `EMBEDDING_PROVIDER=local` in
+  `RUNTIME_ENV` to keep the in-process vectors with a key set. Without a payment method on the
+  Voyage account, rate limits are low and Voyage may keep the text sent (listing text, "about
+  me" bios, searches) for training; adding a card lets you opt out in its dashboard (Terms of
+  Service, "Opted Out"). If Voyage refuses or is down, search falls back to keywords.
 
 ## 12. Security (what's enforced, and what you must do)
 
