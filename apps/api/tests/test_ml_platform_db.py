@@ -25,7 +25,7 @@ from app.ml import moderation_jobs, ranker as ranker_mod, smart_replies
 from app.ml.cli import DEFAULT_EVAL, evaluate_rules, load_eval
 from app.ml.embeddings import LocalHashingEmbedder, cosine
 from app.ml.evaluation import classification_report, grouped_ranking_metrics, ndcg_at_k, roc_auc
-from app.ml.indexing import refresh_embedding
+from app.ml.indexing import backfill, refresh_embedding
 from app.ml.llm import LLMUnavailable
 from app.ml.models import ContentEmbedding, MLModel
 from app.ml.moderation import Prescreen, Verdict, decide, prescreen
@@ -197,6 +197,25 @@ async def test_offline_search_eval_hybrid_beats_full_text_alone(listings):
     hybrid, lexical = await ndcg(LocalHashingEmbedder()), await ndcg(NoEmbeddings())
     assert hybrid >= 0.9
     assert hybrid > lexical  # typos and paraphrases only the embedding half can match
+
+
+@pytest.mark.asyncio
+async def test_backfill_sends_changed_listings_in_one_batch_and_skips_the_rest(listings):
+    calls = []
+
+    class Counting(LocalHashingEmbedder):
+        async def embed(self, texts, kind):
+            calls.append(len(texts))
+            return await super().embed(texts, kind)
+
+    async with AsyncSessionLocal() as s:
+        await s.execute(update(Property).where(Property.id.in_([listings.ids["pets"], listings.ids["pg"]]))
+                        .values(description=Property.description + " Newly painted."))
+        await s.commit()
+        first = await backfill(s, "property", Counting())
+        second = await backfill(s, "property", Counting())
+    assert len(calls) == 1 and calls[0] >= 2 and first.updated >= 2
+    assert second.updated == 0 and second.unchanged >= 3
 
 
 @pytest.mark.asyncio

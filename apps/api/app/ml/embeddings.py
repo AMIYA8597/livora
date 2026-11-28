@@ -20,8 +20,10 @@ import hashlib
 import logging
 import math
 import re
+import time
+from collections import OrderedDict
 from functools import lru_cache
-from typing import List, Literal, Protocol, Sequence
+from typing import Dict, List, Literal, Protocol, Sequence, Tuple
 
 import httpx
 
@@ -107,10 +109,18 @@ class LocalHashingEmbedder:
 
 
 class VoyageEmbedder:
-    """Voyage AI embeddings over HTTPS. Batches requests and fails fast (EmbeddingUnavailable)."""
+    """Voyage AI embeddings over HTTPS. Batches requests and fails fast (EmbeddingUnavailable).
+
+    Rate limits are tight on small accounts (3 requests a minute without a payment method), so:
+    query vectors are cached in memory (popular searches cost one request), and after a 429 the
+    embedder stops calling Voyage until the window has passed, so searches go straight to the
+    keyword path instead of each waiting on a request that will be refused.
+    """
 
     URL = "https://api.voyageai.com/v1/embeddings"
     BATCH = 128
+    QUERY_CACHE_SIZE = 1024
+    DEFAULT_COOLDOWN_SECONDS = 60.0
     min_similarity = 0.35
 
     def __init__(self, api_key: str, model: str, dimensions: int = EMBEDDING_DIM, timeout: float = 8.0):
@@ -119,12 +129,36 @@ class VoyageEmbedder:
         self.dimensions = dimensions
         self.model_id = f"voyage:{model}:{dimensions}"
         self._timeout = timeout
+        self._query_cache: "OrderedDict[str, List[float]]" = OrderedDict()
+        self._blocked_until = 0.0
+
+    @staticmethod
+    def _cache_key(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    def _retry_after(self, res: httpx.Response) -> float:
+        try:
+            return max(1.0, min(float(res.headers.get("retry-after", "")), 600.0))
+        except ValueError:
+            return self.DEFAULT_COOLDOWN_SECONDS
 
     async def embed(self, texts: Sequence[str], kind: Kind) -> List[List[float]]:
-        out: List[List[float]] = []
+        cached: Dict[int, List[float]] = {}
+        if kind == "query":
+            for i, t in enumerate(texts):
+                hit = self._query_cache.get(self._cache_key(t))
+                if hit is not None:
+                    self._query_cache.move_to_end(self._cache_key(t))
+                    cached[i] = hit
+        todo: List[Tuple[int, str]] = [(i, t) for i, t in enumerate(texts) if i not in cached]
+        if todo and time.monotonic() < self._blocked_until:
+            raise EmbeddingUnavailable("Voyage embeddings failed: rate limited (cooling down)")
+
+        fresh: Dict[int, List[float]] = {}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            for start in range(0, len(texts), self.BATCH):
-                batch = [t[:MAX_TEXT_CHARS] or " " for t in texts[start:start + self.BATCH]]
+            for start in range(0, len(todo), self.BATCH):
+                chunk = todo[start:start + self.BATCH]
+                batch = [t[:MAX_TEXT_CHARS] or " " for _, t in chunk]
                 try:
                     res = await client.post(
                         self.URL,
@@ -136,14 +170,24 @@ class VoyageEmbedder:
                             "output_dimension": self.dimensions,
                         },
                     )
+                    if res.status_code == 429:
+                        self._blocked_until = time.monotonic() + self._retry_after(res)
                     res.raise_for_status()
                     data = sorted(res.json()["data"], key=lambda d: d["index"])
+                except httpx.HTTPStatusError as exc:
+                    raise EmbeddingUnavailable(
+                        f"Voyage embeddings failed: HTTP {exc.response.status_code}") from exc
                 except (httpx.HTTPError, KeyError, ValueError) as exc:
                     raise EmbeddingUnavailable(f"Voyage embeddings failed: {type(exc).__name__}") from exc
                 if len(data) != len(batch) or any(len(d["embedding"]) != self.dimensions for d in data):
                     raise EmbeddingUnavailable("Voyage returned an unexpected number or size of vectors")
-                out.extend(normalize(d["embedding"]) for d in data)
-        return out
+                for (i, t), d in zip(chunk, data):
+                    fresh[i] = normalize(d["embedding"])
+                    if kind == "query":
+                        self._query_cache[self._cache_key(t)] = fresh[i]
+                        if len(self._query_cache) > self.QUERY_CACHE_SIZE:
+                            self._query_cache.popitem(last=False)
+        return [cached[i] if i in cached else fresh[i] for i in range(len(texts))]
 
 
 @lru_cache(maxsize=4)

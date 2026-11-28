@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy import delete, select, text
@@ -99,15 +99,54 @@ class BackfillResult:
 
 
 async def backfill(db: AsyncSession, entity_type: str, embedder: Optional[Embedder] = None) -> BackfillResult:
+    """Re-embed everything whose text or model changed, in as few provider requests as possible
+    (one per 128 texts), so a rate-limited account can still backfill in one go. Commits."""
     embedder = embedder or get_embedder(entity_type)
     if entity_type == "property":
         ids = (await db.execute(select(Property.id).where(Property.is_active.is_(True)))).scalars().all()
     else:
         ids = (await db.execute(select(Profile.user_id))).scalars().all()
+    existing = {
+        row.entity_id: row for row in (await db.execute(select(ContentEmbedding).where(
+            ContentEmbedding.entity_type == entity_type, ContentEmbedding.entity_id.in_(ids),
+        ))).scalars().all()
+    } if ids else {}
+
     result = BackfillResult()
+    pending: List[Tuple[UUID, str, str]] = []  # (entity id, text, content hash)
     for entity_id in ids:
-        outcome = await refresh_embedding(db, entity_type, entity_id, embedder)
-        setattr(result, outcome, getattr(result, outcome) + 1)
+        source = await _source_text(db, entity_type, entity_id)
+        current = existing.get(entity_id)
+        if not source:
+            if current is not None:
+                await db.execute(delete(ContentEmbedding).where(ContentEmbedding.id == current.id))
+                result.removed += 1
+            else:
+                result.empty += 1
+            continue
+        digest = content_hash(embedder.model_id, source)
+        if current is not None and current.content_hash == digest:
+            result.unchanged += 1
+        else:
+            pending.append((entity_id, source, digest))
+
+    if pending:
+        vectors = await embedder.embed([source for _, source, _ in pending], kind="document")
+        now = datetime.now(timezone.utc)
+        for (entity_id, _, digest), vector in zip(pending, vectors):
+            current = existing.get(entity_id)
+            if current is None:
+                db.add(ContentEmbedding(
+                    entity_type=entity_type, entity_id=entity_id, model=embedder.model_id,
+                    embedding=vector, content_hash=digest, updated_at=now,
+                ))
+            else:
+                current.model = embedder.model_id
+                current.embedding = vector
+                current.content_hash = digest
+                current.updated_at = now
+        result.updated = len(pending)
+    await db.commit()
     return result
 
 
