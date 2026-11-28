@@ -157,8 +157,9 @@ class NotificationService:
                 "link": notif.link, "category": category,
             }))
             queued_push = True
+        # Every column was set above and the session keeps objects loaded after a commit, so there
+        # is nothing to read back.
         await self.db.commit()
-        await self.db.refresh(notif)
 
         try:
             from app.modules.messaging.websocket import manager

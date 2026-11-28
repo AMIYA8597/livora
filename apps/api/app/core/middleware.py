@@ -45,7 +45,7 @@ def is_data_error(exc: BaseException) -> bool:
     out of range (22003), an impossible date (22008) and the like. The caller sent it. Also
     23503, a reference to a row that doesn't exist (a mistyped id)."""
     code = data_error_code(exc)
-    return bool(code) and (code.startswith("22") or code == "23503")
+    return code is not None and (code.startswith("22") or code == "23503")
 
 
 class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):

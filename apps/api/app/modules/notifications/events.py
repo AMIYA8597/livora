@@ -13,6 +13,7 @@ from functools import wraps
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.notifications.service import NotificationService
@@ -38,8 +39,12 @@ APPOINTMENT_STATUS_TEXT = {
 
 
 async def first_name(db: AsyncSession, user_id: UUID) -> str:
-    user = await db.get(User, user_id)
-    name = (user.full_name or "").strip() if user else ""
+    # Already loaded (often the signed-in user): no query. Otherwise just the name, not the
+    # whole user and their roles.
+    loaded = db.identity_map.get(db.identity_key(User, user_id))
+    full_name = loaded.full_name if loaded is not None else await db.scalar(
+        select(User.full_name).where(User.id == user_id))
+    name = (full_name or "").strip()
     return name.split()[0] if name else "Someone"
 
 

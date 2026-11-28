@@ -173,3 +173,40 @@ async def test_signed_in_user_costs_one_statement(async_client: AsyncClient):
 
     health = await async_client.get("/health")
     assert health.headers["X-DB-Queries"] == "0"
+
+
+@pytest.mark.asyncio
+async def test_a_like_and_a_like_back_make_a_match_in_few_statements(async_client: AsyncClient):
+    """Liking loads both people's earlier decisions in one query and both profiles in another,
+    and a like back reuses the score it just worked out instead of computing it again."""
+    async def register(name: str) -> tuple[dict, str]:
+        resp = await async_client.post("/api/v1/auth/register", json={
+            "email": f"lk_{uuid4().hex[:10]}@example.in", "password": "Password123!",
+            "full_name": name, "role": "seeker",
+        })
+        assert resp.status_code == 201, resp.text
+        headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+        me = (await async_client.get("/api/v1/auth/me", headers=headers)).json()
+        return headers, me["id"]
+
+    asha, asha_id = await register("Asha Like")
+    ravi, ravi_id = await register("Ravi Like")
+
+    first = await async_client.post("/api/v1/matching/interactions", headers=asha,
+                                    json={"target_user_id": ravi_id, "action": "like"})
+    assert first.status_code == 200, first.text
+    assert first.json()["is_mutual_match"] is False
+    assert int(first.headers["X-DB-Queries"]) <= 10  # was 14
+
+    back = await async_client.post("/api/v1/matching/interactions", headers=ravi,
+                                   json={"target_user_id": asha_id, "action": "like"})
+    assert back.status_code == 200, back.text
+    body = back.json()
+    assert body["is_mutual_match"] is True and body["mutual_match_id"]
+    assert body["compatibility_score"] is not None
+    assert int(back.headers["X-DB-Queries"]) <= 16  # was 21
+
+    again = await async_client.post("/api/v1/matching/interactions", headers=asha,
+                                    json={"target_user_id": ravi_id, "action": "like"})
+    assert again.status_code == 200 and again.json()["mutual_match_id"] == body["mutual_match_id"]
+    assert int(again.headers["X-DB-Queries"]) <= 11

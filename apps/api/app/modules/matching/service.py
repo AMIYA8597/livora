@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, and_, func, text
@@ -182,33 +182,48 @@ class MatchingService:
         )).all()
         return {r[0]: list(r[1]) for r in rows}
 
-    async def pair_features(self, user_id: UUID, target_user_id: UUID) -> Optional[Dict[str, float]]:
-        """Ranking features for one (viewer, candidate) pair, or None if a profile is missing."""
-        profile_service = ProfileService(self.db)
-        p1 = await profile_service.get_by_user_id(user_id)
-        p2 = await profile_service.get_by_user_id(target_user_id)
-        target = (await self.db.execute(select(User).where(User.id == target_user_id))).scalar_one_or_none()
-        if not p1 or not p2 or not target:
+    async def _pair_profiles(self, user_id: UUID, target_user_id: UUID) -> Optional[Tuple[Profile, Profile, bool]]:
+        """Both profiles and whether the candidate is verified, in one query (None if either is missing)."""
+        rows = (await self.db.execute(
+            select(Profile, User.is_verified)
+            .join(User, User.id == Profile.user_id)
+            .where(Profile.user_id.in_([user_id, target_user_id]))
+        )).all()
+        found = {profile.user_id: (profile, verified) for profile, verified in rows}
+        mine, theirs = found.get(user_id), found.get(target_user_id)
+        if not mine or not theirs:
             return None
+        return mine[0], theirs[0], bool(theirs[1])
+
+    async def _pair_scores(self, user_id: UUID, target_user_id: UUID) -> Optional[Tuple[dict, Dict[str, float]]]:
+        """The compatibility breakdown and the ranking features for one pair, or None if a profile is missing."""
+        pair = await self._pair_profiles(user_id, target_user_id)
+        if pair is None:
+            return None
+        p1, p2, candidate_verified = pair
         breakdown = await self._breakdown(user_id, p1, p2)
         bios = await self._bio_embeddings([user_id, target_user_id])
         mine, theirs = bios.get(user_id), bios.get(target_user_id)
         v1 = list(p1.lifestyle_vector) if p1.lifestyle_vector is not None else []
         v2 = list(p2.lifestyle_vector) if p2.lifestyle_vector is not None else []
-        return pair_features(
+        features = pair_features(
             breakdown, vector_sim=cosine_similarity(v1, v2),
             bio_similarity=cosine(mine, theirs) if mine and theirs else None,
-            candidate_verified=bool(target.is_verified),
+            candidate_verified=candidate_verified,
             candidate_has_avatar=bool(p2.avatar_url), candidate_has_bio=bool(p2.bio),
         )
+        return breakdown, features
+
+    async def pair_features(self, user_id: UUID, target_user_id: UUID) -> Optional[Dict[str, float]]:
+        """Ranking features for one (viewer, candidate) pair, or None if a profile is missing."""
+        scores = await self._pair_scores(user_id, target_user_id)
+        return scores[1] if scores else None
 
     async def get_pairwise_score(self, user_id: UUID, target_user_id: UUID) -> ScoreBreakdownSchema:
-        profile_service = ProfileService(self.db)
-        p1 = await profile_service.get_by_user_id(user_id)
-        p2 = await profile_service.get_by_user_id(target_user_id)
-
-        if not p1 or not p2:
+        pair = await self._pair_profiles(user_id, target_user_id)
+        if pair is None:
             raise NotFoundException("One or both profiles could not be found")
+        p1, p2, _ = pair
         return ScoreBreakdownSchema(**(await self._breakdown(user_id, p1, p2)))
 
     async def _breakdown(self, user_id: UUID, p1: Profile, p2: Profile) -> dict:
@@ -255,13 +270,14 @@ class MatchingService:
         if (await self.db.execute(block_check)).scalar_one_or_none():
             raise ForbiddenException("Cannot interact with a blocked user")
 
-        # 1. Check or update interaction
-        existing_q = select(MatchInteraction).where(
-            MatchInteraction.user_id == user_id,
-            MatchInteraction.target_user_id == target_user_id
-        )
-        existing_res = await self.db.execute(existing_q)
-        interaction = existing_res.scalar_one_or_none()
+        # 1. My earlier decision about them and theirs about me, in one query.
+        pair_rows = (await self.db.execute(select(MatchInteraction).where(or_(
+            and_(MatchInteraction.user_id == user_id, MatchInteraction.target_user_id == target_user_id),
+            and_(MatchInteraction.user_id == target_user_id, MatchInteraction.target_user_id == user_id),
+        )))).scalars().all()
+        interaction = next((r for r in pair_rows if r.user_id == user_id), None)
+        reciprocal = next((r for r in pair_rows if r.user_id == target_user_id
+                           and r.action in ("like", "super_like")), None)
 
         # Free tier: a daily cap on new likes (re-liking someone already liked doesn't count).
         is_new_like = action in ("like", "super_like") and not (interaction and interaction.action in ("like", "super_like"))
@@ -270,9 +286,10 @@ class MatchingService:
 
         # Snapshot what the user saw when they decided: training data for the learned ranker.
         try:
-            features = await self.pair_features(user_id, target_user_id)
+            scores = await self._pair_scores(user_id, target_user_id)
         except Exception:
-            features = None
+            scores = None
+        features = scores[1] if scores else None
         if interaction:
             interaction.action = action
             interaction.created_at = datetime.now(timezone.utc)  # when they last decided
@@ -293,13 +310,6 @@ class MatchingService:
 
         # 2. Check for mutual match
         if action in ("like", "super_like"):
-            reciprocal_q = select(MatchInteraction).where(
-                MatchInteraction.user_id == target_user_id,
-                MatchInteraction.target_user_id == user_id,
-                MatchInteraction.action.in_(["like", "super_like"])
-            )
-            reciprocal = (await self.db.execute(reciprocal_q)).scalar_one_or_none()
-
             if reciprocal:
                 is_mutual = True
                 # Canonical pair ordering (min, max) to prevent duplicate reverse records
@@ -312,7 +322,9 @@ class MatchingService:
                 )
                 existing_match = (await self.db.execute(match_q)).scalar_one_or_none()
 
-                breakdown = await self.get_pairwise_score(user_id, target_user_id)
+                # The score was already worked out for the features above; reuse it.
+                breakdown = (ScoreBreakdownSchema(**scores[0]) if scores
+                             else await self.get_pairwise_score(user_id, target_user_id))
                 comp_score = breakdown.overall_score
 
                 if existing_match:
