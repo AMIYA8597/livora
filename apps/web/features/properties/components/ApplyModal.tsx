@@ -78,6 +78,7 @@ export function ApplyModal({ isOpen, onClose, propertyId, roomId, defaultRent, c
               id="apply-intro"
               required
               minLength={20}
+              maxLength={2000}
               rows={4}
               value={introduction}
               onChange={(e) => setIntroduction(e.target.value)}

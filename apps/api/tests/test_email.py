@@ -2,7 +2,7 @@
 Transactional email: templates, provider selection/retries, fail-safe sending,
 password-reset delivery and single-use tokens, and domain-event notifications.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -243,7 +243,7 @@ async def test_application_lifecycle_notifies_owner_then_applicant(async_client:
     applicant_email, applicant_id, applicant_token = await _register(async_client)
     resp = await async_client.post(
         "/api/v1/applications/",
-        json={"property_id": owner_listing["property_id"], "introduction": "Hi", "proposed_rent": 29000, "move_in_target": "2026-12-15"},
+        json={"property_id": owner_listing["property_id"], "introduction": "Hi", "proposed_rent": 29000, "move_in_target": str(date.today() + timedelta(days=18))},
         headers={"Authorization": f"Bearer {applicant_token}"},
     )
     assert resp.status_code == 201, resp.text
