@@ -7,3 +7,9 @@
 # under 32 characters, so no real client (web or app) sends anything these limits refuse.
 POST /api/v1/admin/users/{user_id}/roles request.role: maxLength tightened from None to 32
 POST /api/v1/auth/register request.additional_roles: maxItems tightened from None to 4
+
+# Application checks (2026-11-28): a direct API call stored an application with a rent of -5.
+# The web form already caps nothing the API now refuses for real use (an introduction is a few
+# sentences; no client sends documents yet), and the web app is the only client in this repo.
+POST /api/v1/applications/ request.documents: maxItems tightened from None to 10
+POST /api/v1/applications/ request.introduction: maxLength tightened from None to 2000
