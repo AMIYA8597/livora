@@ -11,6 +11,7 @@ from app.modules.matching.engine import (
     ALGORITHM_VERSION,
 )
 from app.modules.matching.service import MatchingService
+from tests.matching_mocks import interactions_found
 from app.modules.matching.models import MatchInteraction
 from app.core.exceptions import BadRequestException
 
@@ -123,18 +124,14 @@ async def test_mutual_match_lifecycle_transactional():
     mock_db = AsyncMock()
     mock_db.add = MagicMock()
     service = MatchingService(mock_db)
-    service.pair_features = AsyncMock(return_value=None)  # profile reads not mocked here
+    service._pair_scores = AsyncMock(return_value=None)  # profile reads not mocked here
 
     # 1. User A likes User B (Initial interaction, target hasn't liked back yet)
-    mock_existing_int = MagicMock()
-    mock_existing_int.scalar_one_or_none.return_value = None
-    mock_reciprocal = MagicMock()
-    mock_reciprocal.scalar_one_or_none.return_value = None # User B has not liked User A yet
 
     mock_no_block = MagicMock()
     mock_no_block.scalar_one_or_none.return_value = None
 
-    mock_db.execute.side_effect = [mock_no_block, mock_existing_int, mock_reciprocal]
+    mock_db.execute.side_effect = [mock_no_block, interactions_found()]  # neither has decided yet
 
     res_a = await service.record_interaction(user_a, user_b, action="like")
     assert res_a.is_mutual_match is False
@@ -146,12 +143,8 @@ async def test_mutual_match_lifecycle_transactional():
     assert "cannot record an interaction with yourself" in str(exc_info.value.detail).lower()
 
     # 3. User B likes User A back (Reciprocal like found -> Mutual Match created!)
-    mock_existing_int_b = MagicMock()
-    mock_existing_int_b.scalar_one_or_none.return_value = None
 
     reciprocal_match_from_a = MatchInteraction(user_id=user_a, target_user_id=user_b, action="like")
-    mock_reciprocal_found = MagicMock()
-    mock_reciprocal_found.scalar_one_or_none.return_value = reciprocal_match_from_a
 
     mock_existing_mutual = MagicMock()
     mock_existing_mutual.scalar_one_or_none.return_value = None
@@ -163,7 +156,7 @@ async def test_mutual_match_lifecycle_transactional():
     mock_breakdown.model_dump.return_value = {"overall_score": 88.5}
     service.get_pairwise_score.return_value = mock_breakdown
 
-    mock_db.execute.side_effect = [mock_no_block, mock_existing_int_b, mock_reciprocal_found, mock_existing_mutual]
+    mock_db.execute.side_effect = [mock_no_block, interactions_found(reciprocal_match_from_a), mock_existing_mutual]
 
     res_b = await service.record_interaction(user_b, user_a, action="like")
     assert res_b.is_mutual_match is True

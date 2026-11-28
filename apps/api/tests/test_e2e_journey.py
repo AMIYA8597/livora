@@ -26,6 +26,7 @@ from app.modules.properties.service import PropertyService
 from app.modules.matching.engine import compute_10_dimension_compatibility
 from app.modules.matching.service import MatchingService
 from app.modules.matching.models import MatchInteraction
+from tests.matching_mocks import interactions_found
 from app.modules.groups.service import GroupService
 from app.modules.groups.schemas import GroupCreate
 from app.modules.groups.models import Group, GroupMember
@@ -202,14 +203,12 @@ async def test_full_marketplace_end_to_end_journey():
     # Mutual Reciprocal Matching Interaction
     matching_service = MatchingService(mock_db)
     # Ranking-feature snapshots read profiles; covered by tests/test_ml_platform_db.py.
-    matching_service.pair_features = AsyncMock(return_value=None)
+    matching_service._pair_scores = AsyncMock(return_value=None)
 
     # Actor A likes Actor B
-    mock_existing_int = MagicMock()
-    mock_existing_int.scalar_one_or_none.return_value = None
-    mock_reciprocal = MagicMock()
-    mock_reciprocal.scalar_one_or_none.return_value = None
-    mock_db.execute.side_effect = [mock_existing_int, mock_existing_int, mock_reciprocal]
+    mock_no_block = MagicMock()
+    mock_no_block.scalar_one_or_none.return_value = None
+    mock_db.execute.side_effect = [mock_no_block, interactions_found()]  # neither has decided yet
 
     res_a = await matching_service.record_interaction(
         user_id=tenant_a_id,
@@ -220,18 +219,14 @@ async def test_full_marketplace_end_to_end_journey():
     assert res_a.is_mutual_match is False
 
     # Actor B likes Actor A -> Mutual Match!
-    mock_existing_int_b = MagicMock()
-    mock_existing_int_b.scalar_one_or_none.return_value = None
     reciprocal_match_from_a = MatchInteraction(user_id=tenant_a_id, target_user_id=tenant_b_id, action="like")
-    mock_reciprocal_found = MagicMock()
-    mock_reciprocal_found.scalar_one_or_none.return_value = reciprocal_match_from_a
     mock_existing_mutual = MagicMock()
     mock_existing_mutual.scalar_one_or_none.return_value = None
 
     pairwise_mock = MagicMock(overall_score=92.5, model_dump=MagicMock(return_value={"overall_score": 92.5}))
     matching_service.get_pairwise_score = AsyncMock(return_value=pairwise_mock)
 
-    mock_db.execute.side_effect = [mock_existing_int_b, mock_existing_int_b, mock_reciprocal_found, mock_existing_mutual]
+    mock_db.execute.side_effect = [mock_no_block, interactions_found(reciprocal_match_from_a), mock_existing_mutual]
     res_b = await matching_service.record_interaction(
         user_id=tenant_b_id,
         target_user_id=tenant_a_id,

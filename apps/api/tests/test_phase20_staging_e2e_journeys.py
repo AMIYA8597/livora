@@ -30,6 +30,7 @@ from app.modules.properties.models import Property
 from app.modules.matching.engine import compute_10_dimension_compatibility
 from app.modules.matching.service import MatchingService
 from app.modules.matching.models import MatchInteraction
+from tests.matching_mocks import interactions_found
 from app.modules.groups.schemas import GroupCreate
 from app.modules.groups.models import Group, GroupMember
 from app.modules.groups.service import GroupService
@@ -160,15 +161,14 @@ async def test_journey_a_seeker_complete_lifecycle(mock_db):
 
     # 4. Mutual Match & Messaging
     matching_service = MatchingService(mock_db)
-    matching_service.pair_features = AsyncMock(return_value=None)  # profile reads not mocked here
+    matching_service._pair_scores = AsyncMock(return_value=None)  # profile reads not mocked here
     mock_no_int = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
     recip = MatchInteraction(user_id=seeker_id, target_user_id=candidate_id, action="like")
-    mock_recip_found = MagicMock(scalar_one_or_none=MagicMock(return_value=recip))
     mock_no_mutual = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
     matching_service.get_pairwise_score = AsyncMock(
         return_value=MagicMock(overall_score=94.0, model_dump=MagicMock(return_value={"overall_score": 94.0}))
     )
-    mock_db.execute.side_effect = [mock_no_int, mock_no_int, mock_recip_found, mock_no_mutual]
+    mock_db.execute.side_effect = [mock_no_int, interactions_found(recip), mock_no_mutual]
 
     inter_2 = await matching_service.record_interaction(candidate_id, seeker_id, "like")
     assert inter_2.is_mutual_match is True
