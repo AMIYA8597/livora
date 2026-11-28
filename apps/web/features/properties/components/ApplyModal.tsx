@@ -32,7 +32,7 @@ export function ApplyModal({ isOpen, onClose, propertyId, roomId, defaultRent, c
     setIsSubmitting(true);
     setError(null);
     try {
-      await apiClient("/applications", {
+      await apiClient("/applications/", {
         method: "POST",
         body: JSON.stringify({
           property_id: propertyId,

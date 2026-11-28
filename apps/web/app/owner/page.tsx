@@ -58,7 +58,7 @@ function OwnerPortalPageContent() {
   const statsQuery = useApiQuery<OwnerStatsData>(canView ? "/owners/dashboard" : null);
   const propertiesQuery = useApiQuery<OwnerProperty[]>(canView ? "/owners/properties" : null);
   const applicationsQuery = useApiQuery<OwnerApplicantCard[]>(canView ? "/owners/applications" : null);
-  const appointmentsQuery = useApiQuery<OwnerAppointment[]>(canView ? "/appointments" : null);
+  const appointmentsQuery = useApiQuery<OwnerAppointment[]>(canView ? "/appointments/" : null);
 
   const properties = useMemo(() => propertiesQuery.data ?? [], [propertiesQuery.data]);
   const applications = useMemo(() => (applicationsQuery.data ?? []).map(normalizeApplication), [applicationsQuery.data]);
