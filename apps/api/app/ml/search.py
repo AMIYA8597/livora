@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pgvector.sqlalchemy import Vector
 
+from app.core.database import query_stats_var
 from app.ml.embeddings import EMBEDDING_DIM, Embedder, EmbeddingUnavailable, get_embedder
 from app.ml.indexing import has_vector_index
 from app.ml.models import ContentEmbedding
@@ -67,10 +68,13 @@ async def _semantic(
     db: AsyncSession, entity_type: str, eligible_ids: Select, query: str, embedder: Embedder,
     newest_first,
 ) -> Optional[List[UUID]]:
+    stats = query_stats_var.get()
     try:
         [qvec] = await embedder.embed([query], kind="query")
     except EmbeddingUnavailable as exc:
         logger.warning("Semantic search unavailable, using lexical only: %s", exc)
+        if stats is not None:
+            stats.search = "unavailable"
         return None
 
     base = (
@@ -90,7 +94,7 @@ async def _semantic(
             .limit(CANDIDATES)
         )
         rows = (await db.execute(stmt)).all()
-        return [r[0] for r in rows if r[1] >= embedder.min_similarity]
+        return _keep_close_matches([(r[0], float(r[1])) for r in rows], embedder, stats)
 
     stmt = base.add_columns(ContentEmbedding.embedding).order_by(newest_first).limit(SCAN_LIMIT)
     rows = (await db.execute(stmt)).all()
@@ -101,7 +105,21 @@ async def _semantic(
     norms = np.linalg.norm(matrix, axis=1) * (np.linalg.norm(q) or 1.0)
     sims = (matrix @ q) / np.where(norms == 0, 1.0, norms)
     order = np.argsort(-sims)[:CANDIDATES]
-    return [rows[i][0] for i in order if sims[i] >= embedder.min_similarity]
+    return _keep_close_matches([(rows[i][0], float(sims[i])) for i in order], embedder, stats)
+
+
+def _keep_close_matches(scored: Sequence[tuple], embedder: Embedder, stats=None) -> List[UUID]:
+    """`scored` is (id, similarity), best first. Applies the embedder's absolute floor and, if it
+    has one, its margin below the best match."""
+    floor = embedder.min_similarity
+    margin = getattr(embedder, "relative_margin", None)
+    if scored and margin is not None:
+        floor = max(floor, scored[0][1] - margin)
+    kept = [doc_id for doc_id, sim in scored if sim >= floor]
+    if stats is not None:
+        top = f"{scored[0][1]:.3f}" if scored else "-"
+        stats.search = f"kept={len(kept)}/{len(scored)} top={top} floor={floor:.3f}"
+    return kept
 
 
 def clean_query(q: Optional[str]) -> str:

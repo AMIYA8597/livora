@@ -23,7 +23,7 @@ import re
 import time
 from collections import OrderedDict
 from functools import lru_cache
-from typing import Dict, List, Literal, Protocol, Sequence, Tuple
+from typing import Dict, List, Literal, Optional, Protocol, Sequence, Tuple
 
 import httpx
 
@@ -46,6 +46,8 @@ class Embedder(Protocol):
     dimensions: int
     # Cosine similarity below which a document is not considered relevant to a query.
     min_similarity: float
+    # If set, a document must also be within this much of the best match's similarity.
+    relative_margin: Optional[float]
 
     async def embed(self, texts: Sequence[str], kind: Kind) -> List[List[float]]: ...
 
@@ -74,6 +76,7 @@ class LocalHashingEmbedder:
     # wrong listing passes for ~0.1% of queries while typos ("koramangla", "indranagar") always
     # match. Paraphrases with no shared word pieces ("food" vs "meals") need a real model.
     min_similarity = 0.15
+    relative_margin: Optional[float] = None
 
     def __init__(self, dimensions: int = EMBEDDING_DIM):
         self.dimensions = dimensions
@@ -121,7 +124,11 @@ class VoyageEmbedder:
     BATCH = 128
     QUERY_CACHE_SIZE = 1024
     DEFAULT_COOLDOWN_SECONDS = 60.0
-    min_similarity = 0.35
+    # Neural similarities sit in a narrow band that depends on the corpus (listings that share
+    # boilerplate all score close together), so a fixed cut-off either keeps everything or
+    # nothing. Keep what scores close to the best match, above a low absolute floor.
+    min_similarity = 0.2
+    relative_margin: Optional[float] = 0.06
 
     def __init__(self, api_key: str, model: str, dimensions: int = EMBEDDING_DIM, timeout: float = 8.0):
         self._api_key = api_key

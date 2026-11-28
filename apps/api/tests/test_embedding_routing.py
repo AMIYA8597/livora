@@ -117,3 +117,16 @@ async def test_many_documents_go_in_one_request(monkeypatch):
     voyage = _voyage_with(monkeypatch, handler)
     out = await voyage.embed([f"listing {n}" for n in range(130)], kind="document")
     assert len(out) == 130 and sizes == [128, 2]
+
+
+def test_neural_matches_must_be_close_to_the_best_one():
+    from app.core.database import QueryStats
+    from app.ml.search import _keep_close_matches
+
+    stats = QueryStats()
+    scored = [("pg", 0.52), ("co-living", 0.49), ("studio", 0.43), ("far", 0.15)]
+    assert _keep_close_matches(scored, VoyageEmbedder("k", "voyage-4-lite"), stats) == ["pg", "co-living"]
+    assert stats.search == "kept=2/4 top=0.520 floor=0.460"
+    # The local embedder has no margin: only its absolute floor applies.
+    assert _keep_close_matches(scored, LocalHashingEmbedder()) == ["pg", "co-living", "studio", "far"]
+    assert _keep_close_matches([], VoyageEmbedder("k", "voyage-4-lite")) == []

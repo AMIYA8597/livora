@@ -64,6 +64,8 @@ class RequestTraceAndSecurityMiddleware(BaseHTTPMiddleware):
             response = await self._handle(request, call_next, request_id, start_time)
             response.headers["X-DB-Queries"] = str(stats.count)
             response.headers["X-DB-Time-Ms"] = str(round(stats.seconds * 1000, 2))
+            if stats.search:
+                response.headers["X-Search-Semantic"] = stats.search
             return response
         finally:
             query_stats_var.reset(stats_token)

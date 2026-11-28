@@ -17,11 +17,12 @@ class QueryStats:
     X-DB-Time-Ms by the request middleware). The database is a long round trip from the API
     server, so the count is what decides how fast a request is."""
 
-    __slots__ = ("count", "seconds")
+    __slots__ = ("count", "seconds", "search")
 
     def __init__(self) -> None:
         self.count = 0
         self.seconds = 0.0
+        self.search: Optional[str] = None  # how semantic search went (X-Search-Semantic)
 
 
 query_stats_var: ContextVar[Optional[QueryStats]] = ContextVar("query_stats", default=None)
