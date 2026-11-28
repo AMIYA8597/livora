@@ -86,6 +86,7 @@ def unnamed_statement() -> str:
 
 
 PING_TIMEOUT_SECONDS = 5
+PING_SQL = "SELECT 1"
 
 
 def mark_fresh(dbapi_connection, connection_record) -> None:
@@ -93,8 +94,9 @@ def mark_fresh(dbapi_connection, connection_record) -> None:
 
 
 def ping_on_checkout(dbapi_connection, connection_record, connection_proxy) -> None:
-    """Pessimistic disconnect check in one round trip: an empty simple query (";"), which the
-    transaction pooler runs as a transaction of its own. A connection opened for this checkout
+    """Pessimistic disconnect check in one round trip: a simple-protocol SELECT 1 (no prepare),
+    which the transaction pooler runs as a transaction of its own. Not an empty query: asyncpg
+    fails on its missing status ("NoneType has no attribute decode"). A connection opened for this checkout
     is not pinged. A failed ping invalidates the pool, as pool_pre_ping did, and the pool
     retries with a new connection."""
     if connection_record.info.pop("fresh", False):
@@ -103,7 +105,7 @@ def ping_on_checkout(dbapi_connection, connection_record, connection_proxy) -> N
     if driver is None or not hasattr(driver, "execute"):
         return
     try:
-        await_(driver.execute(";", timeout=PING_TIMEOUT_SECONDS))
+        await_(driver.execute(PING_SQL, timeout=PING_TIMEOUT_SECONDS))
     except Exception as error:  # noqa: BLE001 - any failure means "don't use this connection"
         raise InvalidatePoolError(f"ping failed: {type(error).__name__}") from error
 

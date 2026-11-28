@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -59,10 +59,31 @@ async def test_ping_is_one_empty_query_and_a_failure_invalidates_the_pool():
 
     driver = _Driver()
     await greenlet_spawn(ping_on_checkout, _Adapted(driver), _Record(fresh=False), None)
-    assert driver.calls == [";"]
+    assert driver.calls == ["SELECT 1"]
 
     with pytest.raises(InvalidatePoolError):
         await greenlet_spawn(ping_on_checkout, _Adapted(_Driver(fail=True)), _Record(fresh=False), None)
+
+
+@pytest.mark.asyncio
+async def test_pool_keeps_a_healthy_connection_across_checkouts():
+    """The ping must pass on a live connection: a failing ping silently reconnects on every
+    request (TLS and sign-in, ~600 ms), which is how an empty-query ping once shipped."""
+    engine = create_async_engine(TEST_DATABASE_URL, pool_size=1, max_overflow=0)
+    install_ping(engine.sync_engine)
+    invalidated = []
+    event.listen(engine.sync_engine, "invalidate", lambda *args: invalidated.append(args[-1]))
+    try:
+        pids = []
+        try:
+            for _ in range(3):
+                async with engine.connect() as conn:
+                    pids.append((await conn.execute(text("select pg_backend_pid()"))).scalar_one())
+        except OSError:
+            pytest.skip("needs the test database")
+        assert invalidated == [] and len(set(pids)) == 1
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
